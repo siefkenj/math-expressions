@@ -18,16 +18,16 @@ use num_rational::BigRational;
 use num_traits::{Signed, Zero};
 
 use crate::expr::{Expr, MathConst};
-use crate::norm::syntactic::map_children;
+use crate::normalize::syntactic::map_children;
 
 const TRIG: &[&str] = &["sin", "cos", "tan", "cot", "sec", "csc"];
 
 /// Fold trig/exp/log special values and normalize parity, to a bounded
 /// fixpoint. The input and output are canonical.
 pub fn fold_special_values(e: &Expr) -> Expr {
-    let mut cur = crate::norm::canonicalize(e);
+    let mut cur = crate::normalize::canonicalize(e);
     for _ in 0..8 {
-        let next = crate::norm::canonicalize(&fold_once(&cur));
+        let next = crate::normalize::canonicalize(&fold_once(&cur));
         if next == cur {
             break;
         }
@@ -121,7 +121,7 @@ fn split_pi(e: &Expr) -> (BigRational, Expr) {
             None => rest.push(t),
         }
     }
-    (coeff, canon(&crate::norm::add(rest)))
+    (coeff, canon(&crate::normalize::add(rest)))
 }
 
 /// The rational `q` when `e = q·π` (`π`, `3π`, `-π/2`, …), else `None`.
@@ -213,7 +213,7 @@ fn exp_arg(e: &Expr) -> Option<Expr> {
 // ---------------- small helpers ----------------
 
 fn canon(e: &Expr) -> Expr {
-    crate::norm::canonicalize(e)
+    crate::normalize::canonicalize(e)
 }
 
 fn apply(name: &str, arg: Expr) -> Expr {
@@ -221,7 +221,7 @@ fn apply(name: &str, arg: Expr) -> Expr {
 }
 
 fn negate(e: &Expr) -> Expr {
-    canon(&crate::norm::mul(vec![Expr::int(-1), e.clone()]))
+    canon(&crate::normalize::mul(vec![Expr::int(-1), e.clone()]))
 }
 
 /// Heuristic "is this expression negative-leading" test for parity extraction.

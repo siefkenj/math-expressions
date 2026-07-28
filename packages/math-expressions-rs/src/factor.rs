@@ -15,7 +15,7 @@
 
 use crate::expr::Expr;
 use crate::num::Number;
-use crate::{norm, ops, upoly};
+use crate::{normalize, ops, upoly};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{One, Signed, Zero};
@@ -23,7 +23,7 @@ use num_traits::{One, Signed, Zero};
 /// Factor a univariate polynomial over ℚ. Returns the input canonicalized and
 /// unchanged when it is not a single-variable polynomial of degree ≥ 2.
 pub fn factor(e: &Expr) -> Expr {
-    factor_univariate(e).unwrap_or_else(|| norm::canonicalize(e))
+    factor_univariate(e).unwrap_or_else(|| normalize::canonicalize(e))
 }
 
 fn factor_univariate(e: &Expr) -> Option<Expr> {
@@ -34,7 +34,7 @@ fn factor_univariate(e: &Expr) -> Option<Expr> {
     let var = var.clone();
 
     // Fully distribute, then read off dense rational coefficients.
-    let expanded = norm::canonicalize(&norm::expand(e));
+    let expanded = normalize::canonicalize(&normalize::expand(e));
     let coeffs = extract_upoly(&expanded, &var)?;
     if upoly::degree(&coeffs) < 2 {
         return None; // degree ≤ 1 is already irreducible
@@ -355,11 +355,11 @@ fn interpolate(xs: &[BigRational], ys: &[BigRational]) -> Option<upoly::UPoly> {
 /// is always attempted. Returns the input canonicalized when there is
 /// nothing common to pull. The result is gate-checked against the input.
 pub fn factor_terms(e: &Expr) -> Expr {
-    factor_terms_opt(e).unwrap_or_else(|| norm::canonicalize(e))
+    factor_terms_opt(e).unwrap_or_else(|| normalize::canonicalize(e))
 }
 
 fn factor_terms_opt(e: &Expr) -> Option<Expr> {
-    let expanded = norm::canonicalize(&norm::expand(e));
+    let expanded = normalize::canonicalize(&normalize::expand(e));
     let terms: Vec<Expr> = match &expanded {
         Expr::Add(ts) => ts.clone(),
         _ => return None, // a single term has nothing to factor against
@@ -394,7 +394,7 @@ fn factor_terms_opt(e: &Expr) -> Option<Expr> {
     // the canonical order first — wasm and native must produce the same tree.
     let sorted = |m: &std::collections::HashMap<Expr, i64>| -> Vec<(Expr, i64)> {
         let mut v: Vec<(Expr, i64)> = m.iter().map(|(b, e)| (b.clone(), *e)).collect();
-        v.sort_by(|(a, _), (b, _)| crate::norm::cmp(a, b));
+        v.sort_by(|(a, _), (b, _)| crate::normalize::cmp(a, b));
         v
     };
     let mut pulled: Vec<Expr> = Vec::new();

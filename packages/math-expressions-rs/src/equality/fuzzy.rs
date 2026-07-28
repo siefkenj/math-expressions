@@ -3,7 +3,7 @@
 //! the sampling stages add to their per-point comparisons.
 
 use super::EqOptions;
-use crate::eval::{eval_complex, Env};
+use crate::eval_numerical::{eval_complex, Env};
 use crate::expr::Expr;
 use num_complex::Complex64;
 
@@ -154,7 +154,7 @@ fn replace_numbers(
             Box::new(replace_numbers(b, vars, include_exponents, params)),
             x.clone(),
         ),
-        _ => crate::norm::syntactic::map_children(e, |c| {
+        _ => crate::normalize::syntactic::map_children(e, |c| {
             replace_numbers(c, vars, include_exponents, params)
         }),
     }

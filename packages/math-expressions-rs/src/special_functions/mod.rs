@@ -5,7 +5,7 @@
 //! notated inverse, and calculus rules. Definitions live in family files
 //! under `functions/`; [`ALL`] registers them; the accessors at the bottom
 //! replace the per-subsystem tables that used to be scattered across
-//! `parse/`, `norm/`, `diff.rs`, and `integrate/`.
+//! `parse/`, `normalize/`, `diff.rs`, and `integrate/`.
 //!
 //! # Adding a function
 //!
@@ -71,7 +71,7 @@ pub struct FnDef {
     /// placeholder `x` (`None`: `diff` falls back to prime notation).
     pub derivative: Option<&'static str>,
     /// One antiderivative in the argument `u`, as an expression builder
-    /// using the `norm` smart constructors — exactly the shapes the
+    /// using the `normalize` smart constructors — exactly the shapes the
     /// integrator's elementary table historically produced. The caller
     /// handles the linear-inner-argument division.
     pub antiderivative: Option<fn(Expr) -> Expr>,
@@ -178,7 +178,7 @@ fn index() -> &'static HashMap<&'static str, &'static FnDef> {
         for def in ALL {
             for key in std::iter::once(&def.name).chain(def.aliases) {
                 if m.insert(*key, *def).is_some() {
-                    panic!("functions::ALL registers {key:?} twice");
+                    panic!("special_functions::ALL registers {key:?} twice");
                 }
             }
         }

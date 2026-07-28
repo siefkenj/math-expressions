@@ -54,14 +54,14 @@ pub enum FixId {
     Log10,
 }
 
-/// The kernel rows of every registered function, in `functions::ALL`
+/// The kernel rows of every registered function, in `special_functions::ALL`
 /// order — the id space of `Op::Call(u32)`. Ids are only meaningful within
 /// a run (tapes are compiled per evaluation), so registry order changes are
 /// harmless.
 pub fn registry() -> &'static [&'static FnKernel] {
     static R: std::sync::OnceLock<Vec<&'static FnKernel>> = std::sync::OnceLock::new();
     R.get_or_init(|| {
-        crate::functions::ALL
+        crate::special_functions::ALL
             .iter()
             .filter_map(|d| d.kernel)
             .collect()
@@ -75,7 +75,7 @@ pub fn lookup(name: &str) -> Option<u32> {
         .get_or_init(|| {
             let mut m = HashMap::new();
             let mut id = 0u32;
-            for def in crate::functions::ALL {
+            for def in crate::special_functions::ALL {
                 if def.kernel.is_some() {
                     for key in std::iter::once(&def.name).chain(def.aliases) {
                         m.insert(*key, id);

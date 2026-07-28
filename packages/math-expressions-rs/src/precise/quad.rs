@@ -367,7 +367,7 @@ pub fn integrate_to_precision(
     }
     let (lo, hi, negate) = if lo < hi { (lo, hi, false) } else { (hi, lo, true) };
 
-    let fc = crate::norm::simplify_core(f);
+    let fc = crate::normalize::simplify_core(f);
     if crate::ops::variables(&fc)
         .iter()
         .any(|v| v != var && !crate::sym::is_constant_symbol(v))
@@ -399,7 +399,7 @@ pub(crate) fn compile_pair(
     };
     let mut d = fc.clone();
     for _ in 0..4 {
-        d = crate::norm::simplify_core(&crate::diff::derivative(&d, var));
+        d = crate::normalize::simplify_core(&crate::diff::derivative(&d, var));
     }
     let Ok(tape_d4) = compile(&d) else {
         return Err("fourth derivative not numerically compilable");

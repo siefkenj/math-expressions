@@ -104,8 +104,8 @@ fn head_evaluable(head: &Expr, nargs: usize) -> bool {
 /// historical hardcoded list.)
 fn known_function(name: &str, nargs: usize) -> bool {
     match nargs {
-        1 => crate::functions::eval1(name).is_some(),
-        2 => crate::functions::eval2(name).is_some(),
+        1 => crate::special_functions::eval1(name).is_some(),
+        2 => crate::special_functions::eval2(name).is_some(),
         _ => false,
     }
 }
@@ -142,12 +142,12 @@ fn eval_apply(head: &Expr, args: &[Expr], env: &Env) -> Option<Complex64> {
     // The per-function evaluation rules are `FnDef::eval1`/`eval2` in
     // `crate::functions`; this dispatch only routes by arity.
     if let [arg] = args {
-        let f = crate::functions::eval1(&name)?;
+        let f = crate::special_functions::eval1(&name)?;
         let z = eval_complex(arg, env)?;
         return f(z);
     }
     if let [a, b] = args {
-        let f = crate::functions::eval2(&name)?;
+        let f = crate::special_functions::eval2(&name)?;
         let (za, zb) = (eval_complex(a, env)?, eval_complex(b, env)?);
         return f(za, zb);
     }

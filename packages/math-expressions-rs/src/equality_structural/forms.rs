@@ -3,7 +3,7 @@
 
 use super::helpers::{as_int, strip_neg, symbol_occurrences};
 use crate::expr::{Expr, SeqKind};
-use crate::norm::canonicalize;
+use crate::normalize::canonicalize;
 
 fn is_sum(e: &Expr) -> bool {
     matches!(e, Expr::Add(_))

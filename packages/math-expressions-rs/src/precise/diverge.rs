@@ -100,7 +100,7 @@ fn factor_divisor(f: &Expr) -> Option<(Expr, f64, Option<Expr>)> {
                         return Some((
                             mk_apply("sin", u.clone()),
                             s,
-                            Some(crate::norm::pow(
+                            Some(crate::normalize::pow(
                                 mk_apply("cos", u.clone()),
                                 Expr::Num(n.neg()),
                             )),
@@ -110,7 +110,7 @@ fn factor_divisor(f: &Expr) -> Option<(Expr, f64, Option<Expr>)> {
                         return Some((
                             mk_apply("cos", u.clone()),
                             s,
-                            Some(crate::norm::pow(
+                            Some(crate::normalize::pow(
                                 mk_apply("sin", u.clone()),
                                 Expr::Num(n.neg()),
                             )),
@@ -146,14 +146,14 @@ fn positive_trig_divisor(f: &Expr) -> Option<(Expr, f64, Expr)> {
                         return Some((
                             mk_apply("cos", u.clone()),
                             v,
-                            crate::norm::pow(mk_apply("sin", u.clone()), Expr::Num(n.clone())),
+                            crate::normalize::pow(mk_apply("sin", u.clone()), Expr::Num(n.clone())),
                         ))
                     }
                     "cot" => {
                         return Some((
                             mk_apply("sin", u.clone()),
                             v,
-                            crate::norm::pow(mk_apply("cos", u.clone()), Expr::Num(n.clone())),
+                            crate::normalize::pow(mk_apply("cos", u.clone()), Expr::Num(n.clone())),
                         ))
                     }
                     _ => {}
@@ -182,18 +182,18 @@ fn collect_structure(fc: &Expr) -> (Vec<Divisor>, Vec<LogFactor>) {
             if others.is_empty() {
                 Expr::Num(Number::Int(1)) // empty product: N ≡ 1
             } else {
-                crate::norm::mul(others)
+                crate::normalize::mul(others)
             }
         };
         if let Some((d, s, ncontrib)) = factor_divisor(f) {
             divisors.push(Divisor {
-                d: crate::norm::canonicalize(&d),
+                d: crate::normalize::canonicalize(&d),
                 s,
                 n: rest(ncontrib),
             });
         } else if let Some((d, s, ncontrib)) = positive_trig_divisor(f) {
             divisors.push(Divisor {
-                d: crate::norm::canonicalize(&d),
+                d: crate::normalize::canonicalize(&d),
                 s,
                 n: rest(Some(ncontrib)),
             });
@@ -226,7 +226,7 @@ fn subst_point(e: &Expr, var: &str, pt: &Expr) -> Expr {
 /// (`exact::exact_eval`, the ℚ[π, e, √] tower). The numeric tiers can never
 /// certify a true zero.
 fn exactly_zero_at(e: &Expr, var: &str, pt: &Expr) -> bool {
-    let sub = crate::norm::canonicalize(&subst_point(e, var, pt));
+    let sub = crate::normalize::canonicalize(&subst_point(e, var, pt));
     crate::exact::exact_eval(&sub)
         .map(|v| v.is_zero())
         .unwrap_or(false)
@@ -235,7 +235,7 @@ fn exactly_zero_at(e: &Expr, var: &str, pt: &Expr) -> bool {
 /// Is `e(pt)` certified nonzero? Exact evaluation first; else the ±1-ulp
 /// contract of the arbitrary-precision path (|mant| ≥ 2 excludes 0).
 fn certified_nonzero_at(e: &Expr, var: &str, pt: &Expr) -> bool {
-    let sub = crate::norm::canonicalize(&subst_point(e, var, pt));
+    let sub = crate::normalize::canonicalize(&subst_point(e, var, pt));
     if let Some(v) = crate::exact::exact_eval(&sub) {
         return !v.is_zero();
     }
@@ -369,11 +369,11 @@ fn mvt_certificate(div: &Divisor, var: &str, cell: &ZeroCell) -> bool {
     if div.s < 1.0 {
         return false;
     }
-    let dprime = crate::norm::canonicalize(&crate::diff::derivative(&div.d, var));
+    let dprime = crate::normalize::canonicalize(&crate::diff::derivative(&div.d, var));
     let Ok(dp_tape) = super::tape::compile(&dprime) else {
         return false;
     };
-    let Ok(n_tape) = super::tape::compile(&crate::norm::canonicalize(&div.n)) else {
+    let Ok(n_tape) = super::tape::compile(&crate::normalize::canonicalize(&div.n)) else {
         return false;
     };
     let iv = Iv {
@@ -411,7 +411,7 @@ fn exact_point_certificate(
     let mut dj = div.d.clone();
     let mut m = 0usize;
     for j in 1..=4 {
-        dj = crate::norm::canonicalize(&crate::diff::derivative(&dj, var));
+        dj = crate::normalize::canonicalize(&crate::diff::derivative(&dj, var));
         if exactly_zero_at(&dj, var, pt) {
             continue;
         }
@@ -428,7 +428,7 @@ fn exact_point_certificate(
     let Ok(dm_tape) = super::tape::compile(&dj) else {
         return false;
     };
-    let Ok(n_tape) = super::tape::compile(&crate::norm::canonicalize(&div.n)) else {
+    let Ok(n_tape) = super::tape::compile(&crate::normalize::canonicalize(&div.n)) else {
         return false;
     };
     let mut w = cell_w.max(1e-12);
@@ -471,7 +471,7 @@ fn closed_form_candidates(lo: f64, hi: f64) -> Vec<(Expr, f64)> {
     let k = (mid / (std::f64::consts::PI / 2.0)).round();
     let v = k * std::f64::consts::PI / 2.0;
     if (v - mid).abs() <= half && k.abs() < 1e12 && k != 0.0 {
-        let pt = crate::norm::canonicalize(&Expr::Mul(vec![
+        let pt = crate::normalize::canonicalize(&Expr::Mul(vec![
             Expr::Num(Number::rat(k as i64, 2)),
             Expr::sym("pi"),
         ]));
@@ -789,7 +789,7 @@ fn exact_zero_order(d: &Expr, var: &str, pt: &Expr) -> Option<usize> {
     }
     let mut dj = d.clone();
     for j in 1..=4 {
-        dj = crate::norm::canonicalize(&crate::diff::derivative(&dj, var));
+        dj = crate::normalize::canonicalize(&crate::diff::derivative(&dj, var));
         if exactly_zero_at(&dj, var, pt) {
             continue;
         }
@@ -832,7 +832,7 @@ pub fn integrate_analyzed(
     } else {
         (hi0, lo0, true)
     };
-    let fc = crate::norm::simplify_core(f);
+    let fc = crate::normalize::simplify_core(f);
     if crate::ops::variables(&fc)
         .iter()
         .any(|v| v != var && !crate::sym::is_constant_symbol(v))
@@ -919,7 +919,7 @@ fn cell_tail_bound(
         // derivatives vanish exactly, making the Taylor form valid).
         let mut dm = div.d.clone();
         for _ in 0..m {
-            dm = crate::norm::canonicalize(&crate::diff::derivative(&dm, var));
+            dm = crate::normalize::canonicalize(&crate::diff::derivative(&dm, var));
         }
         let dm_tape = super::tape::compile(&dm).ok()?;
         let dm_iv = interval_eval(&dm_tape, iv)?;
@@ -948,7 +948,7 @@ fn cell_tail_bound(
     if let Some(&li) = cell.vanishing_logs.first() {
         let lf = logs.get(li)?;
         // u has a certified simple zero here: K_u|x−ρ| ≤ |u| ≤ M_u|x−ρ|.
-        let du = crate::norm::canonicalize(&crate::diff::derivative(&lf.u, var));
+        let du = crate::normalize::canonicalize(&crate::diff::derivative(&lf.u, var));
         let du_tape = super::tape::compile(&du).ok()?;
         let du_iv = interval_eval(&du_tape, iv)?;
         if !(du_iv.lo > 0.0 || du_iv.hi < 0.0) {
@@ -981,9 +981,9 @@ fn cell_tail_bound(
     let n_expr = if kept.is_empty() {
         Expr::Num(Number::Int(1))
     } else {
-        crate::norm::mul(kept)
+        crate::normalize::mul(kept)
     };
-    let n_tape = super::tape::compile(&crate::norm::canonicalize(&n_expr)).ok()?;
+    let n_tape = super::tape::compile(&crate::normalize::canonicalize(&n_expr)).ok()?;
     let n_iv = interval_eval(&n_tape, iv)?;
     let a_sup = n_iv.mag();
     if !a_sup.is_finite() {
@@ -1003,9 +1003,9 @@ fn cell_tail_bound(
 
 fn factor_matches_divisor(f: &Expr, div: &Divisor) -> bool {
     match factor_divisor(f) {
-        Some((d, _, _)) => crate::norm::canonicalize(&d) == div.d,
+        Some((d, _, _)) => crate::normalize::canonicalize(&d) == div.d,
         None => positive_trig_divisor(f)
-            .map(|(d, _, _)| crate::norm::canonicalize(&d) == div.d)
+            .map(|(d, _, _)| crate::normalize::canonicalize(&d) == div.d)
             .unwrap_or(false),
     }
 }

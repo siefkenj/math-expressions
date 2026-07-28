@@ -20,7 +20,7 @@
 //!
 //! 0. **Blank guard** — a missing operand makes equality undefined ⇒ `false`
 //!    (unless `allow_blanks`).
-//! 1. **Exact canonical compare** — [`canonicalize`](crate::norm::canonicalize)
+//! 1. **Exact canonical compare** — [`canonicalize`](crate::normalize::canonicalize)
 //!    both sides and compare trees. Most equal pairs agree here with no
 //!    numerics (the exactness payoff: `10^20+1 ≠ 10^20+2` is decided, not
 //!    sampled).

@@ -1,7 +1,7 @@
 //! Vector operations (JS `vector_add`/`sub`/`dot`/`cross`).
 
 use crate::expr::Expr;
-use crate::norm::{add, canonicalize, mul};
+use crate::normalize::{add, canonicalize, mul};
 use crate::sym::Sym;
 
 /// The components of a vector-shaped expression: a `Seq` of any vector kind

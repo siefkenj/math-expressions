@@ -5,7 +5,7 @@
 use crate::assumptions::{is_negative, is_nonzero, is_positive, Assumptions};
 use crate::equality::{equals, EqOptions};
 use crate::expr::{Expr, RelOp, SeqKind};
-use crate::norm::{canonicalize, simplify_with, syntactic::map_children};
+use crate::normalize::{canonicalize, simplify_with, syntactic::map_children};
 
 /// Does `a` equal `b` after exactly `n` sign flips of subtrees of `a`?
 /// `n = 0` is plain [`equals`]. Port of `equalSpecifiedSignErrors`: every
@@ -72,7 +72,7 @@ pub fn solve_linear(e: &Expr, var: &str, assumptions: &Assumptions) -> Option<Ex
     // lhs − rhs = 0 form, expanded so the negation distributes over sums
     // (canonicalize alone keeps `−(4+2x)` as a product, which would defeat
     // the linear-term extraction below).
-    let zeroed = crate::norm::expand_core(&Expr::Add(vec![
+    let zeroed = crate::normalize::expand_core(&Expr::Add(vec![
         lhs.clone(),
         Expr::Neg(Box::new(rhs.clone())),
     ]));
@@ -109,7 +109,7 @@ pub fn solve_linear(e: &Expr, var: &str, assumptions: &Assumptions) -> Option<Ex
                 if var_count != 1 {
                     return None; // var², or missing after all
                 }
-                a_parts.push(crate::norm::mul(rest));
+                a_parts.push(crate::normalize::mul(rest));
             }
             _ => return None, // var under a power/function: not linear
         }

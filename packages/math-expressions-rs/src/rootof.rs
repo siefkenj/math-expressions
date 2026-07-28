@@ -201,8 +201,8 @@ pub(crate) fn upoly_in_root(coeffs: &[BigRational], root: &Expr) -> Expr {
             let num = Expr::Num(Number::from_bigrational(c.clone()));
             match i {
                 0 => num,
-                1 => crate::norm::mul(vec![num, root.clone()]),
-                _ => crate::norm::mul(vec![
+                1 => crate::normalize::mul(vec![num, root.clone()]),
+                _ => crate::normalize::mul(vec![
                     num,
                     Expr::Pow(
                         Box::new(root.clone()),
@@ -212,7 +212,7 @@ pub(crate) fn upoly_in_root(coeffs: &[BigRational], root: &Expr) -> Expr {
             }
         })
         .collect();
-    crate::norm::add(terms)
+    crate::normalize::add(terms)
 }
 
 /// Entry cap for each thread-local memo below. The caches are keyed by the

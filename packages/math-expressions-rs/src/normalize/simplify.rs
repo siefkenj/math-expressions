@@ -29,7 +29,7 @@ use super::{add, canonicalize, mul, split_coeff};
 // non-convergence on adversarial input; real inputs converge in 1–2 rounds.
 
 /// Simplify to a meaning-preserving fixpoint, returned in display form
-/// (`norm::present`): polynomial term order, division instead of negative
+/// (`normalize::present`): polynomial term order, division instead of negative
 /// exponents, explicit `Neg`.
 ///
 /// This is now the **aggressive** simplifier — it always runs [`full_simplify`]:
@@ -41,7 +41,7 @@ use super::{add, canonicalize, mul, split_coeff};
 /// behavior uses [`simplify_base`]; code that needs the canonical (non-display)
 /// shape uses [`simplify_core`].
 pub fn simplify(e: &Expr) -> Expr {
-    crate::norm::full_simplify(e, &Assumptions::new())
+    crate::normalize::full_simplify(e, &Assumptions::new())
 }
 
 /// The base canonical simplify in display form — `simplify`'s pre-`full_simplify`

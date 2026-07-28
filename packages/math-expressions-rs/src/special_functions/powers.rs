@@ -6,7 +6,7 @@
 use super::{FnDef, DEFAULTS};
 use crate::precise::kernels::{FixId, FnKernel};
 use crate::expr::Expr;
-use crate::norm::{mul, pow};
+use crate::normalize::{mul, pow};
 use crate::num::Number;
 use num_complex::Complex64;
 

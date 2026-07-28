@@ -6,7 +6,7 @@ use super::numeric::equals_numerical;
 use super::relations::{as_comparison, relations_equal};
 use super::{discrete_infinite, finite_field, plus_minus, EqOptions};
 use crate::expr::{Expr, SeqKind};
-use crate::norm::{canonicalize, desugar_units, normalize_syntactic, simplify_canonical};
+use crate::normalize::{canonicalize, desugar_units, normalize_syntactic, simplify_canonical};
 
 /// Are `a` and `b` mathematically equal?
 pub fn equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
@@ -145,7 +145,7 @@ fn certified_equal(ca: &Expr, cb: &Expr) -> bool {
     // corpus cost). `exact_eval` on the canonical difference decides the
     // constant tower (ℚ, surds, π, e, trig/exp/log special values) directly;
     // a value it can't evaluate returns `None` and falls through to sampling.
-    let diff = crate::norm::canonicalize(&Expr::Add(vec![
+    let diff = crate::normalize::canonicalize(&Expr::Add(vec![
         ca.clone(),
         Expr::Neg(Box::new(cb.clone())),
     ]));
@@ -223,7 +223,7 @@ fn coerce_seqs(e: Expr, opts: &EqOptions) -> Expr {
             };
             return Expr::Seq(mapped, xs.iter().map(|x| recur(x, opts)).collect());
         }
-        crate::norm::syntactic::map_children(e, |c| recur(c, opts))
+        crate::normalize::syntactic::map_children(e, |c| recur(c, opts))
     }
     recur(&e, opts)
 }

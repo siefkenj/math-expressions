@@ -305,7 +305,7 @@ impl Writer<'_> {
             .join(&self.arg_sep());
         // Function heads with dedicated LaTeX spellings (`FnDef::latex_head`).
         let head_str = match head {
-            Expr::Sym(s) => match crate::functions::latex_apply_head(&s.name()) {
+            Expr::Sym(s) => match crate::special_functions::latex_apply_head(&s.name()) {
                 Some(h) => h.to_string(),
                 None => self.emit(head, prec::POW),
             },
@@ -498,7 +498,7 @@ fn string_convert(name: &str) -> String {
     // Function spellings carry their control word on the registry
     // (`asin` → `\arcsin`, `ln` → `\ln`); unlisted spellings fall through
     // to the `\operatorname{…}` path below.
-    if let Some(cmd) = crate::functions::latex_command(name) {
+    if let Some(cmd) = crate::special_functions::latex_command(name) {
         return format!("\\{}", cmd);
     }
     let name = convert_latex_symbol(name).unwrap_or(name);

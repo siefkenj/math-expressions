@@ -448,14 +448,14 @@ pub(crate) fn poly_to_expr(rep: &Rep, vars: &[String]) -> Expr {
                 .filter(|(_, c)| !c.is_zero())
                 .map(|(i, c)| {
                     let coeff = poly_to_expr(c, &vars[1..]);
-                    let power = crate::norm::pow(
+                    let power = crate::normalize::pow(
                         Expr::sym(&vars[0]),
                         Expr::Num(Number::Int(i as i64)),
                     );
-                    crate::norm::mul(vec![coeff, power])
+                    crate::normalize::mul(vec![coeff, power])
                 })
                 .collect();
-            crate::norm::add(terms)
+            crate::normalize::add(terms)
         }
     }
 }

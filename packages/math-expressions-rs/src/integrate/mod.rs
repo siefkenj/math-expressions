@@ -12,7 +12,7 @@ pub(crate) mod rational;
 
 use crate::assumptions::Assumptions;
 use crate::expr::Expr;
-use crate::norm::{add, canonicalize, mul, pow};
+use crate::normalize::{add, canonicalize, mul, pow};
 use crate::num::Number;
 
 fn int(i: i64) -> Expr {
@@ -43,7 +43,7 @@ pub fn integrate(f: &Expr, x: &str, assumptions: &Assumptions) -> Option<Expr> {
     // identity layer; if it actually changed the shape, integrating the result
     // can succeed where the raw form could not. This runs only on the failure
     // path, so the common case pays nothing.
-    let fs = crate::norm::simplify(&fc);
+    let fs = crate::normalize::simplify(&fc);
     if fs != fc {
         return integrate_verified(&fs, x, assumptions);
     }
@@ -74,7 +74,7 @@ fn integrate_verified(fc: &Expr, x: &str, assumptions: &Assumptions) -> Option<E
             return None;
         }
     }
-    Some(crate::norm::simplify(&result))
+    Some(crate::normalize::simplify(&result))
 }
 
 fn integ(e: &Expr, x: &str, fuel: &mut i64) -> Option<Expr> {
@@ -319,7 +319,7 @@ fn table_match(e: &Expr, x: &str) -> Option<Expr> {
             let (Expr::Sym(f), [u]) = (&**head, args.as_slice()) else {
                 return None;
             };
-            let builder = crate::functions::antiderivative_builder(&f.name())?;
+            let builder = crate::special_functions::antiderivative_builder(&f.name())?;
             let b = linear_coeff(u, x)?;
             Some(over(builder(u.clone()), &b))
         }
@@ -404,7 +404,7 @@ fn usub(e: &Expr, x: &str, fuel: &mut i64) -> Option<Expr> {
             continue;
         }
         // f/u′, aggressively cancelled.
-        let q = crate::norm::simplify_core(&crate::ops::reduce_rational(&Expr::Div(
+        let q = crate::normalize::simplify_core(&crate::ops::reduce_rational(&Expr::Div(
             Box::new(e.clone()),
             Box::new(du.clone()),
         )));
@@ -469,5 +469,5 @@ fn replace_subtree(e: &Expr, target: &Expr, to: &Expr) -> Expr {
             }
         }
     }
-    crate::norm::syntactic::map_children(e, |c| replace_subtree(c, target, to))
+    crate::normalize::syntactic::map_children(e, |c| replace_subtree(c, target, to))
 }

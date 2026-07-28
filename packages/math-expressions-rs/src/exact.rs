@@ -175,13 +175,13 @@ impl Exact {
             // canonicalize unifies `Const(Pi/E/I)` → `Sym`; minting `Sym`
             // directly keeps this output canonical without a re-pass.)
             if *pi > 0 {
-                factors.push(crate::norm::pow(
+                factors.push(crate::normalize::pow(
                     Expr::sym("pi"),
                     Expr::int(i64::from(*pi)),
                 ));
             }
             if *e > 0 {
-                factors.push(crate::norm::pow(
+                factors.push(crate::normalize::pow(
                     Expr::sym("e"),
                     Expr::int(i64::from(*e)),
                 ));
@@ -195,9 +195,9 @@ impl Exact {
                 // (e.g. `full_simplify(cos(π/6))` == `sqrt(3)/2`).
                 factors.push(Expr::Apply(Box::new(Expr::sym("sqrt")), vec![radn]));
             }
-            terms.push(crate::norm::mul(factors));
+            terms.push(crate::normalize::mul(factors));
         }
-        crate::norm::canonicalize(&crate::norm::add(terms))
+        crate::normalize::canonicalize(&crate::normalize::add(terms))
     }
 
     fn pow_int(&self, k: i64, budget: &mut i64) -> Option<Exact> {
@@ -510,7 +510,7 @@ fn tan_lattice(k: usize) -> Option<Exact> {
 /// The `_a` assumptions are accepted for forward compatibility (sign/realness
 /// reasoning is not yet implemented) but not yet consulted.
 pub fn is_zero(e: &Expr, _a: &Assumptions) -> Tri {
-    let c = crate::norm::canonicalize(&crate::norm::expand(e));
+    let c = crate::normalize::canonicalize(&crate::normalize::expand(e));
     let vars = free_vars(&c);
     if let Some(v) = certify_canonical(&c, &vars) {
         return Some(v);
@@ -532,7 +532,7 @@ pub fn is_zero(e: &Expr, _a: &Assumptions) -> Tri {
 /// sampling refuter burns its full arbitrary-precision budget precisely when
 /// the expression *is* zero.
 pub(crate) fn certified_zero(e: &Expr, _a: &Assumptions) -> bool {
-    let c = crate::norm::canonicalize(&crate::norm::expand(e));
+    let c = crate::normalize::canonicalize(&crate::normalize::expand(e));
     let vars = free_vars(&c);
     certify_canonical(&c, &vars) == Some(true)
 }

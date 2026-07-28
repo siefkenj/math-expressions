@@ -21,7 +21,7 @@ use num_traits::One;
 
 use crate::expr::Expr;
 use crate::num::Number;
-use crate::poly;
+use crate::polynomials;
 
 /// Maximum distinct indeterminates (real variables + kernels) the dense
 /// recursive polynomial model will accept before we bail to the unchanged
@@ -35,8 +35,8 @@ const MAX_INDETERMINATES: usize = 6;
 pub fn together(e: &Expr) -> Expr {
     match rational_normal(e) {
         Some((num, den)) if is_one_expr(&den) => num,
-        Some((num, den)) => crate::norm::canonicalize(&Expr::Div(Box::new(num), Box::new(den))),
-        None => crate::norm::canonicalize(e),
+        Some((num, den)) => crate::normalize::canonicalize(&Expr::Div(Box::new(num), Box::new(den))),
+        None => crate::normalize::canonicalize(e),
     }
 }
 
@@ -58,7 +58,7 @@ pub(crate) fn is_identically_zero(e: &Expr) -> bool {
 /// The reduced `(numerator, denominator)` pair as canonical, kernel-restored
 /// expressions, or `None` when the input is outside the caps.
 fn rational_normal(e: &Expr) -> Option<(Expr, Expr)> {
-    let canon = crate::norm::canonicalize(e);
+    let canon = crate::normalize::canonicalize(e);
 
     // Replace opaque (non-rational) subtrees with fresh kernel symbols.
     let mut kernels = Kernels::default();
@@ -74,30 +74,30 @@ fn rational_normal(e: &Expr) -> Option<(Expr, Expr)> {
     if is_zero_expr(&den_e) {
         return None; // 0 denominator — undefined, refuse
     }
-    let pn = poly::expr_to_poly(&crate::norm::canonicalize(&num_e), &vars)?;
-    let pd = poly::expr_to_poly(&crate::norm::canonicalize(&den_e), &vars)?;
+    let pn = polynomials::expr_to_poly(&crate::normalize::canonicalize(&num_e), &vars)?;
+    let pd = polynomials::expr_to_poly(&crate::normalize::canonicalize(&den_e), &vars)?;
 
     // Cancel gcd, then normalize rational content onto the numerator (so
     // `(2x+4)/2` → `x+2`, matching `reduce_rational`).
-    let g = poly::gcd(&pn, &pd, vars.len())?;
-    let (pn, pd) = if poly::is_trivial(&g) {
+    let g = polynomials::gcd(&pn, &pd, vars.len())?;
+    let (pn, pd) = if polynomials::is_trivial(&g) {
         (pn, pd)
     } else {
         (
-            poly::exact_div_top(&pn, &g, vars.len())?,
-            poly::exact_div_top(&pd, &g, vars.len())?,
+            polynomials::exact_div_top(&pn, &g, vars.len())?,
+            polynomials::exact_div_top(&pd, &g, vars.len())?,
         )
     };
-    let (cn, pn) = poly::strip_rational_content(&pn);
-    let (cd, pd) = poly::strip_rational_content(&pd);
+    let (cn, pn) = polynomials::strip_rational_content(&pn);
+    let (cd, pd) = polynomials::strip_rational_content(&pd);
     let scalar = Expr::Num(Number::from_bigrational(cn / cd));
 
-    let num = crate::norm::mul(vec![scalar, poly::poly_to_expr(&pn, &vars)]);
-    let den = poly::poly_to_expr(&pd, &vars);
+    let num = crate::normalize::mul(vec![scalar, polynomials::poly_to_expr(&pn, &vars)]);
+    let den = polynomials::poly_to_expr(&pd, &vars);
 
     // Restore the kernels and canonicalize both halves.
-    let num = crate::norm::canonicalize(&kernels.restore(&num));
-    let den = crate::norm::canonicalize(&kernels.restore(&den));
+    let num = crate::normalize::canonicalize(&kernels.restore(&num));
+    let den = crate::normalize::canonicalize(&kernels.restore(&den));
     Some((num, den))
 }
 
@@ -121,11 +121,11 @@ fn rational_parts(e: &Expr) -> Option<(Expr, Expr)> {
             for t in ts {
                 let (n, d) = rational_parts(t)?;
                 // acc = (acc.n·d + n·acc.d) / (acc.d·d)
-                let num = crate::norm::add(vec![
-                    crate::norm::mul(vec![acc.0, d.clone()]),
-                    crate::norm::mul(vec![n, acc.1.clone()]),
+                let num = crate::normalize::add(vec![
+                    crate::normalize::mul(vec![acc.0, d.clone()]),
+                    crate::normalize::mul(vec![n, acc.1.clone()]),
                 ]);
-                let den = crate::norm::mul(vec![acc.1, d]);
+                let den = crate::normalize::mul(vec![acc.1, d]);
                 acc = (num, den);
             }
             acc
@@ -134,15 +134,15 @@ fn rational_parts(e: &Expr) -> Option<(Expr, Expr)> {
             let (mut num, mut den) = (one(), one());
             for f in fs {
                 let (n, d) = rational_parts(f)?;
-                num = crate::norm::mul(vec![num, n]);
-                den = crate::norm::mul(vec![den, d]);
+                num = crate::normalize::mul(vec![num, n]);
+                den = crate::normalize::mul(vec![den, d]);
             }
             (num, den)
         }
         Expr::Div(a, b) => {
             let (na, da) = rational_parts(a)?;
             let (nb, db) = rational_parts(b)?;
-            (crate::norm::mul(vec![na, db]), crate::norm::mul(vec![da, nb]))
+            (crate::normalize::mul(vec![na, db]), crate::normalize::mul(vec![da, nb]))
         }
         Expr::Pow(b, k) => {
             let Expr::Num(Number::Int(k)) = &**k else {
@@ -160,19 +160,19 @@ fn rational_parts(e: &Expr) -> Option<(Expr, Expr)> {
 }
 
 fn neg(x: Expr) -> Expr {
-    crate::norm::mul(vec![Expr::int(-1), x])
+    crate::normalize::mul(vec![Expr::int(-1), x])
 }
 
 fn pow_int(base: Expr, k: i64) -> Expr {
-    crate::norm::pow(base, Expr::int(k))
+    crate::normalize::pow(base, Expr::int(k))
 }
 
 fn is_zero_expr(e: &Expr) -> bool {
-    matches!(crate::norm::canonicalize(e), Expr::Num(n) if n.is_zero())
+    matches!(crate::normalize::canonicalize(e), Expr::Num(n) if n.is_zero())
 }
 
 fn is_one_expr(e: &Expr) -> bool {
-    matches!(crate::norm::canonicalize(e), Expr::Num(n) if n.to_bigrational().is_some_and(|q| q.is_one()))
+    matches!(crate::normalize::canonicalize(e), Expr::Num(n) if n.to_bigrational().is_some_and(|q| q.is_one()))
 }
 
 // ---------------- opaque kernels ----------------

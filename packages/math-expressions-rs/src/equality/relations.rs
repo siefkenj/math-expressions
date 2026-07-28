@@ -2,9 +2,9 @@
 //! standard forms, and the proportionality test the `±` path also reuses.
 
 use super::EqOptions;
-use crate::eval::{eval_complex, free_symbols, Env};
+use crate::eval_numerical::{eval_complex, free_symbols, Env};
 use crate::expr::{Expr, RelOp};
-use crate::norm::canonicalize;
+use crate::normalize::canonicalize;
 use num_complex::Complex64;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};

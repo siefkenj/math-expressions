@@ -329,7 +329,7 @@ pub fn solve_ode_exprs(
     if rhs.len() != state_vars.len() || y0.len() != rhs.len() || rhs.is_empty() {
         return None;
     }
-    let canon: Vec<Expr> = rhs.iter().map(crate::norm::canonicalize).collect();
+    let canon: Vec<Expr> = rhs.iter().map(crate::normalize::canonicalize).collect();
     // All free variables must be the independent/state variables.
     for c in &canon {
         for v in crate::ops::variables(c) {
@@ -394,13 +394,13 @@ pub fn solve_ode_exprs(
             let states = state_vars.to_vec();
             Some(solve_ode_with(
                 move |t, y, out| {
-                    let mut env = crate::eval::Env::new();
+                    let mut env = crate::eval_numerical::Env::new();
                     env.insert(ind.clone(), num_complex::Complex64::new(t, 0.0));
                     for (name, &v) in states.iter().zip(y.iter()) {
                         env.insert(name.clone(), num_complex::Complex64::new(v, 0.0));
                     }
                     for (i, c) in canon.iter().enumerate() {
-                        match crate::eval::eval_complex(c, &env) {
+                        match crate::eval_numerical::eval_complex(c, &env) {
                             Some(z) if z.re.is_finite() && z.im.abs() < 1e-9 * z.re.abs().max(1.0) => {
                                 out[i] = z.re
                             }

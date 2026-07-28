@@ -53,7 +53,7 @@ impl Default for TextToAstOptions {
                 "pi", "Pi", "rho", "sigma", "Sigma", "tau", "Tau", "upsilon", "Upsilon", "phi",
                 "Phi", "chi", "psi", "Psi", "omega", "Omega", "angle", "deg", "emptyset",
             ]),
-            applied_function_symbols: crate::functions::applied_text_names(),
+            applied_function_symbols: crate::special_functions::applied_text_names(),
             function_symbols: v(&["f", "g"]),
             operator_symbols: v(&["binom", "vec", "linesegment"]),
             parse_leibniz_notation: true,

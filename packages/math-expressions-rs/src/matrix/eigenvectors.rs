@@ -2,7 +2,7 @@
 //! is the abstract eigenvalue.
 
 use crate::expr::Expr;
-use crate::norm::canonicalize;
+use crate::normalize::canonicalize;
 use crate::upoly::{self, UPoly};
 use num_traits::One;
 use num_rational::BigRational;

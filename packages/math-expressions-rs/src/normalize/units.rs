@@ -82,5 +82,5 @@ pub fn desugar_units(e: &Expr) -> Expr {
             }
         }
     }
-    crate::norm::syntactic::map_children(e, desugar_units)
+    crate::normalize::syntactic::map_children(e, desugar_units)
 }

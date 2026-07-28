@@ -2,7 +2,7 @@
 //! (nullspace over ℚ[t]/(f)) lives in [`super::eigenvectors`].
 
 use crate::expr::Expr;
-use crate::norm::{add, canonicalize, mul, pow};
+use crate::normalize::{add, canonicalize, mul, pow};
 use crate::num::Number;
 use crate::upoly::{self, UPoly};
 use num_complex::Complex64;
@@ -116,7 +116,7 @@ pub(super) struct EigenItem {
 }
 
 fn numeric_of(value: &Expr) -> Option<Complex64> {
-    crate::eval::eval_complex(value, &std::collections::HashMap::new())
+    crate::eval_numerical::eval_complex(value, &std::collections::HashMap::new())
 }
 
 fn sort_key(z: Complex64) -> (u8, f64, f64, f64) {

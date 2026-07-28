@@ -5,7 +5,7 @@
 
 use super::{apply, int, FnDef, DEFAULTS};
 use crate::precise::kernels::{FixId, FnKernel};
-use crate::norm::{add, mul, pow};
+use crate::normalize::{add, mul, pow};
 
 pub const EXP: FnDef = FnDef {
     name: "exp",

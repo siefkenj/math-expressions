@@ -15,9 +15,9 @@ use super::numeric::{
 };
 use super::relations::{as_comparison, proportional, Comparison};
 use super::{equals, EqOptions};
-use crate::eval::{eval_complex, free_symbols};
+use crate::eval_numerical::{eval_complex, free_symbols};
 use crate::expr::{Expr, RelOp};
-use crate::norm::{canonicalize, simplify_canonical};
+use crate::normalize::{canonicalize, simplify_canonical};
 use num_complex::Complex64;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;

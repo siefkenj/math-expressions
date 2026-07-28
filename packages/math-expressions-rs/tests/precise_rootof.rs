@@ -96,7 +96,7 @@ fn complex_rootof_components() {
     assert_eq!(take(im, 39), take(im2, 39));
     // And both components match the f64 seed to ~1e-12.
     let (rf, if_) = p.to_complex_f64().expect("finite");
-    use math_expressions::eval::{eval_complex, Env};
+    use math_expressions::eval_numerical::{eval_complex, Env};
     let z = eval_complex(&math_expressions::canonicalize(&e), &Env::new()).expect("numeric");
     assert!((rf - z.re).abs() < 1e-12 && (if_ - z.im).abs() < 1e-12);
     assert!(rf < 0.0 && if_ < 0.0, "index 0 is the (−,−) root");

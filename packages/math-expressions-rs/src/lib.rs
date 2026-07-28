@@ -20,42 +20,42 @@
 //! # Public surface (facade tiers)
 //!
 //! - **Root re-exports** (below) are the primary API: prefer
-//!   `math_expressions::simplify` over `math_expressions::norm::simplify`.
+//!   `math_expressions::simplify` over `math_expressions::normalize::simplify`.
 //! - **API namespaces** — modules used qualified, by design: [`exact`]
 //!   (certified zero-equivalence), [`precise`] (arbitrary-precision eval /
 //!   quadrature), [`numeric`] (mathjs-compatible f64 kernels), [`js_tree`] /
 //!   [`js_match`] (JS `Tree` interop), [`pm`], [`ode`], [`notation`],
-//!   [`resource_limits`], [`output`], [`parse`].
-//! - **Everything else** (`norm`, `eval`, `equality*`, `functions`, `ops`,
+//!   [`resource_limits`], [`print`], [`parse`].
+//! - **Everything else** (`normalize`, `eval_numerical`, `equality*`, `special_functions`, `ops`,
 //!   `matrix`, …) is `pub` for the integration-test suite, not a stability
 //!   surface; new external callers should go through the tiers above.
 
 pub mod assumptions;
 pub mod diff;
 pub mod equality;
-pub mod eval;
+pub mod eval_numerical;
 pub mod exact;
 pub mod factor;
 pub mod ratform;
 pub mod grade;
 pub mod expr;
-pub mod functions;
+pub mod special_functions;
 pub mod equality_structural;
 pub mod integrate;
 pub mod js_match;
 pub mod js_tree;
 pub mod resource_limits;
 pub mod matrix;
-pub mod norm;
+pub mod normalize;
 pub mod notation;
 pub mod num;
 pub mod numeric;
 pub mod ode;
 pub mod ops;
-pub mod output;
+pub mod print;
 pub mod parse;
 pub mod pm;
-mod poly;
+mod polynomials;
 pub mod precise;
 pub(crate) mod rootof;
 pub mod sym;
@@ -84,7 +84,7 @@ pub use matrix::{
     char_poly, cross_prod, det, dot_prod, eigenvalues, eigenvectors, matmul, matrix_inverse,
     nullspace, rank, rref, trace, transpose, vector_add, vector_sub, EigenPair,
 };
-pub use norm::{
+pub use normalize::{
     canonicalize, desugar_units, expand, full_simplify, simplify, simplify_logical, simplify_with,
 };
 pub use num::Number;
@@ -98,7 +98,7 @@ pub use ops::{
     to_intervals, tuples_to_vectors, variables, AnalyticOpts,
 };
 pub use notation::{Digits, Grouping, NumberNotation};
-pub use output::{to_latex, to_text, LatexOpts, TextOpts};
+pub use print::{to_latex, to_text, LatexOpts, TextOpts};
 pub use parse::latex::{LatexToAst, LatexToAstOptions};
 pub use parse::text::{TextToAst, TextToAstOptions};
 pub use parse::ParseError;

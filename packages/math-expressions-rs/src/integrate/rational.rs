@@ -22,7 +22,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{One, Signed, Zero};
 
-use crate::norm::{add as cadd, mul as cmul, pow as cpow};
+use crate::normalize::{add as cadd, mul as cmul, pow as cpow};
 
 fn num(r: &BigRational) -> Expr {
     Expr::Num(Number::from_bigrational(r.clone()))
@@ -36,7 +36,7 @@ fn int(i: i64) -> Expr {
 // univariate rational-function converter — dense `(num, den)` `UPoly` pairs in
 // one named variable, exactly what the LRT integrator consumes. It is
 // deliberately NOT merged with `crate::ratform` (`together`/`cancel`), which is
-// the multivariate Expr-level normal form over `poly::Rep` with
+// the multivariate Expr-level normal form over `polynomials::Rep` with
 // opaque-kernelization; the two share no representation. If a `Rep`↔`UPoly`
 // converter ever exists, revisit — until then use ratform for Expr rewriting
 // and this for univariate coefficient extraction.

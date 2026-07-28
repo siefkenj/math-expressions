@@ -29,7 +29,7 @@ use super::{add, mul, pow};
 // polynomials are far below both; they exist so a pasted product of dozens of
 // sums cannot exhaust memory (the bug that once froze this dev container).
 
-/// Fully expand `e`, in display form (`norm::present`). Internal callers
+/// Fully expand `e`, in display form (`normalize::present`). Internal callers
 /// that pattern-match on canonical shapes use [`expand_core`].
 pub fn expand(e: &Expr) -> Expr {
     super::present(&expand_core(e))

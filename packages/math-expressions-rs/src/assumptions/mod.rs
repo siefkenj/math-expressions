@@ -21,7 +21,7 @@
 //! (`x−3 | x>4` → unknown sign).
 
 use crate::expr::{Expr, MathConst, RelOp};
-use crate::norm::canonicalize;
+use crate::normalize::canonicalize;
 use crate::num::Number;
 use std::collections::HashMap;
 
@@ -49,7 +49,7 @@ impl Assumptions {
         let canon = canonicalize(assumption);
         for conjunct in conjuncts(&canon) {
             let mut vars = std::collections::BTreeSet::new();
-            crate::eval::free_symbols(conjunct, &mut vars);
+            crate::eval_numerical::free_symbols(conjunct, &mut vars);
             for v in vars {
                 self.by_var.entry(v).or_default().push(conjunct.clone());
             }
@@ -96,7 +96,7 @@ impl Assumptions {
         let canon = canonicalize(assumption);
         for conjunct in conjuncts(&canon) {
             let mut vars = std::collections::BTreeSet::new();
-            crate::eval::free_symbols(conjunct, &mut vars);
+            crate::eval_numerical::free_symbols(conjunct, &mut vars);
             if vars.contains("x") {
                 self.generic.push(conjunct.clone());
             }
@@ -129,7 +129,7 @@ impl Assumptions {
                     return true;
                 }
                 let mut vs = std::collections::BTreeSet::new();
-                crate::eval::free_symbols(f, &mut vs);
+                crate::eval_numerical::free_symbols(f, &mut vs);
                 !vs.contains(var)
             })
             .map(|f| canonicalize(&crate::ops::substitute(f, &subs)))

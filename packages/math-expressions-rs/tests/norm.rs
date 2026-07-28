@@ -1,7 +1,7 @@
 //! Canonicalization tests: exact folding, like-term/like-power combination,
 //! identity elimination, and idempotence over the whole parser fixture corpus.
 
-use math_expressions::norm::canonicalize;
+use math_expressions::normalize::canonicalize;
 use math_expressions::{Expr, Number, TextToAst, TextToAstOptions};
 
 fn parse(s: &str) -> Expr {
@@ -154,7 +154,7 @@ fn pow_distribution_keeps_mul_flat() {
 #[test]
 fn limits_are_scoped_and_effective() {
     use math_expressions::resource_limits::{self, ResourceLimits};
-    use math_expressions::norm::expand; // via re-export? use crate path below if needed
+    use math_expressions::normalize::expand; // via re-export? use crate path below if needed
     // Tight expand cap: a modest power-of-sum bails to the unexpanded form.
     let e = parse("(a+b)^6");
     let strict = ResourceLimits {

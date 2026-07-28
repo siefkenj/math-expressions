@@ -45,7 +45,7 @@ impl Default for LatexToAstOptions {
                 "Phi", "chi", "psi", "Psi", "omega", "Omega", "partial", "angle", "circ", "%", "$",
                 "emptyset",
             ]),
-            applied_function_symbols: crate::functions::applied_latex_names(),
+            applied_function_symbols: crate::special_functions::applied_latex_names(),
             function_symbols: v(&["f", "g"]),
             parse_leibniz_notation: true,
             parse_scientific_notation: true,

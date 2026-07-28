@@ -1,4 +1,4 @@
-//! Display form of user-facing operations (`norm::present`): simplified
+//! Display form of user-facing operations (`normalize::present`): simplified
 //! output should read like a calculus student's "simplest form" — polynomial
 //! term order (descending degree, constants last), division instead of
 //! negative exponents, explicit minus signs — while staying canonically equal

@@ -4,7 +4,7 @@
 use super::helpers::{as_int, content, gcd, int_div, signed_div, signed_int, strip_neg};
 use super::radicals::denom_has_radical;
 use crate::expr::Expr;
-use crate::norm::canonicalize;
+use crate::normalize::canonicalize;
 use crate::num::Number;
 
 fn is_decimal_literal(n: &Number) -> bool {

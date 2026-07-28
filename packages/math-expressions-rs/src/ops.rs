@@ -1,9 +1,9 @@
 //! Expression utilities: `substitute` and `variables`.
 //! Small, self-contained ports of the corresponding `me.*` methods.
 
-use crate::eval::{eval_complex, Env};
+use crate::eval_numerical::{eval_complex, Env};
 use crate::expr::Expr;
-use crate::norm::{canonicalize, present, simplify_core, syntactic::map_children};
+use crate::normalize::{canonicalize, present, simplify_core, syntactic::map_children};
 use crate::num::Number;
 use num_complex::Complex64;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -40,7 +40,7 @@ fn reduce_node(e: &Expr) -> Expr {
         if let Expr::Pow(b, x) = f {
             if let Expr::Num(Number::Int(k)) = &**x {
                 if *k < 0 {
-                    den_parts.push(crate::norm::pow(
+                    den_parts.push(crate::normalize::pow(
                         (**b).clone(),
                         Expr::Num(Number::Int(-k)),
                     ));
@@ -53,8 +53,8 @@ fn reduce_node(e: &Expr) -> Expr {
     if den_parts.is_empty() {
         return e;
     }
-    let num = crate::norm::mul(num_parts);
-    let den = crate::norm::mul(den_parts);
+    let num = crate::normalize::mul(num_parts);
+    let den = crate::normalize::mul(den_parts);
 
     // Common variable list (order fixed by BTreeSet). Constant symbols are
     // rejected by the converter, so `pi/x` style fractions pass through.
@@ -67,30 +67,30 @@ fn reduce_node(e: &Expr) -> Expr {
     }
 
     let (Some(pn), Some(pd)) = (
-        crate::poly::expr_to_poly(&num, &vars),
-        crate::poly::expr_to_poly(&den, &vars),
+        crate::polynomials::expr_to_poly(&num, &vars),
+        crate::polynomials::expr_to_poly(&den, &vars),
     ) else {
         return e;
     };
-    let Some(g) = crate::poly::gcd(&pn, &pd, vars.len()) else {
+    let Some(g) = crate::polynomials::gcd(&pn, &pd, vars.len()) else {
         return e;
     };
-    if crate::poly::is_trivial(&g) {
+    if crate::polynomials::is_trivial(&g) {
         return e;
     }
     let (Some(qn), Some(qd)) = (
-        crate::poly::exact_div_top(&pn, &g, vars.len()),
-        crate::poly::exact_div_top(&pd, &g, vars.len()),
+        crate::polynomials::exact_div_top(&pn, &g, vars.len()),
+        crate::polynomials::exact_div_top(&pd, &g, vars.len()),
     ) else {
         return e;
     };
     // Normalize the quotients' rational content into a single scalar on the
     // numerator, so `(2x+4)/2` comes out as `x+2` rather than `½·(2x+4)`.
-    let (cn, qn) = crate::poly::strip_rational_content(&qn);
-    let (cd, qd) = crate::poly::strip_rational_content(&qd);
+    let (cn, qn) = crate::polynomials::strip_rational_content(&qn);
+    let (cd, qd) = crate::polynomials::strip_rational_content(&qd);
     let scalar = Expr::Num(Number::from_bigrational(cn / cd));
-    let new_num = crate::norm::mul(vec![scalar, crate::poly::poly_to_expr(&qn, &vars)]);
-    let new_den = crate::poly::poly_to_expr(&qd, &vars);
+    let new_num = crate::normalize::mul(vec![scalar, crate::polynomials::poly_to_expr(&qn, &vars)]);
+    let new_den = crate::polynomials::poly_to_expr(&qd, &vars);
     canonicalize(&Expr::Div(Box::new(new_num), Box::new(new_den)))
 }
 
@@ -261,11 +261,11 @@ fn unit_body(args: &[Expr]) -> Option<&Expr> {
 
 /// `me.remove_units`: strip unit annotations. With `scale_based_on_unit`, the
 /// scaling units are applied (`50%` → `1/2`, `90 deg` → `pi/2`) via
-/// [`crate::norm::desugar_units`]; without it, the bare value is kept
+/// [`crate::normalize::desugar_units`]; without it, the bare value is kept
 /// (`50%` → `50`).
 pub fn remove_units(e: &Expr, scale_based_on_unit: bool) -> Expr {
     if scale_based_on_unit {
-        return crate::norm::desugar_units(e);
+        return crate::normalize::desugar_units(e);
     }
     if let Expr::OtherOp(name, args) = e {
         if name.name() == "unit" {
@@ -279,9 +279,9 @@ pub fn remove_units(e: &Expr, scale_based_on_unit: bool) -> Expr {
 
 /// `me.remove_scaling_units`: drop only the *scaling* units (`%`, `deg`, `$`),
 /// rewriting them into plain arithmetic. Identical to the equality-time
-/// [`crate::norm::desugar_units`] pass.
+/// [`crate::normalize::desugar_units`] pass.
 pub fn remove_scaling_units(e: &Expr) -> Expr {
-    crate::norm::desugar_units(e)
+    crate::normalize::desugar_units(e)
 }
 
 /// `me.add_unit`: wrap `e` in the given unit. `$` is a prefix unit
@@ -398,7 +398,7 @@ pub fn is_analytic(e: &Expr, opts: &AnalyticOpts) -> bool {
 pub fn normalize_function_names(e: &Expr) -> Expr {
     fn rename_head(h: &Expr) -> Expr {
         match h {
-            Expr::Sym(s) => match crate::functions::canonical_name(&s.name()) {
+            Expr::Sym(s) => match crate::special_functions::canonical_name(&s.name()) {
                 Some(canon) => Expr::sym(canon),
                 None => h.clone(),
             },

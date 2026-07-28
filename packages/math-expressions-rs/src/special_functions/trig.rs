@@ -2,7 +2,7 @@
 
 use super::{apply, int, FnDef, DEFAULTS};
 use crate::precise::kernels::{FixId, FnKernel};
-use crate::norm::mul;
+use crate::normalize::mul;
 
 pub const SIN: FnDef = FnDef {
     name: "sin",

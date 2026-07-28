@@ -11,7 +11,7 @@
 //! output need not match mathjs's tree shape — only its value.
 
 use crate::expr::Expr;
-use crate::norm::simplify;
+use crate::normalize::simplify;
 use crate::parse::text::{TextToAst, TextToAstOptions};
 
 /// d/d`var` of `e`, simplified. `var` is the differentiation variable's name.
@@ -112,8 +112,8 @@ fn apply_rule(head: &Expr, args: &[Expr], var: &str) -> Expr {
     // `f^n(x)` parses as `Apply(Pow(f, n), [x])` but denotes `(f(x))^n` for the
     // functions whose exponent conventionally sits outside — trig / hyperbolic /
     // log, with n ≠ −1 (the inverse-function convention). That is exactly the
-    // rewrite the canonical normalizer performs (`norm::canonicalize`,
-    // `norm::syntactic::pass_applied_functions`), but `derivative` does not
+    // rewrite the canonical normalizer performs (`normalize::canonicalize`,
+    // `normalize::syntactic::pass_applied_functions`), but `derivative` does not
     // canonicalize its input, so without this `sin^2(x)` reaches the opaque-prime
     // fallback below and never differentiates. Rewrite to `(f(x))^n` and let the
     // power + chain rules take over (the rewritten head is a bare `Sym`, so this
@@ -174,7 +174,7 @@ fn outer_derivative(fname: &str, arg: &Expr) -> Option<Expr> {
 /// the placeholder `x`. The table is `FnDef::derivative` in
 /// `crate::functions` (alias-aware, so `arc*` spellings find the `a*` entry).
 fn template_for(fname: &str) -> Option<&'static str> {
-    crate::functions::derivative_template(fname)
+    crate::special_functions::derivative_template(fname)
 }
 
 // ---- small faithful-layer builders ----
@@ -202,9 +202,9 @@ fn is_e(e: &Expr) -> bool {
 }
 
 /// Is `base` a function whose exponent moves outside, so `base^n(x)` means
-/// `(base(x))^n` (trig / hyperbolic / log)? Mirrors `norm::syntactic`.
+/// `(base(x))^n` (trig / hyperbolic / log)? Mirrors `normalize::syntactic`.
 fn is_move_exponent(base: &Expr) -> bool {
-    matches!(base, Expr::Sym(s) if crate::functions::moves_exponent_outside(&s.name()))
+    matches!(base, Expr::Sym(s) if crate::special_functions::moves_exponent_outside(&s.name()))
 }
 
 /// Is `e` the integer literal −1 (the inverse-function exponent to leave alone)?
@@ -213,7 +213,7 @@ fn is_neg_one(e: &Expr) -> bool {
 }
 
 /// Does `e` mention the variable `var` anywhere (full recursion — unlike
-/// `eval::free_symbols`, which stops at opaque transcendental subtrees)?
+/// `eval_numerical::free_symbols`, which stops at opaque transcendental subtrees)?
 fn contains_var(e: &Expr, var: &str) -> bool {
     e.any_subexpr(&|c| matches!(c, Expr::Sym(s) if s.name() == var))
 }

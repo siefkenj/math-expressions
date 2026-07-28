@@ -1,7 +1,7 @@
 //! Eager matrix operations: `transpose`, `trace`, `matmul`.
 
 use crate::expr::Expr;
-use crate::norm::{add, canonicalize};
+use crate::normalize::{add, canonicalize};
 use crate::sym::Sym;
 
 /// Matrix transpose. Literal matrices transpose eagerly; anything else stays
@@ -50,7 +50,7 @@ pub fn trace(e: &Expr) -> Expr {
 }
 
 /// The canonical product `a·b` (folds literal matrices, keeps order for
-/// unfoldable ones — see `norm::mul`'s matrix segmentation).
+/// unfoldable ones — see `normalize::mul`'s matrix segmentation).
 pub fn matmul(a: &Expr, b: &Expr) -> Expr {
     canonicalize(&Expr::Mul(vec![a.clone(), b.clone()]))
 }

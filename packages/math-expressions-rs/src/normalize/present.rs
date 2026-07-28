@@ -2,7 +2,7 @@
 //!
 //! `canonicalize`'s output is optimized for *equality testing*, not reading:
 //! `Div` becomes `Mul·Pow⁻¹`, `Neg` becomes a `−1` coefficient, and
-//! commutative operands sort by `norm::order`'s variant-rank order, which
+//! commutative operands sort by `normalize::order`'s variant-rank order, which
 //! prints `x^2 + 2x + 1` as `1 + x^2 + 2 x`. This pass converts a canonical
 //! tree into the equivalent faithful tree a calculus student would write:
 //!

@@ -3,7 +3,7 @@
 
 use crate::assumptions::{is_nonzero, Assumptions};
 use crate::expr::Expr;
-use crate::norm::{canonicalize, mul, pow};
+use crate::normalize::{canonicalize, mul, pow};
 use crate::num::Number;
 use crate::sym::Sym;
 

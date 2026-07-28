@@ -7,7 +7,7 @@
 //! `char_poly(A)(λ)` must equal 0, both through the library's own `equals`
 //! (which exercises `RootOf` reduction and numeric evaluation end-to-end).
 
-use math_expressions::eval::{eval_complex, Env};
+use math_expressions::eval_numerical::{eval_complex, Env};
 use math_expressions::matrix::{char_poly, eigenvalues, eigenvectors};
 use math_expressions::{
     canonicalize, equals, expand, simplify, Assumptions, EqOptions, Expr, TextToAst,

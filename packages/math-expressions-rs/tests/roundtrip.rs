@@ -6,7 +6,7 @@
 //! The corpus is every input in the parser tree-fixtures — realistic
 //! expressions by construction — so we never hand-author expected output.
 
-use math_expressions::output::{latex, text};
+use math_expressions::print::{latex, text};
 use math_expressions::{Expr, LatexToAst, LatexToAstOptions, TextToAst, TextToAstOptions};
 
 #[derive(serde::Deserialize)]

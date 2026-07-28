@@ -166,7 +166,7 @@ fn canon_apply(head: Expr, args: Vec<Expr>) -> Expr {
     // using the same `move_exponent_spellings` registry facet.
     if let Expr::Pow(inner, exp) = &head {
         if let Expr::Sym(f) = &**inner {
-            if crate::functions::moves_exponent_outside(&f.name())
+            if crate::special_functions::moves_exponent_outside(&f.name())
                 && !matches!(&**exp, Expr::Num(Number::Int(-1)))
             {
                 let exp = (**exp).clone();
@@ -261,7 +261,7 @@ fn factorial_of(n: i64) -> Option<Number> {
 /// normalized `a…` spelling. `None` for functions without a notated inverse.
 /// (Table: `FnDef::inverse` in `crate::functions`.)
 fn inverse_function_name(name: &str) -> Option<&'static str> {
-    crate::functions::inverse_of(name)
+    crate::special_functions::inverse_of(name)
 }
 
 /// Canonicalize a function head's name (`arcsin → asin`, `ln → log`, …). The
@@ -279,5 +279,5 @@ fn normalize_head(head: Expr) -> Expr {
 /// standard_form.js `function_normalizations`; now `FnDef::aliases` in
 /// `crate::functions`).
 fn normalize_function_name(name: &str) -> Option<&'static str> {
-    crate::functions::canonical_name(name)
+    crate::special_functions::canonical_name(name)
 }

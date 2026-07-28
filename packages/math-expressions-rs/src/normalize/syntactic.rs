@@ -84,13 +84,13 @@ fn pass_function_names(e: &Expr) -> Expr {
 /// `f^(-1)` into `af` for the invertible trig/hyperbolic names.
 fn normalize_head_name(head: &Expr) -> Expr {
     match head {
-        Expr::Sym(s) => match crate::functions::canonical_name(&s.name()) {
+        Expr::Sym(s) => match crate::special_functions::canonical_name(&s.name()) {
             Some(canon) => Expr::sym(canon),
             None => head.clone(),
         },
         Expr::Pow(base, exp) if is_int(exp, -1) => {
             if let Expr::Sym(s) = base.as_ref() {
-                if let Some(inv) = crate::functions::inverse_of(&s.name()) {
+                if let Some(inv) = crate::special_functions::inverse_of(&s.name()) {
                     return Expr::sym(inv);
                 }
             }
@@ -239,11 +239,11 @@ fn is_int(e: &Expr, v: i64) -> bool {
 }
 
 fn is_move_exponent(base: &Expr) -> bool {
-    matches!(base, Expr::Sym(s) if crate::functions::moves_exponent_outside(&s.name()))
+    matches!(base, Expr::Sym(s) if crate::special_functions::moves_exponent_outside(&s.name()))
 }
 
 /// Apply `f` to every immediate `Expr` child, rebuilding the node; leaves are
-/// returned unchanged. Shared by the syntactic passes and `norm::simplify`
+/// returned unchanged. Shared by the syntactic passes and `normalize::simplify`
 /// (generic over `FnMut` so callers can thread state, e.g. a change flag).
 pub(crate) fn map_children<F: FnMut(&Expr) -> Expr>(e: &Expr, mut f: F) -> Expr {
     match e {

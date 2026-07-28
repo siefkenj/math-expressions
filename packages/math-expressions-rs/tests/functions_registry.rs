@@ -1,12 +1,12 @@
 //! Registry snapshot tests (tmp/IMPROVEMENT_PLAN.md Phase 1 step 1).
 //!
-//! The `crate::functions` registry replaced per-subsystem tables in
+//! The `crate::special_functions` registry replaced per-subsystem tables in
 //! `parse/`, `norm/`, `diff.rs`, and `integrate/`. These tests pin the
 //! derived views to the *historical* table contents, so registry edits that
 //! would silently change parser defaults or normalization behavior fail
 //! loudly. When a change is intentional, update the literals here.
 
-use math_expressions::functions;
+use math_expressions::special_functions;
 use math_expressions::precise::kernels;
 
 /// The text parser's default `applied_function_symbols` exactly as it stood
@@ -83,7 +83,7 @@ fn sorted(mut v: Vec<String>) -> Vec<String> {
 #[test]
 fn text_parser_defaults_match_historical_list() {
     assert_eq!(
-        sorted(functions::applied_text_names()),
+        sorted(special_functions::applied_text_names()),
         sorted(OLD_TEXT_APPLIED.iter().map(|s| s.to_string()).collect()),
     );
 }
@@ -91,7 +91,7 @@ fn text_parser_defaults_match_historical_list() {
 #[test]
 fn latex_parser_defaults_match_historical_list() {
     assert_eq!(
-        sorted(functions::applied_latex_names()),
+        sorted(special_functions::applied_latex_names()),
         sorted(OLD_LATEX_APPLIED.iter().map(|s| s.to_string()).collect()),
     );
 }
@@ -100,7 +100,7 @@ fn latex_parser_defaults_match_historical_list() {
 fn canonical_name_matches_historical_normalizations() {
     for (alias, canon) in OLD_NORMALIZATIONS {
         assert_eq!(
-            functions::canonical_name(alias),
+            special_functions::canonical_name(alias),
             Some(*canon),
             "normalization of {alias:?}"
         );
@@ -108,19 +108,19 @@ fn canonical_name_matches_historical_normalizations() {
     // Canonical spellings and unknown names return None — the old tables'
     // contract (callers use None to mean "leave the head untouched").
     for name in ["log", "sin", "asin", "csc", "sqrt", "notafunction", ""] {
-        assert_eq!(functions::canonical_name(name), None, "{name:?}");
+        assert_eq!(special_functions::canonical_name(name), None, "{name:?}");
     }
 }
 
 #[test]
 fn inverse_of_matches_historical_table() {
     for (name, inv) in OLD_INVERSES {
-        assert_eq!(functions::inverse_of(name), Some(*inv), "inverse of {name:?}");
+        assert_eq!(special_functions::inverse_of(name), Some(*inv), "inverse of {name:?}");
     }
     // Only the 12 canonical trig/hyperbolic spellings have notated inverses;
     // aliases (cosec) and inverse names themselves do not.
     for name in ["cosec", "asin", "arcsin", "log", "exp", "abs", "notafunction"] {
-        assert_eq!(functions::inverse_of(name), None, "{name:?}");
+        assert_eq!(special_functions::inverse_of(name), None, "{name:?}");
     }
 }
 
@@ -128,14 +128,14 @@ fn inverse_of_matches_historical_table() {
 fn move_exponent_matches_historical_set() {
     for name in OLD_MOVE_EXPONENT {
         assert!(
-            functions::moves_exponent_outside(name),
+            special_functions::moves_exponent_outside(name),
             "{name:?} must move exponents outside"
         );
     }
     // Spellings deliberately NOT in the historical set: `cosec` (alias of
     // csc but never listed), the inverse functions, and non-trig functions.
     for name in ["cosec", "asin", "arcsin", "exp", "sqrt", "abs", "notafunction"] {
-        assert!(!functions::moves_exponent_outside(name), "{name:?}");
+        assert!(!special_functions::moves_exponent_outside(name), "{name:?}");
     }
 }
 
@@ -160,7 +160,7 @@ fn precise_kernels_cover_historical_registry() {
     // registry (the Op::Call id space).
     let n = kernels::registry().len();
     assert_eq!(n, 14, "kernel-bearing definitions");
-    for def in functions::ALL {
+    for def in special_functions::ALL {
         if let Some(k) = def.kernel {
             let id = kernels::lookup(def.name).expect("kernel def resolves");
             assert!(std::ptr::eq(kernels::registry()[id as usize], k));
@@ -171,7 +171,7 @@ fn precise_kernels_cover_historical_registry() {
 #[test]
 fn registry_has_no_duplicate_names_or_aliases() {
     let mut seen = std::collections::HashSet::new();
-    for def in functions::ALL {
+    for def in special_functions::ALL {
         for key in std::iter::once(&def.name).chain(def.aliases) {
             assert!(seen.insert(*key), "{key:?} registered twice");
         }
@@ -183,7 +183,7 @@ fn parse_spellings_are_name_or_alias() {
     // Every parser-default spelling must be the def's own name or one of its
     // aliases — a typo here would silently register a phantom function.
     // (`re`/`im` capitalize in LaTeX; the capitalized forms are aliases.)
-    for def in functions::ALL {
+    for def in special_functions::ALL {
         for s in def.parse_text.iter().chain(def.parse_latex) {
             assert!(
                 *s == def.name || def.aliases.contains(s) || s.eq_ignore_ascii_case(def.name),
@@ -197,16 +197,16 @@ fn parse_spellings_are_name_or_alias() {
 #[test]
 fn derivative_templates_are_alias_aware() {
     // Spot checks against the historical diff.rs table, both spellings.
-    assert_eq!(functions::derivative_template("sin"), Some("cos(x)"));
+    assert_eq!(special_functions::derivative_template("sin"), Some("cos(x)"));
     assert_eq!(
-        functions::derivative_template("arcsin"),
-        functions::derivative_template("asin")
+        special_functions::derivative_template("arcsin"),
+        special_functions::derivative_template("asin")
     );
-    assert_eq!(functions::derivative_template("ln"), Some("1/x"));
-    assert_eq!(functions::derivative_template("log"), Some("1/x"));
+    assert_eq!(special_functions::derivative_template("ln"), Some("1/x"));
+    assert_eq!(special_functions::derivative_template("log"), Some("1/x"));
     // log10 historically had NO derivative template (prime-notation fallback).
-    assert_eq!(functions::derivative_template("log10"), None);
-    assert_eq!(functions::derivative_template("notafunction"), None);
+    assert_eq!(special_functions::derivative_template("log10"), None);
+    assert_eq!(special_functions::derivative_template("notafunction"), None);
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn latex_commands_match_historical_tables() {
         ("arccot", "arccot"),
     ] {
         assert_eq!(
-            functions::latex_command(spelling),
+            special_functions::latex_command(spelling),
             Some(cmd),
             "latex command for {spelling:?}"
         );
@@ -241,7 +241,7 @@ fn latex_commands_match_historical_tables() {
     // Never had control words: inverse hyperbolics, lowercase re/im, cosec,
     // shape-rendered functions (floor renders \lfloor, not \floor).
     for spelling in ["asinh", "arcsinh", "re", "im", "cosec", "floor", "conj", "trace"] {
-        assert_eq!(functions::latex_command(spelling), None, "{spelling:?}");
+        assert_eq!(special_functions::latex_command(spelling), None, "{spelling:?}");
     }
 }
 
@@ -254,16 +254,16 @@ fn eval_coverage_matches_historical_known_function() {
         "acsch", "acoth", "exp", "log", "log10", "sqrt", "cbrt", "abs", "sign", "conj", "re",
         "im", "arg", "floor", "ceil", "round", "trace", "factorial",
     ] {
-        assert!(functions::eval1(name).is_some(), "{name:?} must evaluate");
+        assert!(special_functions::eval1(name).is_some(), "{name:?} must evaluate");
     }
     // …the arity-2 list…
     for name in ["atan2", "nthroot", "nCr", "nPr", "mod"] {
-        assert!(functions::eval2(name).is_some(), "{name:?} must evaluate");
+        assert!(special_functions::eval2(name).is_some(), "{name:?} must evaluate");
     }
     // …and names deliberately NOT evaluable: aliases (evaluation runs on
     // canonicalized trees), det, erf, rootof.
     for name in ["arcsin", "ln", "cosec", "det", "erf", "rootof", "notafunction"] {
-        assert!(functions::eval1(name).is_none(), "{name:?}");
+        assert!(special_functions::eval1(name).is_none(), "{name:?}");
     }
 }
 
@@ -276,11 +276,11 @@ fn antiderivative_builders_cover_historical_table() {
         "atan", "arctan", "asin", "arcsin", "acos", "arccos",
     ] {
         assert!(
-            functions::antiderivative_builder(name).is_some(),
+            special_functions::antiderivative_builder(name).is_some(),
             "{name:?} lost its antiderivative"
         );
     }
     for name in ["sec", "csc", "asec", "abs", "cbrt", "notafunction"] {
-        assert!(functions::antiderivative_builder(name).is_none(), "{name:?}");
+        assert!(special_functions::antiderivative_builder(name).is_none(), "{name:?}");
     }
 }

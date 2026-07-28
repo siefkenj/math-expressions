@@ -4,7 +4,7 @@
 //! are checked semantically (`equals`); structural expectations (parity sign
 //! pulled out, gated rules NOT fired) are asserted directly.
 
-use math_expressions::norm::{canonicalize, fold_special_values};
+use math_expressions::normalize::{canonicalize, fold_special_values};
 use math_expressions::{equals, Expr, TextToAst};
 
 fn parse(s: &str) -> Expr {

@@ -82,7 +82,7 @@ impl Precise {
     /// form is hand-assembled) and NOT notation-aware (always `.`-decimal).
     /// It is a diagnostic/precision readout, deliberately outside the
     /// printers' round-trip contract; anything user-round-trippable must go
-    /// through `output::to_text`/`to_latex` on an `Expr` instead.
+    /// through `print::to_text`/`to_latex` on an `Expr` instead.
     pub fn to_decimal_string(&self, digits: usize) -> Option<String> {
         self.to_decimal_string_fmt(digits, DecimalFormat::Scientific)
     }
@@ -129,7 +129,7 @@ pub fn evaluate_to_precision(e: &Expr, digits: usize) -> Precise {
     }
     // Simplify FIRST, then check for free variables: bound notation like
     // `rootof(t^3 - t - 1, 0)` only becomes a closed leaf in canonical form.
-    let c = crate::norm::simplify_core(e);
+    let c = crate::normalize::simplify_core(e);
     if crate::ops::variables(&c)
         .iter()
         .any(|v| !crate::sym::is_constant_symbol(v))
