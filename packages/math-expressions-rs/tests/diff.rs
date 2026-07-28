@@ -70,6 +70,22 @@ fn chain_rule_and_function_table() {
 }
 
 #[test]
+fn applied_power_notation() {
+    // `f^n(x)` means `(f(x))^n` for trig/hyperbolic (n ≠ −1). It parses as
+    // `Apply(Pow(f, n), [x])` — a non-`Sym` application head — which the derivative
+    // must recognize instead of emitting an opaque `sin^2'(x)`.
+    d("sin^2(x)", "2*sin(x)*cos(x)");
+    d("cos^2(x)", "-2*sin(x)*cos(x)");
+    d("tan^2(x)", "2*tan(x)*sec(x)^2");
+    d("sec^3(x)", "3*sec(x)^3*tan(x)");
+    d("sinh^2(x)", "2*sinh(x)*cosh(x)");
+    // The playground's default equation: sin²x + cos²x + 1 ≡ 2, so d/dx = 0.
+    d("sin^2(x) + cos^2(x) + 1", "0");
+    // Chain rule still applies to the inner argument.
+    d("sin^2(2*x)", "4*sin(2*x)*cos(2*x)");
+}
+
+#[test]
 fn nested_composition() {
     d("sin(cos(x))", "-sin(x)*cos(cos(x))");
     d("exp(sin(x))", "cos(x)*exp(sin(x))");

@@ -109,6 +109,22 @@ fn power_rule(base: &Expr, exp: &Expr, var: &str) -> Expr {
 
 /// d/dx of a function application, by the chain rule.
 fn apply_rule(head: &Expr, args: &[Expr], var: &str) -> Expr {
+    // `f^n(x)` parses as `Apply(Pow(f, n), [x])` but denotes `(f(x))^n` for the
+    // functions whose exponent conventionally sits outside — trig / hyperbolic /
+    // log, with n ≠ −1 (the inverse-function convention). That is exactly the
+    // rewrite the canonical normalizer performs (`norm::canonicalize`,
+    // `norm::syntactic::pass_applied_functions`), but `derivative` does not
+    // canonicalize its input, so without this `sin^2(x)` reaches the opaque-prime
+    // fallback below and never differentiates. Rewrite to `(f(x))^n` and let the
+    // power + chain rules take over (the rewritten head is a bare `Sym`, so this
+    // recurses at most once).
+    if let (Expr::Pow(base, exp), [arg]) = (head, args) {
+        if is_move_exponent(base) && !is_neg_one(exp) {
+            let applied = Expr::Apply(base.clone(), vec![arg.clone()]);
+            return diff(&Expr::Pow(Box::new(applied), exp.clone()), var);
+        }
+    }
+
     // Only bare single-argument function symbols are handled specially.
     if let (Expr::Sym(f), [arg]) = (head, args) {
         let inner = diff(arg, var);
@@ -183,6 +199,17 @@ fn log_of(a: Expr) -> Expr {
 fn is_e(e: &Expr) -> bool {
     matches!(e, Expr::Sym(s) if s.name() == "e")
         || matches!(e, Expr::Const(crate::expr::MathConst::E))
+}
+
+/// Is `base` a function whose exponent moves outside, so `base^n(x)` means
+/// `(base(x))^n` (trig / hyperbolic / log)? Mirrors `norm::syntactic`.
+fn is_move_exponent(base: &Expr) -> bool {
+    matches!(base, Expr::Sym(s) if crate::functions::moves_exponent_outside(&s.name()))
+}
+
+/// Is `e` the integer literal −1 (the inverse-function exponent to leave alone)?
+fn is_neg_one(e: &Expr) -> bool {
+    matches!(e, Expr::Num(n) if *n == crate::num::Number::Int(-1))
 }
 
 /// Does `e` mention the variable `var` anywhere (full recursion — unlike

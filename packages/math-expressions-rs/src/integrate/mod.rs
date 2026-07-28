@@ -31,10 +31,31 @@ fn depends_on(e: &Expr, x: &str) -> bool {
 /// concern, as in Rubi/mathjs). `None` is the honest "no elementary form
 /// found within budget" — the caller can still integrate numerically via
 /// `integrate_to_precision`.
-pub fn integrate(f: &Expr, x: &str, _assumptions: &Assumptions) -> Option<Expr> {
+pub fn integrate(f: &Expr, x: &str, assumptions: &Assumptions) -> Option<Expr> {
     let fc = canonicalize(f);
+    if let Some(res) = integrate_verified(&fc, x, assumptions) {
+        return Some(res);
+    }
+    // Retry on a heuristically simplified integrand. `canonicalize` is
+    // assumption-free and does no trig/log identities, so a sum like
+    // `sin^2 x + cos^2 x + 1` reaches `integ` as an unintegrable term-by-term
+    // split even though it collapses to the constant `2`. `simplify` applies the
+    // identity layer; if it actually changed the shape, integrating the result
+    // can succeed where the raw form could not. This runs only on the failure
+    // path, so the common case pays nothing.
+    let fs = crate::norm::simplify(&fc);
+    if fs != fc {
+        return integrate_verified(&fs, x, assumptions);
+    }
+    None
+}
+
+/// Integrate an already-canonical (or simplified) `fc` and gate the result by
+/// differentiation. Returns `None` if no antiderivative is found OR the gate
+/// rejects the candidate.
+fn integrate_verified(fc: &Expr, x: &str, assumptions: &Assumptions) -> Option<Expr> {
     let mut fuel = crate::resource_limits::current().max_integration_steps;
-    let result = integ(&fc, x, &mut fuel)?;
+    let result = integ(fc, x, &mut fuel)?;
     // The gate (plan §2c): verify by differentiation. Accept iff the sampled
     // `equals` OR the certified exact stages (FULL_SIMPLIFY S1: structural
     // cancellation, exact constants, rational normal form) confirm
@@ -47,9 +68,9 @@ pub fn integrate(f: &Expr, x: &str, _assumptions: &Assumptions) -> Option<Expr> 
     // reject, and on true zeros it burns its full arbitrary-precision budget
     // before returning Unknown (measured ~35× suite slowdown).
     let df = crate::diff::derivative(&result, x);
-    if !crate::equality::equals(&df, &fc, &crate::equality::EqOptions::default()) {
+    if !crate::equality::equals(&df, fc, &crate::equality::EqOptions::default()) {
         let residual = Expr::Add(vec![df, Expr::Neg(Box::new(fc.clone()))]);
-        if !crate::exact::certified_zero(&residual, _assumptions) {
+        if !crate::exact::certified_zero(&residual, assumptions) {
             return None;
         }
     }
@@ -149,6 +170,40 @@ fn over(e: Expr, b: &Expr) -> Expr {
     }
 }
 
+/// `∫ fname(u)^n dx` for `n ≥ 0` and `u = a + b·x` linear, via the standard
+/// power-reduction recursion. `fname` is `"sin"` or `"cos"`. The result is
+/// gate-verified by the caller, so this only needs to be correct, not canonical.
+fn trig_power_integral(fname: &str, u: &Expr, b: &Expr, n: i64, x: &str) -> Expr {
+    // ∫ f(u)^0 dx = ∫ 1 dx = x.
+    if n == 0 {
+        return Expr::sym(x);
+    }
+    // ∫ sin(u) dx = −cos(u)/b ;  ∫ cos(u) dx = sin(u)/b.
+    if n == 1 {
+        return match fname {
+            "sin" => over(mul(vec![int(-1), apply("cos", u.clone())]), b),
+            _ => over(apply("sin", u.clone()), b),
+        };
+    }
+    // Boundary term ∓ f(u)^(n−1)·g(u)/(n·b): cofunction `g` and sign differ for
+    // sin (−, g=cos) vs cos (+, g=sin).
+    let (cofn, sign): (&str, i64) = if fname == "sin" { ("cos", -1) } else { ("sin", 1) };
+    let boundary = over(
+        mul(vec![
+            int(sign),
+            pow(apply(fname, u.clone()), int(n - 1)),
+            apply(cofn, u.clone()),
+            pow(int(n), int(-1)),
+        ]),
+        b,
+    );
+    let recursive = mul(vec![
+        Expr::Num(Number::rat(n - 1, n)),
+        trig_power_integral(fname, u, b, n - 2, x),
+    ]);
+    add(vec![boundary, recursive])
+}
+
 /// The elementary table (Rubi cluster 1 + pervasive `a + b·x` linear
 /// substitution): every row is `∫ g(u) dx = G(u)/b` for linear `u`.
 fn table_match(e: &Expr, x: &str) -> Option<Expr> {
@@ -171,7 +226,7 @@ fn table_match(e: &Expr, x: &str) -> Option<Expr> {
             if let Some(b) = linear_coeff(base, x) {
                 if !depends_on(exp, x) {
                     if matches!(exp, Expr::Num(n) if n.to_f64() == -1.0) {
-                        return Some(over(apply("ln", base.clone()), &b));
+                        return Some(over(apply("log", base.clone()), &b));
                     }
                     // u^n → u^(n+1)/(n+1): exponent must be a number ≠ −1.
                     if let Expr::Num(n) = exp {
@@ -197,7 +252,7 @@ fn table_match(e: &Expr, x: &str) -> Option<Expr> {
                     if matches!(base, Expr::Num(n) if n.is_positive() && !n.is_one()) {
                         let f = mul(vec![
                             e.clone(),
-                            pow(apply("ln", base.clone()), int(-1)),
+                            pow(apply("log", base.clone()), int(-1)),
                         ]);
                         return Some(over(f, &b));
                     }
@@ -232,6 +287,26 @@ fn table_match(e: &Expr, x: &str) -> Option<Expr> {
                                 return Some(over(cot, &b));
                             }
                             _ => {}
+                        }
+                    }
+                }
+            }
+            // Positive integer powers of sin/cos with a linear argument, by the
+            // reduction  ∫sinⁿ(u) dx = −sinⁿ⁻¹(u)·cos(u)/(n·b) + (n−1)/n·∫sinⁿ⁻²(u) dx
+            // (and the sign-flipped cos analogue), bottoming out at ∫1 = x and
+            // ∫sin(u) dx = −cos(u)/b. The `∫sin²x` case is why an un-simplified
+            // `sin²x + cos²x` used to fail entirely.
+            if let (Expr::Apply(h, args), Expr::Num(Number::Int(n))) = (base, exp) {
+                // Bounded: the reduction expands to ~n/2 terms in one shot
+                // (outside the step-fuel loop), so refuse absurd exponents rather
+                // than build a huge tree. 16 covers every realistic case.
+                if (2..=16).contains(n) {
+                    if let (Expr::Sym(f), [u]) = (&**h, args.as_slice()) {
+                        let name = f.name();
+                        if name == "sin" || name == "cos" {
+                            if let Some(b) = linear_coeff(u, x) {
+                                return Some(trig_power_integral(&name, u, &b, *n, x));
+                            }
                         }
                     }
                 }

@@ -182,6 +182,27 @@ fn sec_squared_shapes() {
 }
 
 #[test]
+fn trig_powers() {
+    // Power-reduction for ∫sinⁿ(u)/∫cosⁿ(u) with a linear argument — previously
+    // "no elementary form found".
+    assert_integrates_to("sin(x)^2", "(x - sin(x)*cos(x))/2");
+    assert_integrates_to("cos(x)^2", "(x + sin(x)*cos(x))/2");
+    assert_integrates_to("sin(x)^3", "cos(x)^3/3 - cos(x)");
+    assert_integrates_to("cos(x)^3", "sin(x) - sin(x)^3/3");
+    // Linear inner argument u = 2x carries the 1/b factor.
+    assert_integrates_to("sin(2x)^2", "x/2 - sin(2x)*cos(2x)/4");
+}
+
+#[test]
+fn simplify_collapsing_integrands() {
+    // Sums that a trig identity collapses to something trivially integrable.
+    // (The pieces also integrate individually now, but this pins the behavior;
+    // the second row is the playground's default equation.)
+    assert_integrates_to("sin(x)^2 + cos(x)^2", "x");
+    assert_integrates_to("sin(x)^2 + cos(x)^2 + 1", "2x");
+}
+
+#[test]
 fn u_substitution() {
     assert_integrates_to("x * exp(x^2)", "exp(x^2)/2");
     assert_integrates_to("2x/(x^2+1)", "ln(x^2+1)");

@@ -132,6 +132,20 @@ sum/product/leibniz skeletons or the i18n helpers. Extend Phase 2's scope note.
 - **⬜ OPEN** 4 independent sampling mechanisms (equality/numeric.rs,
   finite_field.rs, exact.rs `SAMPLE_POINTS`, diverge.rs `GRID`) — a shared
   sample-point policy module is deferred.
+- **✅ DONE (2026-07-22)** `equals` false-negatives on exact constant
+  identities. `equals(1/2, cos(π/3))` returned **false** — two pre-existing
+  bugs compounding: finite-field evaluates `cos(π/3)` to a meaningless ℤ/pℤ
+  value and *rejects*, and the numeric sampler evaluates it to
+  `0.5000…1 − 0i` and *rejects*. Added an accept-only **certified-exact
+  stage** (`equality/api.rs::certified_equal`) *before* both rejection stages:
+  variable-free operands get `exact_eval(a − b)` (the S1 tower), so
+  `cos(π/3) = 1/2`, `√8 = 2√2`, `tan(π/4) = 1`, `sin(π/6)+cos(π/3) = 1` are now
+  recognized. Sound (accept-only → no false positives; `pi ≠ 3.14` etc. still
+  reject). **Perf: verified negligible** — 16.5 ms → 16.3 ms per full
+  824-pair corpus pass (using the lean `exact_eval` path, not the
+  `expand`/`ratform`-heavy `certified_zero`, which had cost +21%); the
+  integrate gate is unaffected (its `equals(F′,f)` calls involve variables, so
+  the stage is gated off). Regression in `tests/architecture_fixes.rs`.
 
 ## 6. Traversal architecture — [MOSTLY TRACKED: IMPROVEMENT Phase 3/4, STACK_SAFETY]
 

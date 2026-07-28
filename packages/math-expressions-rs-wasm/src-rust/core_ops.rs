@@ -80,6 +80,18 @@ impl Expression {
         self.derive(rust_simplify(&self.0))
     }
 
+    /// Aggressive simplification beyond [`Self::simplify`] (which stays
+    /// byte-compatible with the JS library): folds `exp(ln x) → x`, trig
+    /// special values (`cos(π/3) → 1/2`), rational cancellation, and the other
+    /// sound rewrites JS never had (FULL_SIMPLIFY_PLAN). Always value-equal to
+    /// the input.
+    pub fn full_simplify(&self) -> Expression {
+        self.derive(math_expressions::full_simplify(
+            &self.0,
+            &Assumptions::new(),
+        ))
+    }
+
     /// Simplify under the given `assumptions` — each a relation in text syntax
     /// (e.g. `"x > 0"`, `"n elementof Z"`). Assumptions that fail to parse are
     /// ignored. With an empty list this equals [`Self::simplify`].

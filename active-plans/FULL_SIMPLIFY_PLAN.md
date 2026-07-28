@@ -46,15 +46,30 @@
 > commons (gate rejects, input returned unchanged); Kronecker budget (200k
 > combos) is a hardcoded const, not a `ResourceLimits` field.
 >
-> **Deferred consequences** (behavior-preserving refactors, not blocking):
-> collapse `diverge.rs` PiLin onto `exact::is_zero`; matrix eigen residual
-> check → `is_zero`; matrix eigenvalue root ladder → `factor`; integrate I1 →
-> `ratform`. True multivariate irreducible factorization (beyond `factor_terms`
-> content) is not yet implemented.
+> **`full_simplify` entry point — LANDED EARLY (2026-07-22, MVP form).**
+> `norm::full_simplify(e, &Assumptions) -> Expr` (`src/norm/full.rs`,
+> `tests/full_simplify.rs`; wasm `Expression.full_simplify()`). This is the
+> *staged* form of the S7 driver: it iterates the landed sound passes —
+> `simplify` → `fold_special_values` (S3) → `reduce_rational` (S2) — to a
+> fixpoint, rather than doing the cost-directed beam search over a complexity
+> measure. Every pass is sound and canonical-in/out, so the result is always
+> value-equal to the input; S7 upgrades the *strategy* (assumption-gated rules,
+> expand-vs-factor scoring), not the soundness. Exposes `exp(ln x) → x`,
+> `cos(π/3) → 1/2`, `(x²−1)/(x−1) → x+1`, etc. — the folds `simplify` withholds
+> to stay JS-corpus-compatible. (Also fixed here: `exact::to_expr` now emits
+> `sqrt(r)` not `r^(1/2)`, so its surds unify with the canonical form.)
 >
-> **Next: S5** (assumption/sign propagation), **S6** (radical denesting),
-> **S7** (trig restructuring + the cost-directed `full_simplify` driver — the
-> chunk after which the `full_simplify` wasm entry point lands). See
+> **Deferred consequences:** ✅ done — `diverge.rs` PiLin collapsed onto
+> `exact::exact_eval`; matrix pivot/discriminant zero-tests → `exact::
+> certified_zero`; ±1-ulp unified as `MpFix::excludes_zero`. Still deferred:
+> matrix eigenvalue root ladder → `factor` (today's `factor` is weaker — S4
+> tail); integrate I1 → `ratform` (different representations). True
+> multivariate irreducible factorization (beyond `factor_terms` content) is not
+> yet implemented.
+>
+> **Next: S5** (assumption/sign propagation — will let `full_simplify` consult
+> its `&Assumptions`), **S6** (radical denesting), **S7** (trig restructuring +
+> upgrading the `full_simplify` fixpoint to the cost-directed driver). See
 > `WHATS_LEFT.md` §B.5.
 
 Status: DRAFT (not started). Chunked so every phase lands independently,

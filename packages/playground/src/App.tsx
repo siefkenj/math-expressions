@@ -65,7 +65,7 @@ const SHOWCASE: { label: string; expr: string; chain: string }[] = [
     chain: `${BASE_VAR}.integrate("x")`,
   },
   {
-    label: "∫ 1/x dx  →  ln|x|  (Rust only)",
+    label: "∫ 1/x dx  →  log x  (Rust only)",
     expr: "1/x",
     chain: `${BASE_VAR}.integrate("x")`,
   },

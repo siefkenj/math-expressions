@@ -187,12 +187,13 @@ impl Exact {
                 ));
             }
             if !rad.is_one() {
-                let radn = Expr::Num(Number::from_bigrational(BigRational::from_integer(rad.clone())));
-                let half = Expr::Num(Number::from_bigrational(BigRational::new(
-                    BigInt::one(),
-                    BigInt::from(2),
-                )));
-                factors.push(crate::norm::pow(radn, half));
+                let radn =
+                    Expr::Num(Number::from_bigrational(BigRational::from_integer(rad.clone())));
+                // `sqrt(rad)` (an `Apply`), not `rad^(1/2)` (a `Pow`): the
+                // former is the canonical surd spelling the parsers/simplify
+                // use, so `to_expr` output unifies with the rest of the system
+                // (e.g. `full_simplify(cos(π/6))` == `sqrt(3)/2`).
+                factors.push(Expr::Apply(Box::new(Expr::sym("sqrt")), vec![radn]));
             }
             terms.push(crate::norm::mul(factors));
         }

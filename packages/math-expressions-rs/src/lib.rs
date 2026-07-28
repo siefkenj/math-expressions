@@ -84,7 +84,9 @@ pub use matrix::{
     char_poly, cross_prod, det, dot_prod, eigenvalues, eigenvectors, matmul, matrix_inverse,
     nullspace, rank, rref, trace, transpose, vector_add, vector_sub, EigenPair,
 };
-pub use norm::{canonicalize, desugar_units, expand, simplify, simplify_logical, simplify_with};
+pub use norm::{
+    canonicalize, desugar_units, expand, full_simplify, simplify, simplify_logical, simplify_with,
+};
 pub use num::Number;
 pub use ode::{solve_ode_exprs, solve_ode_with, OdeSolution};
 pub use ops::{

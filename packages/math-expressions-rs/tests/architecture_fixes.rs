@@ -67,6 +67,26 @@ fn ode_dense_output_at_nan_does_not_panic() {
     assert!((sol.at(1.0)[0] - std::f64::consts::E).abs() < 1e-6);
 }
 
+/// `equals` must recognize exact constant identities the numeric sampler and
+/// finite-field stages false-reject (`cos(π/3) = 1/2`, surds), via the
+/// accept-only certified-exact stage — without breaking true inequalities.
+#[test]
+fn equals_certifies_constant_identities() {
+    let eq = |a: &str, b: &str| math_expressions::equals(&parse(a), &parse(b), &Default::default());
+    // Previously false negatives (numeric ill-conditioning / finite-field):
+    assert!(eq("1/2", "cos(pi/3)"));
+    assert!(eq("cos(pi/3)", "1/2"));
+    assert!(eq("sqrt(8)", "2*sqrt(2)"));
+    assert!(eq("tan(pi/4)", "1"));
+    assert!(eq("sin(pi/6) + cos(pi/3)", "1"));
+    assert!(eq("exp(ln(3))", "3"));
+    // Must NOT introduce false positives (accept-only, sound):
+    assert!(!eq("cos(pi/3)", "1/3"));
+    assert!(!eq("pi", "3.14"));
+    assert!(!eq("sqrt(2)", "1.41"));
+    assert!(!eq("sqrt(2) + sqrt(3)", "sqrt(5)"));
+}
+
 /// Pivot/rank decisions must use *certified* zero, not syntactic zero: an
 /// entry that is symbolically zero (`sqrt(8) - 2 sqrt(2)`) must not count as
 /// a nonzero pivot.

@@ -20,6 +20,7 @@
 
 mod canonicalize;
 mod constructors;
+mod full;
 mod matrix_ops;
 mod units;
 
@@ -40,6 +41,7 @@ pub use special_values::fold_special_values;
 pub use syntactic::normalize_syntactic;
 
 pub use canonicalize::canonicalize;
+pub use full::full_simplify;
 pub use units::desugar_units;
 pub(crate) use constructors::{add, mul, pow, split_coeff};
 pub(crate) use matrix_ops::{identity_matrix, is_matrix_valued, matmul_literal};
