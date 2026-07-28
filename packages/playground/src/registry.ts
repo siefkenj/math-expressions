@@ -396,11 +396,17 @@ export const REGISTRY: OpEntry[] = [
           ),
         ),
     },
-    null,
     {
-      unsupportedReason: {
-        rust: "the Rust port exposes integrate_to_precision, not a bare numeric integral",
-      },
+      // Certified quadrature reduced to an f64 (null = couldn't certify).
+      call: "integrate_numerically(v, a, b) — certified",
+      run: (h, a) =>
+        num(
+          h.integrate_numerically(
+            needStr(a[0], "variable"),
+            needNum(a[1], "lower"),
+            needNum(a[2], "upper"),
+          ) ?? null,
+        ),
     },
   ),
 
@@ -620,6 +626,11 @@ export const CURATED_RUST_METHODS: ReadonlySet<string> = new Set([
   "normalize_function_names",
   "derivative",
   "integrate",
+  // Covered by the curated `integrateNumerically` op (camelCase chain id), whose
+  // Rust side dispatches to `integrate_numerically` — list it so the dynamic
+  // "Other" section treats it as already-surfaced. (The case-folding resolver in
+  // wasmApi.ts would otherwise dual-wire it under `integrateNumerically` too.)
+  "integrate_numerically",
   "variables",
   "functions",
   "equals",

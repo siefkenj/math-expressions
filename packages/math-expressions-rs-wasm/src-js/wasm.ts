@@ -36,6 +36,13 @@ export interface WasmExpression {
 
   derivative(variable: string): WasmExpression;
   integrate(variable: string): WasmExpression | undefined;
+  /** Numeric definite integral over `[lower, upper]`, backed by certified
+   * quadrature; `undefined` when it cannot be certified (never a wrong value). */
+  integrate_numerically(
+    variable: string,
+    lower: number,
+    upper: number,
+  ): number | undefined;
 
   simplify(): WasmExpression;
   simplify_with_assumptions(assumptions: string[]): WasmExpression;

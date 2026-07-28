@@ -2,6 +2,7 @@
 //! evaluation of constant expressions.
 
 use super::Expression;
+use math_expressions::{Expr, Number};
 use wasm_bindgen::prelude::*;
 
 /// How `evaluate_to_precision` renders its digits (mirrors the core
@@ -58,6 +59,23 @@ impl Expression {
     ) -> Option<String> {
         math_expressions::precise::integrate_to_precision(&self.0, var, &a.0, &b.0, digits)
             .to_decimal_string(digits)
+    }
+
+    /// Best-effort numeric definite integral over `[lower, upper]` — the port of
+    /// the JS `integrateNumerically(var, lower, upper)`. Backed by the CERTIFIED
+    /// `integrate_to_precision` reduced to an `f64`: returns the value when it
+    /// can be certified, `undefined` when it cannot. This is the honest
+    /// divergence from JS, which always returns a (possibly inaccurate) estimate
+    /// — here a hard/divergent integrand yields `undefined` rather than a
+    /// silently-wrong number.
+    ///
+    /// 10 significant digits (not the ≤13 certified max): ample for an f64
+    /// estimate, with margin so near-cancellation cases — e.g. `∫₀^π sin`, which
+    /// fails to certify at 13 — still return a value.
+    pub fn integrate_numerically(&self, var: &str, lower: f64, upper: f64) -> Option<f64> {
+        let a = Expr::Num(Number::from_f64(lower));
+        let b = Expr::Num(Number::from_f64(upper));
+        math_expressions::precise::integrate_to_precision(&self.0, var, &a, &b, 10).to_f64()
     }
 
     /// Three-way definite-integral analysis (DIVERGENCE_PLAN): JSON

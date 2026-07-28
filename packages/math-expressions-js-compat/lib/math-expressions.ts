@@ -162,6 +162,14 @@ class Expression {
   integrate(v) {
     return wrap(this._w.integrate(varName(v)), this.context);
   }
+  // Best-effort numeric definite integral. Unlike the original JS (which always
+  // returns an uncertified estimate), this is backed by the CERTIFIED
+  // quadrature and returns `NaN` when the value cannot be certified — never a
+  // silently-wrong number.
+  integrateNumerically(v, lower, upper) {
+    const r = this._w.integrate_numerically(varName(v), Number(lower), Number(upper));
+    return r === undefined ? NaN : r;
+  }
 
   // ---- normalization / simplification ----
   simplify() {
@@ -348,7 +356,6 @@ for (const name of [
   "derivative_with_story",
   "derivative_story",
   "derivativeStory",
-  "integrateNumerically",
   "toXML",
   "toGLSL",
   "toMathjs",

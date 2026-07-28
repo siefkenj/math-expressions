@@ -31,13 +31,14 @@ pub fn full_simplify(e: &Expr, _a: &Assumptions) -> Expr {
     let max_rounds = crate::resource_limits::current()
         .max_simplify_rounds
         .max(1);
-    let mut cur = crate::norm::simplify(e);
+    let mut cur = crate::norm::simplify_base(e);
     for _ in 0..max_rounds {
-        // Each pass is sound and canonical-in/out; re-`simplify` after them so
-        // the next round sees a fully normalized tree.
+        // Each pass is sound and canonical-in/out; re-run the *base* simplify
+        // after them so the next round sees a fully normalized tree. (Must be
+        // the base, not the public `simplify`, which now *is* `full_simplify`.)
         let folded = crate::norm::fold_special_values(&cur);
         let reduced = crate::ops::reduce_rational(&folded);
-        let next = crate::norm::simplify(&reduced);
+        let next = crate::norm::simplify_base(&reduced);
         if next == cur {
             break;
         }

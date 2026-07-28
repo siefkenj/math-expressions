@@ -313,9 +313,19 @@ code.block {
   padding-top: 4px;
 }
 .palette-ops {
+  /* Deterministic row height so the "Other" collapse clamps to exact rows:
+     each op button is 16px line-box + 4px padding + 2px border = 22px. */
+  --op-btn-h: 22px;
+  --op-gap: 5px;
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: var(--op-gap);
+}
+/* Collapsed "Other": at most 3 rows. The +2px lands the cut just inside the
+   4th-row gap (never on a button), and overflow hides the rest. */
+.palette-ops.collapsed {
+  max-height: calc(3 * var(--op-btn-h) + 2 * var(--op-gap) + 2px);
+  overflow: hidden;
 }
 .op-btn {
   display: inline-flex;
@@ -323,12 +333,26 @@ code.block {
   gap: 4px;
   font-family: var(--mono);
   font-size: 11px;
+  line-height: 16px;
   background: var(--code-bg);
   border: 1px solid var(--border);
   color: var(--fg);
   border-radius: 5px;
   padding: 2px 7px;
   cursor: pointer;
+}
+.palette-more {
+  margin-top: 6px;
+  font-size: 10.5px;
+  font-family: var(--mono);
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+}
+.palette-more:hover {
+  text-decoration: underline;
 }
 .op-btn:hover {
   border-color: var(--accent);

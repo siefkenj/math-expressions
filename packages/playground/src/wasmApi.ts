@@ -243,7 +243,10 @@ function makeRun<H>(
 }
 
 /** Turn one parsed method into an {@link OpEntry}, or null if unrepresentable. */
-function opFromMethod(m: RawMethod, jsHas: (name: string) => boolean): OpEntry | null {
+function opFromMethod(
+  m: RawMethod,
+  jsNameFor: (wasmName: string) => string | null,
+): OpEntry | null {
   const plan = returnPlanOf(m.ret);
   if (!plan) return null;
 
@@ -258,21 +261,27 @@ function opFromMethod(m: RawMethod, jsHas: (name: string) => boolean): OpEntry |
     args.push({ name: p.name.replace(/^_/, ""), kind, optional: p.optional });
   }
 
-  const insertText = `${m.name}(${args.map((s) => PLACEHOLDER[s.kind]).join(", ")})`;
+  // The wasm method is always called under its own (snake_case) name. The JS
+  // side may expose the same operation under a differently-cased spelling
+  // (`integrate_numerically` → `integrateNumerically`); when it does, we surface
+  // the op under the JS-provided name — that is the one users of the JS library
+  // know — and dispatch each engine to its own spelling.
+  const jsName = jsNameFor(m.name);
+  const id = jsName ?? m.name;
+  const argSig = args.map((s) => s.name).join(", ");
+  const insertText = `${id}(${args.map((s) => PLACEHOLDER[s.kind]).join(", ")})`;
+
   const rust: EngineOp<RustExpr> = {
-    call: `${m.name}(${args.map((s) => s.name).join(", ")})`,
+    call: `${m.name}(${argSig})`,
     run: makeRun<RustExpr>(m.name, args, plan),
   };
-  // Auto-wire the JS engine only when its Expression exposes a same-named
-  // method (the Rust port mirrors JS names). Otherwise mark it JS-unsupported —
-  // the palette then renders it "rust-only", exactly like curated `factor`.
-  const js: EngineOp<JsExpr> | null = jsHas(m.name)
-    ? { call: `${m.name}(${args.map((s) => s.name).join(", ")})`, run: makeRun<JsExpr>(m.name, args, plan) }
+  const js: EngineOp<JsExpr> | null = jsName
+    ? { call: `${jsName}(${argSig})`, run: makeRun<JsExpr>(jsName, args, plan) }
     : null;
 
   return {
-    id: m.name,
-    display: m.name,
+    id,
+    display: id,
     category: "Other",
     args,
     returns: plan.returns,
@@ -282,7 +291,7 @@ function opFromMethod(m: RawMethod, jsHas: (name: string) => boolean): OpEntry |
     rust,
     unsupportedReason: js
       ? undefined
-      : { js: "auto-generated from the Rust WASM API; the JS library has no method of this name" },
+      : { js: "auto-generated from the Rust WASM API; the JS library has no method of this name (even under case folding)" },
   };
 }
 
@@ -304,13 +313,16 @@ export interface DynamicOpsReport {
  * a method actually exists on the *live* wasm `Expression` prototype. A method is
  * only surfaced when it is in both, so a stale or hand-edited `.d.ts` declaring a
  * method the running wasm lacks can never produce a dead palette button.
- * `jsHas` likewise reports whether the canonical JS `Expression` exposes the
- * method, so shared methods light up on both engines.
+ * `jsNameFor` maps a wasm (snake_case) method to the canonical JS `Expression`
+ * method that is the same operation — an exact match, or one differing only by
+ * case/separator folding (`integrate_numerically` → `integrateNumerically`).
+ * When it resolves, the op is surfaced under the JS-provided name and both
+ * engines light up; when it returns null, the op is rust-only.
  */
 export function buildDynamicOpsReport(
   dts: string,
   rustHas: (name: string) => boolean,
-  jsHas: (name: string) => boolean,
+  jsNameFor: (wasmName: string) => string | null,
 ): DynamicOpsReport {
   const ops: OpEntry[] = [];
   const skipped: { name: string; reason: string }[] = [];
@@ -323,9 +335,14 @@ export function buildDynamicOpsReport(
       });
       continue;
     }
-    const op = opFromMethod(m, jsHas);
-    if (op) ops.push(op);
-    else skipped.push({ name: m.name, reason: `signature "(${m.params.map((p) => p.type).join(", ")}) => ${m.ret}" is not chainable in the playground` });
+    const op = opFromMethod(m, jsNameFor);
+    if (!op) {
+      skipped.push({ name: m.name, reason: `signature "(${m.params.map((p) => p.type).join(", ")}) => ${m.ret}" is not chainable in the playground` });
+      continue;
+    }
+    // A curated op may already own the JS-provided name (e.g. `integrateNumerically`).
+    if (REGISTRY_BY_ID.has(op.id)) continue;
+    ops.push(op);
   }
   ops.sort((a, b) => a.id.localeCompare(b.id));
   return { ops, skipped };
@@ -335,9 +352,9 @@ export function buildDynamicOpsReport(
 export function buildDynamicOps(
   dts: string,
   rustHas: (name: string) => boolean,
-  jsHas: (name: string) => boolean,
+  jsNameFor: (wasmName: string) => string | null,
 ): OpEntry[] {
-  const { ops, skipped } = buildDynamicOpsReport(dts, rustHas, jsHas);
+  const { ops, skipped } = buildDynamicOpsReport(dts, rustHas, jsNameFor);
   if (skipped.length)
     console.info(
       `[playground] ${ops.length} wasm methods auto-added to "Other"; ` +
@@ -356,4 +373,29 @@ export function collectMethodNames(handle: object): Set<string> {
     proto = Object.getPrototypeOf(proto);
   }
   return names;
+}
+
+/** Fold an identifier to case/separator-insensitive form for matching
+ * `integrate_numerically` ↔ `integrateNumerically`. */
+function normalizeId(s: string): string {
+  return s.replace(/_/g, "").toLowerCase();
+}
+
+/**
+ * Build a `jsNameFor` resolver from the set of live JS `Expression` method
+ * names: given a wasm (snake_case) method, return the JS method that is the same
+ * operation — an exact match, or one differing only by case/separator folding —
+ * or null when the JS library has no counterpart. Exact matches win over folded
+ * ones so an engine that genuinely shares the snake_case spelling is preferred.
+ */
+export function jsNameResolver(
+  jsNames: Set<string>,
+): (wasmName: string) => string | null {
+  const byFold = new Map<string, string>();
+  for (const n of jsNames) {
+    const k = normalizeId(n);
+    if (!byFold.has(k)) byFold.set(k, n); // first spelling wins; JS rarely collides
+  }
+  return (wasmName) =>
+    jsNames.has(wasmName) ? wasmName : byFold.get(normalizeId(wasmName)) ?? null;
 }

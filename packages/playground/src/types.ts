@@ -88,6 +88,9 @@ export interface RustExpr {
   is_analytic(allow_abs: boolean, allow_arg: boolean, allow_relation: boolean): boolean;
   /** Indefinite integral in `v`; `undefined` when no elementary form is found. */
   integrate(v: string): RustExpr | undefined;
+  /** Numeric definite integral over `[lower, upper]`, backed by certified
+   * quadrature; `undefined` when it cannot be certified (never a wrong value). */
+  integrate_numerically(v: string, lower: number, upper: number): number | undefined;
 }
 
 /** The Rust wasm-bindgen module (glue), loaded at runtime. */

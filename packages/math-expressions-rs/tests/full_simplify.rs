@@ -88,9 +88,13 @@ fn meaning_preserving_on_reliable_inputs() {
 }
 
 #[test]
-fn simplify_itself_is_unchanged_oracle() {
-    // The whole point: `simplify` stays byte-compatible with the JS corpus and
-    // does NOT fold exp(ln x) — only `full_simplify` does.
-    assert_ne!(simplify(&p("exp(ln(x))")), p("x"));
-    assert_eq!(fs("exp(ln(x))"), p("x"));
+fn simplify_now_folds_like_full_simplify() {
+    // `simplify` is now the aggressive simplifier: it folds `exp(ln x) → x` and
+    // the trig/exp/log special values (previously only `full_simplify` did), so
+    // the two are equivalent. (The JS-corpus-compatible base is retained
+    // internally as `simplify_base`, but is no longer the public `simplify`.)
+    assert_eq!(simplify(&p("exp(ln(x))")), p("x"));
+    for s in ["exp(ln(x))", "sin(pi/6)", "ln(1) + e^0", "cos(0)*x"] {
+        assert_eq!(simplify(&p(s)), fs(s), "simplify != full_simplify on {s:?}");
+    }
 }

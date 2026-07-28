@@ -121,8 +121,24 @@ fn collect_js_gaps(assert_invariants: bool) -> BTreeSet<String> {
                 && !involves_nonfinite(&parsed)
                 && !involves_nonfinite(&simplified);
             if judgeable {
-                let preserves =
-                    agrees || catch(|| equals(&simplified, &parsed, &opts)).unwrap_or(false);
+                let preserves = agrees
+                    || catch(|| equals(&simplified, &parsed, &opts)).unwrap_or(false)
+                    // Sound special-value folds (`sin(π)·x → 0`, `exp(ln x) → x`, …)
+                    // that the now-aggressive `simplify` performs are correct, but
+                    // the float-sampling `equals` cannot confirm them — `sin(π)`
+                    // samples as ~1e-16, not exactly 0 — and JS never folded them so
+                    // `agrees` is false too. Certify meaning-preservation via the
+                    // difference instead: `input − simplified` must itself simplify
+                    // to 0. (Only `simplify` knows these special values, so this is
+                    // the strongest available oracle here.)
+                    || catch(|| {
+                        let diff = Expr::Add(vec![
+                            parsed.clone(),
+                            Expr::Neg(Box::new(simplified.clone())),
+                        ]);
+                        matches!(simplify(&diff), Expr::Num(n) if n.is_zero())
+                    })
+                    .unwrap_or(false);
                 assert!(
                     preserves,
                     "simplify changed the meaning of {:?}: got {:?}",

@@ -28,11 +28,28 @@ use super::{add, canonicalize, mul, split_coeff};
 // round strictly makes progress or we stop, so this only bounds pathological
 // non-convergence on adversarial input; real inputs converge in 1–2 rounds.
 
-/// Simplify to a meaning-preserving fixpoint (see module docs), returned in
-/// display form (`norm::present`): polynomial term order, division instead of
-/// negative exponents, explicit `Neg`. Internal code that needs the canonical
-/// shape uses [`simplify_core`] instead.
+/// Simplify to a meaning-preserving fixpoint, returned in display form
+/// (`norm::present`): polynomial term order, division instead of negative
+/// exponents, explicit `Neg`.
+///
+/// This is now the **aggressive** simplifier — it always runs [`full_simplify`]:
+/// the base canonical simplify plus the sound special-value (`exp(ln x) → x`,
+/// trig at the π/12 lattice, `ln 1`, …) and rational-cancellation passes,
+/// iterated to a fixpoint. (Previously `simplify` was the base only, kept
+/// byte-compatible with the JS `.simplify()` corpus; the aggressive form was the
+/// opt-in `full_simplify`.) Internal code that specifically needs the base
+/// behavior uses [`simplify_base`]; code that needs the canonical (non-display)
+/// shape uses [`simplify_core`].
 pub fn simplify(e: &Expr) -> Expr {
+    crate::norm::full_simplify(e, &Assumptions::new())
+}
+
+/// The base canonical simplify in display form — `simplify`'s pre-`full_simplify`
+/// behavior (JS-corpus compatible: no `exp(ln x) → x` etc.). Used by
+/// [`full_simplify`] as its per-round base (so it does not recurse into the now
+/// aggressive public [`simplify`]), and by any internal caller that wants only
+/// the base reductions.
+pub(crate) fn simplify_base(e: &Expr) -> Expr {
     super::present(&simplify_core(e))
 }
 

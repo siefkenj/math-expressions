@@ -34,7 +34,7 @@ pub(crate) mod syntactic;
 pub(crate) use expand::expand_core;
 pub(crate) use order::cmp;
 pub(crate) use present::present;
-pub(crate) use simplify::{simplify_canonical, simplify_core};
+pub(crate) use simplify::{simplify_base, simplify_canonical, simplify_core};
 pub use expand::expand;
 pub use simplify::{simplify, simplify_logical, simplify_with};
 pub use special_values::fold_special_values;
