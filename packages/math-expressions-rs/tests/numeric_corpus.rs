@@ -3,7 +3,7 @@
 //! `me.round_numbers_to_precision_plus_decimals`) by
 //! `scripts/generate-numeric-corpus.mjs`.
 
-use math_expressions::{js_match, js_tree, numeric, ops};
+use math_expressions::{js_tree, numeric, ops};
 use serde_json::Value;
 
 fn corpus() -> Value {
@@ -114,38 +114,6 @@ fn eigenvalues_match_mathjs() {
                 max = max.max((av - p.value * p.vector[i]).norm());
             }
             assert!(max <= 1e-6 * norm, "residual {max} too large in {case}");
-        }
-    }
-}
-
-#[test]
-fn match_agrees_with_js_default_mode() {
-    for case in corpus()["match"].as_array().unwrap() {
-        let got = js_match::match_template(&case["tree"], &case["pattern"]);
-        match (&case["bindings"], got) {
-            (Value::Null, None) => {}
-            (Value::Null, Some(m)) => panic!(
-                "JS found no match but we bound {:?} in {case}",
-                Value::Object(m)
-            ),
-            (expected, None) => panic!("JS bound {expected} but we found no match in {case}"),
-            (expected, Some(m)) => {
-                let exp = expected.as_object().unwrap();
-                assert_eq!(
-                    exp.len(),
-                    m.len(),
-                    "binding sets differ in {case}: JS {expected}, ours {:?}",
-                    Value::Object(m.clone())
-                );
-                for (k, v) in exp {
-                    assert_eq!(
-                        m.get(k),
-                        Some(v),
-                        "binding {k} differs in {case}: ours {:?}",
-                        Value::Object(m.clone())
-                    );
-                }
-            }
         }
     }
 }

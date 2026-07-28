@@ -52,7 +52,7 @@ pub fn from_serialized(json: &str) -> Result<Expression, JsError> {
 pub fn match_template(tree_json: &str, pattern_json: &str) -> Option<String> {
     let tree: serde_json::Value = serde_json::from_str(tree_json).ok()?;
     let pattern: serde_json::Value = serde_json::from_str(pattern_json).ok()?;
-    math_expressions::js_match::match_template(&tree, &pattern)
+    crate::js_match::match_template(&tree, &pattern)
         .map(|m| serde_json::Value::Object(m).to_string())
 }
 
@@ -60,19 +60,19 @@ pub fn match_template(tree_json: &str, pattern_json: &str) -> Option<String> {
 #[wasm_bindgen]
 pub fn flatten_ast(tree_json: &str) -> Option<String> {
     let tree: serde_json::Value = serde_json::from_str(tree_json).ok()?;
-    Some(math_expressions::js_match::flatten_tree(&tree).to_string())
+    Some(crate::js_match::flatten_tree(&tree).to_string())
 }
 
 /// `me.utils.unflattenLeft`.
 #[wasm_bindgen]
 pub fn unflatten_left(tree_json: &str) -> Option<String> {
     let tree: serde_json::Value = serde_json::from_str(tree_json).ok()?;
-    Some(math_expressions::js_match::unflatten_left(&tree).to_string())
+    Some(crate::js_match::unflatten_left(&tree).to_string())
 }
 
 /// `me.utils.unflattenRight`.
 #[wasm_bindgen]
 pub fn unflatten_right(tree_json: &str) -> Option<String> {
     let tree: serde_json::Value = serde_json::from_str(tree_json).ok()?;
-    Some(math_expressions::js_match::unflatten_right(&tree).to_string())
+    Some(crate::js_match::unflatten_right(&tree).to_string())
 }

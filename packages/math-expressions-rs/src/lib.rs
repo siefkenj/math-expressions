@@ -23,59 +23,70 @@
 //!   `math_expressions::simplify` over `math_expressions::normalize::simplify`.
 //! - **API namespaces** — modules used qualified, by design: [`exact`]
 //!   (certified zero-equivalence), [`precise`] (arbitrary-precision eval /
-//!   quadrature), [`numeric`] (mathjs-compatible f64 kernels), [`js_tree`] /
-//!   [`js_match`] (JS `Tree` interop), [`pm`], [`ode`], [`notation`],
-//!   [`resource_limits`], [`print`], [`parse`].
+//!   quadrature), [`numeric`] (mathjs-compatible f64 kernels), [`js_tree`]
+//!   (`Expr` ⇄ JS `Tree` JSON codec), [`pm`], [`ode`], [`notation`],
+//!   [`resource_limits`], [`print`], [`parse`]. Several of these are *facade
+//!   aliases* (below) whose files live inside a grouping folder — e.g.
+//!   `js_tree` is `js::tree`, `pm` is `ops::pm`, `ode` is `numeric::ode`.
 //! - **Everything else** (`normalize`, `eval_numerical`, `equality*`, `special_functions`, `ops`,
-//!   `matrix`, …) is `pub` for the integration-test suite, not a stability
-//!   surface; new external callers should go through the tiers above.
+//!   `matrix`, `calculus`, …) is `pub` for the integration-test suite, not a
+//!   stability surface; new external callers should go through the tiers above.
 
 pub mod assumptions;
-pub mod diff;
+pub mod calculus;
 pub mod equality;
-pub mod eval_numerical;
 pub mod exact;
-pub mod factor;
-pub mod ratform;
 pub mod grade;
 pub mod expr;
 pub mod special_functions;
 pub mod equality_structural;
-pub mod integrate;
-pub mod js_match;
-pub mod js_tree;
+pub mod js;
 pub mod resource_limits;
 pub mod matrix;
 pub mod normalize;
 pub mod notation;
 pub mod num;
 pub mod numeric;
-pub mod ode;
 pub mod ops;
 pub mod print;
 pub mod parse;
-pub mod pm;
 mod polynomials;
 pub mod precise;
-pub(crate) mod rootof;
 pub mod sym;
-pub(crate) mod upoly;
+
+// The polynomial-algebra modules physically live under `polynomials/`; these
+// facade aliases preserve the public (`factor`, `ratform`) and crate-internal
+// (`rootof`, `upoly`) paths their callers use.
+pub use polynomials::ratform;
+pub(crate) use polynomials::rootof;
+pub(crate) use polynomials::univariate as upoly;
+
+// `ode` and the complex evaluator physically live under `numeric/`; these
+// aliases preserve the public `ode` namespace and the `eval_numerical` path
+// (used both crate-internally and by the integration-test suite).
+pub use numeric::ode;
+pub use numeric::complex as eval_numerical;
 
 pub use assumptions::{
     is_complex, is_integer, is_negative, is_nonnegative, is_nonpositive, is_nonzero, is_positive,
     is_real, Assumptions,
 };
-pub use diff::derivative;
+pub use calculus::diff::derivative;
+// `diff` / `integrate` physically live under `calculus/`; these aliases
+// preserve the crate-internal `crate::diff::…` / `crate::integrate::…` paths.
+pub(crate) use calculus::{diff, integrate};
 pub use equality::discrete_infinite::{create_discrete_infinite_set, match_discrete_infinite};
 pub use equality::{
     contains_blank, equals, equals_syntactic, equals_via_real, finite_field_evaluate, EqOptions,
 };
-pub use factor::{factor, factor_terms};
-pub use integrate::integrate;
+pub use polynomials::factor::{factor, factor_terms};
+pub use calculus::integrate::integrate;
 pub use grade::{
     equal_specified_sign_errors, equal_with_sign_errors, evaluate_membership, solve_linear,
 };
 pub use expr::{Expr, MathConst, RelOp};
+// `js_tree` is a by-design public namespace; the file now lives at `js/tree.rs`.
+pub use js::tree as js_tree;
 pub use equality_structural::{
     check_structural_comparison, structural_equality, StructuralComparison,
     StructuralComparisonResult,
@@ -88,7 +99,7 @@ pub use normalize::{
     canonicalize, desugar_units, expand, full_simplify, simplify, simplify_logical, simplify_with,
 };
 pub use num::Number;
-pub use ode::{solve_ode_exprs, solve_ode_with, OdeSolution};
+pub use numeric::ode::{solve_ode_exprs, solve_ode_with, OdeSolution};
 pub use ops::{
     add_unit, altvectors_to_vectors, constants_to_floats, evaluate, evaluate_numbers,
     evaluate_to_constant, functions, get_component, is_analytic, normalize_function_names,
@@ -102,8 +113,12 @@ pub use print::{to_latex, to_text, LatexOpts, TextOpts};
 pub use parse::latex::{LatexToAst, LatexToAstOptions};
 pub use parse::text::{TextToAst, TextToAstOptions};
 pub use parse::ParseError;
-pub use pm::{contains_pm, count_pm, expand_pm_signs, PmOverflow, MAX_PM_COUNT};
-pub use ratform::{cancel, together};
+// `pm` is a by-design public namespace; the file now lives at `ops/pm.rs`.
+// This alias keeps both `crate::pm::…` (internal callers) and
+// `math_expressions::pm::…` (public) resolving.
+pub use ops::pm;
+pub use ops::pm::{contains_pm, count_pm, expand_pm_signs, PmOverflow, MAX_PM_COUNT};
+pub use polynomials::ratform::{cancel, together};
 pub use precise::{
     evaluate_to_precision, integrate_analyzed, integrate_to_precision, IntegralVerdict, Precise,
     SingularPoint,

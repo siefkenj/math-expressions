@@ -323,3 +323,234 @@ fn unflatten(tree: &Value, left: bool) -> Value {
         rev.fold(last, |acc, x| wrap(x, acc))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! The JS-tree utility surface Doenet uses via `me.utils`: default-mode
+    //! template `match`, `flatten`/`unflatten{Left,Right}` (all `js_match`),
+    //! plus `js_tree::to_js` structural equality and the crate `substitute`
+    //! (core-crate items, exercised here through the same JS-tree surface).
+    //! Ported from `spec/quick_trees.spec.js`; only the **default** match mode
+    //! is ported (opt-in JS params are deliberately unported — see this file's
+    //! module docs and JS_TEST_COVERAGE_AUDIT.md).
+    use super::{flatten_tree, match_template, unflatten_left, unflatten_right};
+    use math_expressions::js_tree::to_js;
+    use math_expressions::{equals, substitute, EqOptions, Expr, TextToAst, TextToAstOptions};
+    use serde_json::{json, Value};
+    use std::collections::HashMap;
+
+    fn parse(s: &str) -> Expr {
+        TextToAst::new(TextToAstOptions::default())
+            .convert(s)
+            .unwrap_or_else(|e| panic!("parse {s:?}: {e}"))
+    }
+
+    /// The JS `TREE(s)` helper: parse text and take the raw JS tree.
+    fn tree(s: &str) -> Value {
+        to_js(&parse(s))
+    }
+
+    /// Structural tree equality (JS `trees.equal`) is JSON identity of the encoding.
+    fn equal(a: &Value, b: &Value) -> bool {
+        a == b
+    }
+
+    fn eq_expr(a: &Expr, b: &Expr) -> bool {
+        equals(a, b, &EqOptions::default())
+    }
+
+    // ---- tree basics ----
+
+    #[test]
+    fn structural_equality_is_exact_and_order_sensitive() {
+        assert!(equal(&tree("cos x"), &tree("cos x")));
+        assert!(!equal(&tree("cos x"), &tree("cos y")));
+        // Structural equality does NOT allow order changes (that is `equals`).
+        assert!(!equal(&tree("x+y"), &tree("y+x")));
+    }
+
+    #[test]
+    fn flatten_and_unflatten() {
+        // unflattenRight: ["+",1,2,3] -> ["+",1,["+",2,3]]
+        assert_eq!(unflatten_right(&json!(["+", 1, 2, 3])), json!(["+", 1, ["+", 2, 3]]));
+        // unflattenLeft: ["+",1,2,3] -> ["+",["+",1,2],3]
+        assert_eq!(unflatten_left(&json!(["+", 1, 2, 3])), json!(["+", ["+", 1, 2], 3]));
+        // flatten both nestings back to the n-ary form.
+        assert_eq!(flatten_tree(&json!(["+", 1, ["+", 2, 3]])), json!(["+", 1, 2, 3]));
+        assert_eq!(flatten_tree(&json!(["+", ["+", 1, 2], 3])), json!(["+", 1, 2, 3]));
+    }
+
+    #[test]
+    fn substitute_symbols() {
+        let sub = |e: &str, pairs: &[(&str, Expr)]| {
+            let map: HashMap<String, Expr> =
+                pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
+            substitute(&parse(e), &map)
+        };
+
+        // x+y becomes 1+2 when x:=1 and y:=2
+        assert!(eq_expr(
+            &sub("x+y", &[("x", parse("1")), ("y", parse("2"))]),
+            &parse("1+2")
+        ));
+        // simultaneous swap: x := y^2 and y := x^2
+        assert!(eq_expr(
+            &sub("x+y", &[("x", parse("y^2")), ("y", parse("x^2"))]),
+            &parse("y^2 + x^2")
+        ));
+        // recurses through apply / div
+        assert!(eq_expr(
+            &sub("cos(x+y)/sin(x*y)", &[("x", parse("1")), ("y", parse("2"))]),
+            &parse("cos(1+2)/sin(1*2)")
+        ));
+        // recurses through relations (chained inequality)
+        assert!(eq_expr(
+            &sub("x < y < z", &[("x", parse("a")), ("y", parse("b")), ("z", parse("c"))]),
+            &parse("a < b < c")
+        ));
+        assert!(eq_expr(
+            &sub("x < y <= z", &[("x", parse("a")), ("y", parse("b")), ("z", parse("c"))]),
+            &parse("a < b <= c")
+        ));
+    }
+
+    // ---- default-mode template matching ----
+
+    #[test]
+    fn match_binds_wildcards() {
+        let m = match_template(&tree("x+y"), &tree("a+b")).expect("x+y matches a+b");
+        assert_eq!(m.get("a"), Some(&json!("x")));
+        assert_eq!(m.get("b"), Some(&json!("y")));
+    }
+
+    #[test]
+    fn match_requires_same_operator_and_whole_tree() {
+        // x+y does not match a*b
+        assert!(match_template(&tree("x+y"), &tree("a*b")).is_none());
+        // a wildcard match must cover the entire tree
+        assert!(match_template(&tree("x+y/z"), &tree("a/b")).is_none());
+    }
+
+    #[test]
+    fn match_must_be_consistent() {
+        // x+y/z matches a+b/c (all distinct) ...
+        assert!(match_template(&tree("x+y/z"), &tree("a+b/c")).is_some());
+        // ... but not a+b/a (would need y/z's numerator == denominator)
+        assert!(match_template(&tree("x+y/z"), &tree("a+b/a")).is_none());
+        // x+y/x DOES match a+b/a (x bound consistently)
+        assert!(match_template(&tree("x+y/x"), &tree("a+b/a")).is_some());
+    }
+
+    #[test]
+    fn match_multichar_placeholders_and_exact_numbers() {
+        // multi-character pattern leaves are still wildcards by default
+        assert!(match_template(&json!(["+", "x", "y"]), &json!(["+", "a", "bc"])).is_some());
+        assert!(match_template(&json!(["+", "x", "bc"]), &json!(["+", "a", "bc"])).is_some());
+        // numbers must match exactly
+        assert!(match_template(&tree("3x+5"), &tree("ab+5")).is_some());
+        assert!(match_template(&tree("3x+5"), &tree("ab+6")).is_none());
+    }
+
+    #[test]
+    fn match_addition_matches_subtraction_not_vice_versa() {
+        // x-y is ["+","x",["-","y"]]; a wildcard b absorbs the negated term.
+        assert!(match_template(&tree("x-y"), &tree("a+b")).is_some());
+        // but x+y cannot match a-b (the second operand must be a negation)
+        assert!(match_template(&tree("x+y"), &tree("a-b")).is_none());
+    }
+
+    #[test]
+    fn match_template_default_mode() {
+        // ["+", ["*", 2, "x"], 3] against ["+", ["*", "a", "x"], "b"]:
+        // wildcards a, x, b (all pattern variables).
+        let tree = json!(["+", ["*", 2, "x"], 3]);
+        let pat = json!(["+", ["*", "a", "y"], "b"]);
+        let m = match_template(&tree, &pat).unwrap();
+        assert_eq!(m.get("a").unwrap(), &json!(2));
+        assert_eq!(m.get("y").unwrap(), &json!("x"));
+        assert_eq!(m.get("b").unwrap(), &json!(3));
+
+        // Grouping: last wildcard absorbs the rest of an associative operator.
+        let tree = json!(["+", 1, 2, 3]);
+        let m = match_template(&tree, &json!(["+", "u", "v"])).unwrap();
+        assert_eq!(m.get("u").unwrap(), &json!(1));
+        assert_eq!(m.get("v").unwrap(), &json!(["+", 2, 3]));
+
+        // Repeated wildcard must bind equal subtrees.
+        assert!(match_template(&json!(["+", "x", "x"]), &json!(["+", "u", "u"])).is_some());
+        assert!(match_template(&json!(["+", "x", "y"]), &json!(["+", "u", "u"])).is_none());
+
+        // Unary minus of product matches a * pattern.
+        let tree = json!(["-", ["*", "x", "y"]]);
+        let m = match_template(&tree, &json!(["*", "a", "b"])).unwrap();
+        assert_eq!(m.get("a").unwrap(), &json!(["-", "x"]));
+        assert_eq!(m.get("b").unwrap(), &json!("y"));
+
+        // Operators must match exactly; no match across operators.
+        assert!(match_template(&json!(["*", 1, 2]), &json!(["+", "u", "v"])).is_none());
+        // Exact variable-free match -> empty bindings.
+        assert_eq!(
+            match_template(&json!(["+", 1, 2]), &json!(["+", 1, 2]))
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    /// `match_template` is `pub` and runs on raw caller-supplied JS trees. A
+    /// degenerate `["-", ["*"]]` (unary minus of a nullary product) against any
+    /// `["*", …]` pattern used to index an empty operand vec → abort under
+    /// `panic = "abort"`. It must now cleanly return `None`.
+    #[test]
+    fn match_template_nullary_product_minus_does_not_abort() {
+        assert_eq!(
+            match_template(&json!(["-", ["*"]]), &json!(["*", "a"])),
+            None
+        );
+    }
+
+    /// Differential corpus generated from the JS oracle (`me.utils.match`) by
+    /// `scripts/generate-numeric-corpus.mjs`. The fixture is shared with the
+    /// core crate's numeric corpus and lives there; read it across the crate
+    /// boundary (the `match` slice is the only part `js_match` owns).
+    fn match_corpus() -> Value {
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../math-expressions-rs/tests/fixtures/numeric-corpus.json"
+        ))
+        .expect("run scripts/generate-numeric-corpus.mjs first");
+        serde_json::from_str(&text).unwrap()
+    }
+
+    #[test]
+    fn match_agrees_with_js_default_mode() {
+        for case in match_corpus()["match"].as_array().unwrap() {
+            let got = match_template(&case["tree"], &case["pattern"]);
+            match (&case["bindings"], got) {
+                (Value::Null, None) => {}
+                (Value::Null, Some(m)) => panic!(
+                    "JS found no match but we bound {:?} in {case}",
+                    Value::Object(m)
+                ),
+                (expected, None) => panic!("JS bound {expected} but we found no match in {case}"),
+                (expected, Some(m)) => {
+                    let exp = expected.as_object().unwrap();
+                    assert_eq!(
+                        exp.len(),
+                        m.len(),
+                        "binding sets differ in {case}: JS {expected}, ours {:?}",
+                        Value::Object(m.clone())
+                    );
+                    for (k, v) in exp {
+                        assert_eq!(
+                            m.get(k),
+                            Some(v),
+                            "binding {k} differs in {case}: ours {:?}",
+                            Value::Object(m.clone())
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

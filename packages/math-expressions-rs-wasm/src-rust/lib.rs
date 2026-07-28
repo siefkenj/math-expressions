@@ -34,6 +34,7 @@ mod calculus;
 mod core_ops;
 mod grading;
 mod interop;
+mod js_match;
 mod limits;
 mod matrix_ops;
 mod numeric;
