@@ -8,7 +8,7 @@
 //!   in that field. It only ever returns a value it can *prove* correct;
 //!   anything outside the tower yields `None`. The ring itself lives in
 //!   [`value`], the evaluator in [`eval`].
-//! * [`is_zero`] — `is_zero(e, a) -> Tri` (`Some(true)` = certified zero,
+//! * [`is_zero`] — `is_zero(e, a) -> MaybeBool` (`Some(true)` = certified zero,
 //!   `Some(false)` = certified nonzero, `None` = undecided). Soundness is the
 //!   invariant: it never answers `Some(_)` unless the answer is certain. The
 //!   service lives in [`zero_testing`]; the single-`RootOf` decider in

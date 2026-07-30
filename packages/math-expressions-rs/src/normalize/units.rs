@@ -17,10 +17,12 @@ pub(crate) fn is_scaling_unit_symbol(e: &Expr) -> bool {
     matches!(e, Expr::Sym(s) if matches!(s.name().as_str(), "%" | "$" | "deg" | "circ"))
 }
 
-/// Decode the `["unit", …]` operand layout the parsers emit into
-/// `(symbol, value)`: prefix `$` is `[unit, value]`; postfix `%`/`deg` is
-/// `[value, unit]` (mirrors `get_unit_value_of_tree` in
-/// lib/expression/units.js).
+/// Decode a two-operand `["unit", …]` node into `(symbol, value)`. The parsers
+/// emit prefix `$` as `[unit, value]` and postfix `%`/`deg` as `[value, unit]`
+/// (mirroring `get_unit_value_of_tree` in lib/expression/units.js); this takes
+/// whichever operand *is* a scaling-unit symbol, so either order decodes for
+/// either spelling — matching what `ops::remove_units` has always accepted.
+/// If both operands are unit symbols the first one is treated as the unit.
 fn unit_parts(args: &[Expr]) -> Option<(&Expr, &Expr)> {
     match args {
         [a, b] if is_scaling_unit_symbol(a) => Some((a, b)),

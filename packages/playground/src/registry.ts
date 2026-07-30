@@ -626,10 +626,8 @@ export const CURATED_RUST_METHODS: ReadonlySet<string> = new Set([
   "normalize_function_names",
   "derivative",
   "integrate",
-  // Covered by the curated `integrateNumerically` op (camelCase chain id), whose
-  // Rust side dispatches to `integrate_numerically` — list it so the dynamic
-  // "Other" section treats it as already-surfaced. (The case-folding resolver in
-  // wasmApi.ts would otherwise dual-wire it under `integrateNumerically` too.)
+  // Dispatched by the curated `integrateNumerically` op, whose chain id is the
+  // camelCase JS spelling — so it has to be listed here by its Rust name.
   "integrate_numerically",
   "variables",
   "functions",

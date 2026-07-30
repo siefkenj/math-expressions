@@ -2,8 +2,8 @@
 //! expressions denote the same mathematical object? This is the value axis —
 //! contrast [`equality_structural`](crate::equality_structural), which asks
 //! whether an answer is in a required *form* (factored, reduced, …), and
-//! [`certified_digits`](crate::eval_numeric::certified_digits), which is certified arbitrary-precision numeric
-//! evaluation.
+//! [`certified_digits`](crate::eval_numeric::certified_digits), which is
+//! certified arbitrary-precision numeric evaluation.
 //!
 //! ## It is a staged decision procedure, not a numerical test
 //!

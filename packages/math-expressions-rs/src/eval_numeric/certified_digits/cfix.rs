@@ -1,7 +1,7 @@
 //! P4: complex fixed point — pairs of `MpFix` with kernels composed from the
 //! real ones (principal branches matching `eval_complex`). Composition adds
 //! a few ulps per level; every helper takes generous internal guard bits and
-//! the Ziv-style mantissa check in `mod.rs` validates delivered magnitude.
+//! the Ziv-style mantissa check in `pipeline.rs` validates delivered magnitude.
 
 use super::fix::MpFix;
 use super::kernels::{self, Budget};

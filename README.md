@@ -103,10 +103,24 @@ the table below translates the old names, which the historical design notes in
 | `numeric.rs`, `ode.rs`                 | `mathjs_compat/{dense_f64,ode}.rs`              |
 | `expr.rs`, `sym.rs`, `js_tree.rs`      | `expr/{tree,sym,serde}.rs`                      |
 | `js_match.rs`                          | `math-expressions-rs-wasm/src-rust/js_match.rs` |
+| `pm.rs`                                | `ops/pm.rs`                                     |
 | `matrix/kernels.rs`                    | `matrix/elimination.rs`                         |
 
 `ops.rs`, `num.rs`, `assumptions/mod.rs` and `functions/mod.rs` were also split
-into submodules; each new barrel module's `//!` docs list its parts.
+into submodules; each new barrel module's `//!` docs list its parts. `expr.rs`
+additionally split off `expr/visit.rs`, which now owns
+`norm::syntactic::map_children` as `crate::expr::map_children`.
+
+Inside `eval_numeric/certified_digits/`, the old `precise/` files were renamed
+too: `precise/mod.rs` → `pipeline.rs`, `precise/tier0.rs` → `float_bounds.rs`,
+`precise/complex.rs` → `cfix.rs`.
+
+Two types were renamed along the way: `Tri` → `MaybeBool` (the three-valued
+`Option<bool>` alias in `assumptions`), and `numeric::EigenPair` →
+`mathjs_compat::NumericEigenPair` (the symbolic `matrix::EigenPair` keeps its
+name). `flatten_tree`, `unflatten_left`, `unflatten_right` and `match_template`
+are no longer part of the core crate's public API — they moved to the wasm crate
+with `js_match.rs`.
 
 ## History
 

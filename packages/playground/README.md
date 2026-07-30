@@ -91,7 +91,10 @@ the registry (dedup via `CURATED_RUST_METHODS`). Because the `.d.ts` is
 regenerated on every `build:wasm`, **adding a `#[wasm_bindgen]` method to the
 Rust `Expression` makes it appear in the playground on the next build** — no list
 to maintain, no coverage test to keep green. Auto-generated ops run on Rust, and
-also on JS when the canonical `Expression` happens to expose a same-named method.
+also on JS when the canonical `Expression` exposes the same operation — either
+under the same name, or under a spelling that differs only by case/separator
+folding (`integrate_numerically` → `integrateNumerically`), in which case the op
+is listed under the JS-provided name.
 
 The name set is **hybrid**: the `.d.ts` supplies the argument/return *types* (a
 live object exposes only method names and arity, not parameter types), while the

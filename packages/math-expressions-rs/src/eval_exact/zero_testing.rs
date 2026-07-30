@@ -1,4 +1,4 @@
-//! The certified zero-equivalence service: `is_zero(e, a) -> Tri`
+//! The certified zero-equivalence service: `is_zero(e, a) -> MaybeBool`
 //! (`Some(true)` = certified zero, `Some(false)` = certified nonzero,
 //! `None` = undecided). Soundness is the invariant: it never answers `Some(_)`
 //! unless the answer is certain.

@@ -16,9 +16,10 @@ fn fs(s: &str) -> Expr {
     full_simplify(&p(s), &Assumptions::new())
 }
 
-/// `full_simplify(input)` equals the simplified `expected` form (structural,
-/// since both are driven through `simplify`). Structural — not via `equals`,
-/// which has a pre-existing false-negative on `cos(pi/3)` vs `1/2`.
+/// `full_simplify(input)` equals the simplified `expected` form. Structural
+/// (both sides are driven through `simplify` first), not via `equals`: these
+/// tests are about the *shape* `full_simplify` reduces to, and `equals` would
+/// accept any mathematically-equal tree — including a completely unreduced one.
 fn assert_fs(input: &str, expected: &str) {
     assert_eq!(
         fs(input),
@@ -78,8 +79,10 @@ fn idempotent() {
 
 #[test]
 fn meaning_preserving_on_reliable_inputs() {
-    // Use `equals` only where it is reliable (polynomial/rational), since it
-    // has a known false-negative on trig-vs-rational.
+    // Use `equals` only where it is reliable (polynomial/rational). The new
+    // certified-exact stage rescues *variable-free* trig-vs-rational pairs
+    // (`cos(pi/3)` vs `1/2`), but with a free variable those fall back to
+    // sampling, which still false-rejects a folded `sin(pi)*x → 0`.
     use math_expressions::equals;
     for s in ["(x^2-1)/(x-1)", "2*x + 3*x", "(a+b)^2 - a^2 - 2*a*b"] {
         assert!(

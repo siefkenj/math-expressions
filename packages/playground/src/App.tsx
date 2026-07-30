@@ -326,7 +326,7 @@ export default function App() {
   // loads. Names are read off the live prototypes of each engine's `Expression`:
   // the wasm `.d.ts` supplies the *types*, but a method is only surfaced when it
   // also exists on the live Rust prototype (guarding against a stale `.d.ts`);
-  // the JS predicate lets shared methods light up on both engines.
+  // the JS name resolver lets shared methods light up on both engines.
   const allOps = useMemo<OpEntry[]>(() => {
     if (!loaded || !engines) return REGISTRY;
     // Introspect a throwaway handle, freeing the wasm one afterwards.

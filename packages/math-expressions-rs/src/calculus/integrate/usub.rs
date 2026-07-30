@@ -17,8 +17,14 @@ pub(super) fn usub(e: &Expr, x: &str, fuel: &mut i64) -> Option<Expr> {
     const U: &str = "_usub";
     let mut candidates: Vec<Expr> = Vec::new();
     collect_candidates(e, &mut candidates);
-    candidates.retain(|u| depends_on(u, x) && !matches!(u, Expr::Sym(_)));
-    candidates.dedup();
+    // Order-preserving dedup: `collect_candidates` yields the same subtree from
+    // several places (an `Apply`'s argument, then the `Apply` itself, then again
+    // from a sibling), and those repeats are rarely *adjacent* — `Vec::dedup`
+    // would leave them in, and each one would then eat one of the
+    // `max_integration_candidates` slots that bound the search.
+    let mut seen = std::collections::HashSet::new();
+    candidates
+        .retain(|u| depends_on(u, x) && !matches!(u, Expr::Sym(_)) && seen.insert(u.clone()));
     candidates.truncate(crate::resource_limits::current().max_integration_candidates);
     for u in candidates {
         let du = canonicalize(&crate::calculus::diff::derivative(&u, x));

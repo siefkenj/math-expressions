@@ -95,6 +95,10 @@ pub fn solve_ode(
 /// evaluated inside wasm via the compiled tape — no boundary crossings.
 /// `undefined` when the expressions reference unknown variables.
 #[wasm_bindgen]
+// The parameter list *is* the JS call signature; folding it into an options
+// struct would mean minting a `#[wasm_bindgen]` type and changing the JS API
+// for the sake of a lint. Kept flat, matching `solve_ode` above.
+#[allow(clippy::too_many_arguments)]
 pub fn solve_ode_expressions(
     rhs: &Expression,
     ind_var: &str,

@@ -4,8 +4,8 @@
 //! vanishing-step and non-finite detection → clean early termination at the
 //! last accepted point — never a hang, never NaN samples).
 //!
-//! f64-only by design, like `src/numeric.rs`: this is plotting/animation
-//! numerics, not CAS arithmetic.
+//! f64-only by design, like [`dense_f64`](super::dense_f64): this is
+//! plotting/animation numerics, not CAS arithmetic.
 
 use crate::expr::Expr;
 

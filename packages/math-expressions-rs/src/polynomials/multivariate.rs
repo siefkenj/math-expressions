@@ -432,8 +432,8 @@ fn ground_lift(g: Rep, depth: usize) -> Rep {
 }
 
 fn number_to_rational(n: &Number) -> Option<BigRational> {
-    // Single source of truth in num.rs — this wrapper only keeps the local
-    // call-site name; do not re-implement the conversion here.
+    // Single source of truth in num/number.rs — this wrapper only keeps the
+    // local call-site name; do not re-implement the conversion here.
     n.to_bigrational()
 }
 

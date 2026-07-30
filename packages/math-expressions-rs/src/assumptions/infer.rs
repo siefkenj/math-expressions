@@ -370,7 +370,7 @@ fn apply_facts(head: &Expr, args: &[Expr], a: &Assumptions) -> Facts {
             }
         }
         // Both spellings: `log` is canonical but the registry's builders and
-        // un-normalized user trees say `ln` (see functions/exp_log.rs).
+        // un-normalized user trees say `ln` (see special_functions/exp_log.rs).
         "log" | "ln" => {
             if af.positive == Some(true) {
                 out.real = Some(true);

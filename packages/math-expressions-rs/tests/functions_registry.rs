@@ -53,7 +53,7 @@ const OLD_NORMALIZATIONS: &[(&str, &str)] = &[
     ("cosec", "csc"),
 ];
 
-/// The historical `inverse_function_name` table (norm/mod.rs history).
+/// The historical `inverse_function_name` table (normalize/mod.rs history).
 const OLD_INVERSES: &[(&str, &str)] = &[
     ("sin", "asin"),
     ("cos", "acos"),
@@ -69,7 +69,7 @@ const OLD_INVERSES: &[(&str, &str)] = &[
     ("coth", "acoth"),
 ];
 
-/// The historical MOVE_EXPONENT_OUTSIDE set (norm/syntactic.rs history).
+/// The historical MOVE_EXPONENT_OUTSIDE set (normalize/syntactic.rs history).
 const OLD_MOVE_EXPONENT: &[&str] = &[
     "cos", "cosh", "sin", "sinh", "tan", "tanh", "sec", "sech", "csc", "csch", "cot", "coth",
     "log", "ln",
@@ -141,9 +141,9 @@ fn move_exponent_matches_historical_set() {
 
 #[test]
 fn precise_kernels_cover_historical_registry() {
-    // The names the old precise/kernels.rs REGISTRY rows listed, alias
-    // spellings included, all resolve — and to the same id as their
-    // canonical spelling.
+    // The names the old eval_numeric/certified_digits/kernels.rs REGISTRY rows
+    // listed, alias spellings included, all resolve — and to the same id as
+    // their canonical spelling.
     for name in [
         "sqrt", "exp", "ln", "log", "abs", "sin", "cos", "tan", "asin", "arcsin", "acos",
         "arccos", "atan", "arctan", "sinh", "cosh", "tanh", "log10",
@@ -196,7 +196,7 @@ fn parse_spellings_are_name_or_alias() {
 
 #[test]
 fn derivative_templates_are_alias_aware() {
-    // Spot checks against the historical diff.rs table, both spellings.
+    // Spot checks against the historical calculus/diff.rs table, both spellings.
     assert_eq!(special_functions::derivative_template("sin"), Some("cos(x)"));
     assert_eq!(
         special_functions::derivative_template("arcsin"),
@@ -212,7 +212,7 @@ fn derivative_templates_are_alias_aware() {
 #[test]
 fn latex_commands_match_historical_tables() {
     // The function portion of the old ALLOWED_LATEX_SYMBOLS list plus the
-    // old convert_latex_symbol arc-conversions (output/latex.rs history).
+    // old convert_latex_symbol arc-conversions (print/latex.rs history).
     for (spelling, cmd) in [
         ("sin", "sin"),
         ("csc", "csc"),
@@ -247,7 +247,7 @@ fn latex_commands_match_historical_tables() {
 
 #[test]
 fn eval_coverage_matches_historical_known_function() {
-    // The historical eval/mod.rs `known_function` arity-1 list…
+    // The historical eval_numeric/complex.rs `known_function` arity-1 list…
     for name in [
         "sin", "cos", "tan", "sinh", "cosh", "tanh", "asin", "acos", "atan", "asinh", "acosh",
         "atanh", "sec", "csc", "cot", "sech", "csch", "coth", "asec", "acsc", "acot", "asech",

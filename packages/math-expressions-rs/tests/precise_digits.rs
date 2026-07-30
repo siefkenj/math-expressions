@@ -1,4 +1,4 @@
-//! 100-digit certification of every kernel in the `precise` registry.
+//! 100-digit certification of every kernel in the `certified_digits` registry.
 //!
 //! One test per registry function, each checked digit-for-digit against an
 //! externally published expansion. References are the OEIS b-files (5000
@@ -8,8 +8,8 @@
 //! implementation's final-digit rounding.
 //!
 //! The first 54 digits of each reference also agree with the independently
-//! sourced constants in `precise.rs`, and the leading 16 with f64 libm, so a
-//! transcription error on either side would be caught twice over.
+//! sourced constants in `tests/precise.rs`, and the leading 16 with f64 libm,
+//! so a transcription error on either side would be caught twice over.
 
 use math_expressions::eval_numeric::certified_digits::{evaluate_to_precision, Precise};
 use math_expressions::{Expr, TextToAst, TextToAstOptions};

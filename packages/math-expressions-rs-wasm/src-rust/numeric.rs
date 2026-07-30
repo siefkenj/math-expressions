@@ -1,5 +1,6 @@
-//! f64 numeric utilities — the `me.math` replacements (see `src/numeric.rs`):
-//! statistics, gcd/lcm, and the mathjs `lusolve`/`eigs` drop-ins.
+//! f64 numeric utilities — the `me.math` replacements (see the core crate's
+//! `mathjs_compat` module): statistics, gcd/lcm, and the mathjs
+//! `lusolve`/`eigs` drop-ins.
 
 use wasm_bindgen::prelude::*;
 

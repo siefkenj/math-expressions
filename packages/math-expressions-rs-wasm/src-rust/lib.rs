@@ -24,7 +24,15 @@
 //! - [`ode`]         — ODE solving (numeric and expression-RHS)
 //! - [`numeric`]     — f64 numeric utilities (the `me.math` replacements)
 //! - [`interop`]     — JS-tree AST boundary (Doenet interop)
+//! - [`js_match`]    — the JS-tree template-match / flatten-unflatten engine
+//!   backing [`interop`] (JS-shape only, so it lives here rather than in the
+//!   core crate)
 //! - [`assumptions`] — the mutable `Assumptions` handle and related builders
+
+// Like the core crate: the barrel docs above name this crate's private
+// submodules, which resolve only under `--document-private-items`. Silencing
+// the lint keeps any *real* broken-link warning visible.
+#![allow(rustdoc::private_intra_doc_links)]
 
 use math_expressions::Expr;
 use wasm_bindgen::prelude::*;

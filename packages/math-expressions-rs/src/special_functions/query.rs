@@ -1,6 +1,6 @@
 //! The accessor layer: thin, mostly alias-aware projections of the registry
 //! that the rest of the crate calls instead of the old per-subsystem tables in
-//! `parse/`, `normalize/`, `diff.rs`, and `integrate/`.
+//! `parse/`, `normalize/`, `calculus/diff.rs`, and `calculus/integrate/`.
 
 use super::registry::{lookup, ALL};
 use crate::expr::Expr;

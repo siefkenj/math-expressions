@@ -11,7 +11,7 @@
 //!   is a correctness bug and is never acceptable (asserted, no snapshot).
 //! - **reduced (fixpoint)** — `simplify(simplify(input)) == simplify(input)`
 //!   structurally. Also a hard invariant of the design (asserted).
-//! - **JS agreement (advisory)** — `equals(simplify(input), js::tree)`. This is
+//! - **JS agreement (advisory)** — `equals(simplify(input), <JS's tree>)`. This is
 //!   the reduction-progress signal: how often we reach something equal to JS's
 //!   reduced form. It is *reported*, and its remaining gaps are snapshotted in
 //!   `fixtures/simplify-known-failures.json` so we catch regressions and can
@@ -20,11 +20,13 @@
 //! Regenerate the snapshot after an intended change:
 //!   UPDATE_KNOWN_FAILURES=1 cargo test --test simplify_corpus
 
+use math_expressions::assumptions::Assumptions;
 use math_expressions::{
-    contains_blank, equals, expr, simplify, EqOptions, Expr, TextToAst, TextToAstOptions,
+    contains_blank, equals, eval_exact, expr, simplify, EqOptions, Expr, TextToAst,
+    TextToAstOptions,
 };
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 fn parse(s: &str) -> Option<Expr> {
     TextToAst::new(TextToAstOptions::default()).convert(s).ok()
@@ -58,6 +60,29 @@ fn involves_nonfinite(e: &Expr) -> bool {
     })
 }
 
+/// Certify `simplified == input` by exact evaluation of their difference at one
+/// rational point: free symbols are pinned at distinct small integers and
+/// [`eval_exact::is_zero`] must return `Some(true)` (certified zero — it never
+/// lies). This closes `equals`'s one blind spot, a folded `0` against a residue
+/// like `sin(π) ≈ 1.2e-16` that no relative tolerance can absorb, without
+/// making `simplify` the judge of its own output. `false` on `Some(false)` or
+/// `None` (undecided), so it only ever *adds* accepted cases.
+fn certified_zero_at_a_point(input: &Expr, simplified: &Expr) -> bool {
+    let diff = Expr::Add(vec![
+        input.clone(),
+        Expr::Neg(Box::new(simplified.clone())),
+    ]);
+    // `variables` reports the named constants too; substituting those would
+    // destroy the very special values this check exists to certify.
+    let subs: HashMap<String, Expr> = math_expressions::variables(&diff)
+        .into_iter()
+        .filter(|v| !matches!(v.as_str(), "pi" | "e" | "i" | "infinity"))
+        .enumerate()
+        .map(|(i, v)| (v, Expr::int(2 + 3 * i as i64)))
+        .collect();
+    let at = math_expressions::substitute(&diff, &subs);
+    eval_exact::is_zero(&at, &Assumptions::new()) == Some(true)
+}
 
 /// The set of inputs where our `simplify` result is NOT `equals` to JS's
 /// `.simplify()` output (the advisory JS-agreement gaps). Also asserts the two
@@ -125,20 +150,20 @@ fn collect_js_gaps(assert_invariants: bool) -> BTreeSet<String> {
                     || catch(|| equals(&simplified, &parsed, &opts)).unwrap_or(false)
                     // Sound special-value folds (`sin(π)·x → 0`, `exp(ln x) → x`, …)
                     // that the now-aggressive `simplify` performs are correct, but
-                    // the float-sampling `equals` cannot confirm them — `sin(π)`
-                    // samples as ~1e-16, not exactly 0 — and JS never folded them so
-                    // `agrees` is false too. Certify meaning-preservation via the
-                    // difference instead: `input − simplified` must itself simplify
-                    // to 0. (Only `simplify` knows these special values, so this is
-                    // the strongest available oracle here.)
-                    || catch(|| {
-                        let diff = Expr::Add(vec![
-                            parsed.clone(),
-                            Expr::Neg(Box::new(simplified.clone())),
-                        ]);
-                        matches!(simplify(&diff), Expr::Num(n) if n.is_zero())
-                    })
-                    .unwrap_or(false);
+                    // the float-sampling `equals` cannot confirm them: `sin(π)`
+                    // samples as ~1e-16, and against a folded `0` the relative
+                    // comparison never closes. JS never folded them either, so
+                    // `agrees` is false too.
+                    //
+                    // Certify those via the *difference* instead, using the exact
+                    // algebraic zero tester rather than `simplify` itself: an
+                    // oracle built out of `simplify` would rubber-stamp any
+                    // consistently-wrong special-value table. `is_zero` never
+                    // lies (`Some(true)` means certified zero), and it needs a
+                    // variable-free expression, so free symbols are pinned at
+                    // distinct small integers first — a single certified point,
+                    // on top of the many float points `equals` already sampled.
+                    || catch(|| certified_zero_at_a_point(&parsed, &simplified)).unwrap_or(false);
                 assert!(
                     preserves,
                     "simplify changed the meaning of {:?}: got {:?}",

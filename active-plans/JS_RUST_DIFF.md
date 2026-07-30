@@ -95,8 +95,9 @@ preserved via `js_name`: `mod` (`wasm.rs:205`) and the `Assumptions` class
   `substitute_abs`, `normalize_angle_linesegment_arg_order`,
   `normalize_negative_numbers`.
 - `matrix` (constructor), `scalar_mul` (matrix.js).
-- `integrateNumerically` — Rust integration is symbolic/precise, different
-  contract and name.
+- ~~`integrateNumerically`~~ — **ported**: wasm `integrate_numerically(var,
+  lower, upper)`, exposed by the js-compat drop-in under the JS name. Different
+  contract (certified, `undefined` when it cannot certify — see §4.3).
 - `f()` (returns a JS-callable evaluator) — no equivalent.
 - equality variants: `equalsViaComplex`, `equalsViaSyntax`,
   `equalsViaFiniteField` (boolean), `equalsDiscreteInfinite` (functionality
@@ -155,7 +156,7 @@ preserved via `js_name`: `mod` (`wasm.rs:205`) and the `Assumptions` class
 | discrete infinite set | method `create_discrete_infinite_set(...)` | free fn `discrete_infinite_set(offsets, periods)` | method → free function |
 | assumptions add | `add_assumption(a, exclude_generic)` on Context | `Assumptions.add(relation)->bool` | stateful class instead of Context; drops `exclude_generic`; returns bool |
 | assumption predicates | bundled `get_assumptions(...)` | 8 individual `is_*(expr)->Option<bool>` | split into 8 three-valued predicates |
-| integrate | `integrateNumerically()` (float) | `integrate(var)` / `integrate_to_precision` / `integrate_analyzed` | numeric-only → symbolic + precision variants |
+| integrate | `integrateNumerically()` (float) | `integrate(var)` / `integrate_to_precision` / `integrate_analyzed` / `integrate_numerically` | numeric-only → symbolic + precision variants; the f64 shim is now back too, but certified (see §4.3) |
 | parse entry | `fromText`/`parse` + 4 latex aliases + `fromMml` + auto `from` | `parse_text`, `parse_latex` (+ `_with_options`) | alias fan-out collapsed to two; MML + auto-detect dropped |
 
 ---
@@ -304,17 +305,24 @@ an internal tree-vs-Expression split Rust doesn't need.)
 - **Derivative "story"** — `derivative_story` / `derivativeStory` /
   `derivative_with_story` (step-by-step LaTeX narration). Rust `derivative`
   returns only the result.
-- **`integrateNumerically`** — the fixed-100-interval midpoint routine (Rust's
-  integration is a different, symbolic/precise contract).
+- ~~**`integrateNumerically`**~~ — **ported** as wasm `integrate_numerically`.
+  Not a re-implementation of the fixed-100-interval midpoint routine: it reduces
+  the *certified* quadrature to an f64, so it returns `undefined` where JS would
+  return a silently-wrong estimate (§4.3).
 - `common_denominator` (Rust's analog is the renamed `together`).
 - Unit introspection accessors `get_all_units` / `get_unit_of_tree` /
   `get_unit_value_of_tree` (Rust has desugar/remove/add but no readers).
 
 ### 4.3 Behavioral differences
 
-- **Numeric integration contract** is fundamentally different (JS float midpoint
-  → returns a number; Rust symbolic → returns an expression, or precision-
-  parameterized verified value).
+- **Numeric integration contract** differs even where the names now match. JS
+  `integrateNumerically` is a fixed-100-interval midpoint rule that always
+  returns some number; Rust's `integrate_numerically` reduces the certified
+  adaptive quadrature (10 significant digits) to an f64 and returns
+  `undefined`/`NaN` when it cannot certify — an honest failure instead of a
+  silently-wrong estimate. Rust additionally has no JS counterpart for symbolic
+  `integrate` (returns an expression) or the precision-parameterized
+  `integrate_to_precision` / `integrate_analyzed`.
 - **Rounding**: same three variants; JS defaults digits/decimals to 14, Rust wasm
   takes explicit ints. JS asserts edge behaviors (don't round fractions / π / e /
   fallback) that have **no dedicated Rust test**.
