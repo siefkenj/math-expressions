@@ -116,3 +116,57 @@ impl Expression {
         }
     }
 }
+
+#[cfg(test)]
+mod integrate_numerically_tests {
+    use crate::parse::parse_text;
+
+    fn quad(f: &str, lo: f64, hi: f64) -> Option<f64> {
+        parse_text(f)
+            .unwrap_or_else(|_| panic!("parse {f:?}"))
+            .integrate_numerically("x", lo, hi)
+    }
+
+    fn assert_close(got: Option<f64>, want: f64, what: &str) {
+        let v = got.unwrap_or_else(|| panic!("{what}: expected a certified value, got undefined"));
+        assert!(
+            (v - want).abs() <= 1e-9 * want.abs().max(1.0),
+            "{what}: got {v}, want {want}"
+        );
+    }
+
+    /// The values a caller of the JS `integrateNumerically` shim would get.
+    #[test]
+    fn returns_the_certified_value() {
+        assert_close(quad("x^3", 0.0, 1.0), 0.25, "∫₀¹ x³");
+        assert_close(quad("1/x", 1.0, 2.0), std::f64::consts::LN_2, "∫₁² 1/x");
+        assert_close(quad("exp(-x^2)", -1.0, 1.0), 1.493648265624854, "∫₋₁¹ e^-x²");
+        // Reversed limits are the negated integral, not a failure.
+        assert_close(quad("x^3", 1.0, 0.0), -0.25, "∫₁⁰ x³");
+        // Degenerate interval.
+        assert_close(quad("sin(x)", 1.0, 1.0), 0.0, "∫₁¹ sin");
+    }
+
+    /// The reason the binding asks for 10 digits rather than the certified
+    /// maximum: `∫₀^π sin x = 2` is a near-cancellation case that fails to
+    /// certify at 13 digits. It must still deliver a value.
+    #[test]
+    fn near_cancellation_still_certifies_at_ten_digits() {
+        assert_close(
+            quad("sin(x)", 0.0, std::f64::consts::PI),
+            2.0,
+            "∫₀^π sin (via the f64 π endpoint)",
+        );
+    }
+
+    /// The honest divergence from JS: rather than the silently-wrong estimate
+    /// the JS midpoint rule returns, an integrand it cannot certify yields
+    /// `undefined` (which the js-compat shim maps to `NaN`).
+    #[test]
+    fn uncertifiable_integrands_are_undefined_not_wrong() {
+        // Non-integrable singularity inside the interval: ∫₋₁¹ 1/x diverges.
+        assert_eq!(quad("1/x", -1.0, 1.0), None);
+        // A free variable other than the integration variable is not a number.
+        assert_eq!(quad("x*y", 0.0, 1.0), None);
+    }
+}

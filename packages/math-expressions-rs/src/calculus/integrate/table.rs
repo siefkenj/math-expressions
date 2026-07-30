@@ -1,11 +1,11 @@
 //! The elementary antiderivative table (Rubi cluster 1 + pervasive `a + b·x`
 //! linear substitution): every row is `∫ g(u) dx = G(u)/b` for linear `u`.
 //! The `Apply` arm delegates to `FnDef::antiderivative` in
-//! [`crate::special_functions`]; the `Pow` arm handles powers, exponentials,
+//! [`crate::special_functions`]; [`power_rows`] handles powers, exponentials,
 //! the `1/√(c − b·u²) → asin` row, and integer sin/cos powers (the last via
 //! [`trig_power_integral`]'s power-reduction recursion).
 
-use super::util::{apply, depends_on, int, linear_coeff, over};
+use super::util::{apply, depends_on, int, linear_coeff, over, unary_apply};
 use crate::expr::Expr;
 use crate::normalize::{add, mul, pow};
 use crate::num::Number;
@@ -48,120 +48,112 @@ fn trig_power_integral(fname: &str, u: &Expr, b: &Expr, n: i64, x: &str) -> Expr
 /// substitution): every row is `∫ g(u) dx = G(u)/b` for linear `u`.
 pub(super) fn table_match(e: &Expr, x: &str) -> Option<Expr> {
     match e {
-        // (a+bx)^n and c^(a+bx).
-        Expr::Pow(base0, exp0) => {
-            // `sqrt(w)^k` is `w^(k/2)`: unify so the power rows see one
-            // spelling (canonical form keeps sqrt as an application).
-            let (base, exp): (Expr, Expr) = match (&**base0, &**exp0) {
-                (Expr::Apply(h, args), Expr::Num(n))
-                    if matches!(&**h, Expr::Sym(s) if s.name() == "sqrt")
-                        && args.len() == 1 =>
-                {
-                    (args[0].clone(), Expr::Num(n.mul(&Number::rat(1, 2))))
-                }
-                _ => ((**base0).clone(), (**exp0).clone()),
-            };
-            let (base, exp) = (&base, &exp);
-            // Power of a linear argument with an x-free exponent.
-            if let Some(b) = linear_coeff(base, x) {
-                if !depends_on(exp, x) {
-                    if matches!(exp, Expr::Num(n) if n.to_f64() == -1.0) {
-                        return Some(over(apply("log", base.clone()), &b));
-                    }
-                    // u^n → u^(n+1)/(n+1): exponent must be a number ≠ −1.
-                    if let Expr::Num(n) = exp {
-                        let n1 = n.add(&Number::Int(1));
-                        if !n1.is_zero() {
-                            let f = mul(vec![
-                                pow(base.clone(), Expr::Num(n1.clone())),
-                                pow(Expr::Num(n1), int(-1)),
-                            ]);
-                            return Some(over(f, &b));
-                        }
-                    }
-                }
-            }
-            // Exponential: c^u, x-free base.
-            if !depends_on(base, x) {
-                if let Some(b) = linear_coeff(exp, x) {
-                    let is_e = matches!(base, Expr::Const(crate::expr::MathConst::E))
-                        || matches!(base, Expr::Sym(s) if s.name() == "e");
-                    if is_e {
-                        return Some(over(e.clone(), &b));
-                    }
-                    if matches!(base, Expr::Num(n) if n.is_positive() && !n.is_one()) {
-                        let f = mul(vec![
-                            e.clone(),
-                            pow(apply("log", base.clone()), int(-1)),
-                        ]);
-                        return Some(over(f, &b));
-                    }
-                }
-            }
-            // 1/√(c − b·u²) → asin(u·√(b/c))/√b (the inverse-trig table row
-            // in its canonical Pow clothing).
-            if matches!(exp, Expr::Num(n) if n.to_f64() == -0.5) {
-                if let Some((c, b_coef, u, ub)) = concave_quadratic(base, x) {
-                    let ratio = &b_coef / &c;
-                    let s = super::rational::sqrt_expr(&ratio);
-                    let inv_sqrt_b = pow(super::rational::sqrt_expr(&b_coef), int(-1));
-                    let f = mul(vec![
-                        inv_sqrt_b,
-                        apply("asin", mul(vec![u, s])),
-                    ]);
-                    return Some(over(f, &ub));
-                }
-            }
-            // sec²/csc² in canonical clothing: cos(u)^(−2), sin(u)^(−2).
-            if let (Expr::Apply(h, args), Expr::Num(Number::Int(-2))) = (base, exp) {
-                if let (Expr::Sym(f), [u]) = (&**h, args.as_slice()) {
-                    if let Some(b) = linear_coeff(u, x) {
-                        match f.name().as_str() {
-                            "cos" => return Some(over(apply("tan", u.clone()), &b)),
-                            "sin" => {
-                                let cot = mul(vec![
-                                    int(-1),
-                                    apply("cos", u.clone()),
-                                    pow(apply("sin", u.clone()), int(-1)),
-                                ]);
-                                return Some(over(cot, &b));
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            // Positive integer powers of sin/cos with a linear argument, by the
-            // reduction  ∫sinⁿ(u) dx = −sinⁿ⁻¹(u)·cos(u)/(n·b) + (n−1)/n·∫sinⁿ⁻²(u) dx
-            // (and the sign-flipped cos analogue), bottoming out at ∫1 = x and
-            // ∫sin(u) dx = −cos(u)/b. The `∫sin²x` case is why an un-simplified
-            // `sin²x + cos²x` used to fail entirely.
-            if let (Expr::Apply(h, args), Expr::Num(Number::Int(n))) = (base, exp) {
-                // Bounded: the reduction expands to ~n/2 terms in one shot
-                // (outside the step-fuel loop), so refuse absurd exponents rather
-                // than build a huge tree. 16 covers every realistic case.
-                if (2..=16).contains(n) {
-                    if let (Expr::Sym(f), [u]) = (&**h, args.as_slice()) {
-                        let name = f.name();
-                        if name == "sin" || name == "cos" {
-                            if let Some(b) = linear_coeff(u, x) {
-                                return Some(trig_power_integral(&name, u, &b, *n, x));
-                            }
-                        }
-                    }
-                }
-            }
-            None
-        }
-        Expr::Apply(head, args) => {
+        Expr::Pow(base, exp) => power_rows(e, base, exp, x),
+        Expr::Apply(..) => {
             // The elementary antiderivative table is `FnDef::antiderivative`
             // in `crate::special_functions` (alias-aware: `arctan` finds `atan`).
-            let (Expr::Sym(f), [u]) = (&**head, args.as_slice()) else {
-                return None;
-            };
-            let builder = crate::special_functions::antiderivative_builder(&f.name())?;
+            let (f, u) = unary_apply(e)?;
+            let builder = crate::special_functions::antiderivative_builder(&f)?;
             let b = linear_coeff(u, x)?;
             Some(over(builder(u.clone()), &b))
+        }
+        _ => None,
+    }
+}
+
+/// The `Pow` rows, tried in order: `(a+bx)^n`, `c^(a+bx)`, `1/√(c − b·u²)`,
+/// `sec²`/`csc²`, and integer powers of `sin`/`cos`. `e` is the whole `Pow`
+/// node — the exponential rows emit it back unchanged apart from the `1/b`
+/// factor — and `base` / `exp` are its two children.
+fn power_rows(e: &Expr, base: &Expr, exp: &Expr, x: &str) -> Option<Expr> {
+    // `sqrt(w)^k` is `w^(k/2)`: unify so the rows below see one spelling
+    // (canonical form keeps sqrt as an application).
+    let unified: Option<(Expr, Expr)> = match (unary_apply(base), exp) {
+        (Some((f, w)), Expr::Num(n)) if f == "sqrt" => {
+            Some((w.clone(), Expr::Num(n.mul(&Number::rat(1, 2)))))
+        }
+        _ => None,
+    };
+    let (base, exp) = match &unified {
+        Some((b, k)) => (b, k),
+        None => (base, exp),
+    };
+
+    // Power of a linear argument with an x-free exponent.
+    if let Some(b) = linear_coeff(base, x) {
+        if !depends_on(exp, x) {
+            if matches!(exp, Expr::Num(n) if n.to_f64() == -1.0) {
+                return Some(over(apply("log", base.clone()), &b));
+            }
+            // u^n → u^(n+1)/(n+1): exponent must be a number ≠ −1.
+            if let Expr::Num(n) = exp {
+                let n1 = n.add(&Number::Int(1));
+                if !n1.is_zero() {
+                    let f = mul(vec![
+                        pow(base.clone(), Expr::Num(n1.clone())),
+                        pow(Expr::Num(n1), int(-1)),
+                    ]);
+                    return Some(over(f, &b));
+                }
+            }
+        }
+    }
+    // Exponential: c^u, x-free base.
+    if !depends_on(base, x) {
+        if let Some(b) = linear_coeff(exp, x) {
+            let is_e = matches!(base, Expr::Const(crate::expr::MathConst::E))
+                || matches!(base, Expr::Sym(s) if s.name() == "e");
+            if is_e {
+                return Some(over(e.clone(), &b));
+            }
+            if matches!(base, Expr::Num(n) if n.is_positive() && !n.is_one()) {
+                let f = mul(vec![
+                    e.clone(),
+                    pow(apply("log", base.clone()), int(-1)),
+                ]);
+                return Some(over(f, &b));
+            }
+        }
+    }
+    // 1/√(c − b·u²) → asin(u·√(b/c))/√b (the inverse-trig table row
+    // in its canonical Pow clothing).
+    if matches!(exp, Expr::Num(n) if n.to_f64() == -0.5) {
+        if let Some((c, b_coef, u, ub)) = concave_quadratic(base, x) {
+            let ratio = &b_coef / &c;
+            let s = super::rational::sqrt_expr(&ratio);
+            let inv_sqrt_b = pow(super::rational::sqrt_expr(&b_coef), int(-1));
+            let f = mul(vec![
+                inv_sqrt_b,
+                apply("asin", mul(vec![u, s])),
+            ]);
+            return Some(over(f, &ub));
+        }
+    }
+    // The remaining rows are all `trigfn(u)^n` for an integer `n` and linear `u`.
+    let (Expr::Num(Number::Int(n)), Some((f, u))) = (exp, unary_apply(base)) else {
+        return None;
+    };
+    let b = linear_coeff(u, x)?;
+    match (f.as_str(), *n) {
+        // sec²/csc² in canonical clothing: cos(u)^(−2), sin(u)^(−2).
+        ("cos", -2) => Some(over(apply("tan", u.clone()), &b)),
+        ("sin", -2) => {
+            let cot = mul(vec![
+                int(-1),
+                apply("cos", u.clone()),
+                pow(apply("sin", u.clone()), int(-1)),
+            ]);
+            Some(over(cot, &b))
+        }
+        // Positive integer powers of sin/cos, by the reduction
+        //   ∫sinⁿ(u) dx = −sinⁿ⁻¹(u)·cos(u)/(n·b) + (n−1)/n·∫sinⁿ⁻²(u) dx
+        // (and the sign-flipped cos analogue), bottoming out at ∫1 = x and
+        // ∫sin(u) dx = −cos(u)/b. The `∫sin²x` case is why an un-simplified
+        // `sin²x + cos²x` used to fail entirely. Bounded at 16 because the
+        // reduction expands to ~n/2 terms in one shot (outside the step-fuel
+        // loop), so an absurd exponent must be refused rather than built.
+        ("sin" | "cos", n) if (2..=16).contains(&n) => {
+            Some(trig_power_integral(&f, u, &b, n, x))
         }
         _ => None,
     }

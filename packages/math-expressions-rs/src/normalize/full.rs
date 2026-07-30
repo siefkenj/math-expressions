@@ -32,7 +32,14 @@ use crate::expr::Expr;
 /// the implementation both delegate to, exported under its plan name.
 pub fn full_simplify(e: &Expr, a: &Assumptions) -> Expr {
     // Bound the fixpoint by the same §7f budget as the base simplify's own
-    // rounds; in practice this converges in 2–3 iterations.
+    // rounds; in practice this converges in 2–3 iterations. Clamped to at least
+    // one round so that tightening the budget to 0 (which reduces the base
+    // simplify to plain canonicalization) still runs the special-value and
+    // rational passes once, rather than silently turning `full_simplify` into
+    // `canonicalize`. Termination is by the counter alone — the passes are not
+    // guaranteed to reach a fixpoint on adversarial input, and a run that exits
+    // on the counter simply returns the last tree it produced (still canonical,
+    // still equal to the input, just possibly not idempotent).
     let max_rounds = crate::resource_limits::current()
         .max_simplify_rounds
         .max(1);

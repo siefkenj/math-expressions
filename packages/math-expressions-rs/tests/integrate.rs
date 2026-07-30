@@ -233,3 +233,40 @@ fn honest_failures_within_fuel() {
         );
     }
 }
+
+/// Every stage the pipeline gained must answer to the declared budgets rather
+/// than to its own recursion: the u-sub search to `max_integration_candidates`,
+/// the whole dispatcher (including the re-entrant u-sub and the simplify-retry)
+/// to `max_integration_steps`. Zero of either must make the search fail
+/// cleanly, not loop or panic.
+#[test]
+fn new_stages_answer_to_the_resource_limits() {
+    use math_expressions::resource_limits::{self, ResourceLimits};
+    let integrates = |f: &str, lim: ResourceLimits| {
+        resource_limits::with(lim, || {
+            integrate(&parse(f), "x", &Assumptions::new()).is_some()
+        })
+    };
+    // u-sub is the only stage that can do `x·sin(x²)·cos(x²)`; with no
+    // candidate slots it has nothing to try.
+    let no_candidates = ResourceLimits {
+        max_integration_candidates: 0,
+        ..Default::default()
+    };
+    assert!(!integrates("x sin(x^2) cos(x^2)", no_candidates));
+    assert!(integrates("x sin(x^2) cos(x^2)", ResourceLimits::default()));
+    // Step fuel gates the dispatcher itself, so even `∫ x dx` refuses at 0.
+    let no_fuel = ResourceLimits {
+        max_integration_steps: 0,
+        ..Default::default()
+    };
+    assert!(!integrates("x", no_fuel));
+    // The simplify-retry re-enters the pipeline with a *fresh* budget: one step
+    // is enough for `sin²x + cos²x + 1`, whose first (unsimplified) attempt
+    // already spent one and failed.
+    let one_step = ResourceLimits {
+        max_integration_steps: 1,
+        ..Default::default()
+    };
+    assert!(integrates("sin(x)^2 + cos(x)^2 + 1", one_step));
+}

@@ -18,6 +18,20 @@ pub(super) fn depends_on(e: &Expr, x: &str) -> bool {
     crate::ops::variables(e).iter().any(|v| v == x)
 }
 
+/// Destructure a single-argument application of a *named* function — `f(u)`,
+/// the shape every table row keys on — into `(name, u)`. `None` for anything
+/// else, including the `f^n(x)` spelling, whose head is a `Pow` rather than a
+/// bare symbol.
+pub(super) fn unary_apply(e: &Expr) -> Option<(String, &Expr)> {
+    let Expr::Apply(head, args) = e else {
+        return None;
+    };
+    let (Expr::Sym(f), [u]) = (&**head, args.as_slice()) else {
+        return None;
+    };
+    Some((f.name(), u))
+}
+
 pub(super) fn over(e: Expr, b: &Expr) -> Expr {
     if matches!(b, Expr::Num(n) if n.is_one()) {
         e

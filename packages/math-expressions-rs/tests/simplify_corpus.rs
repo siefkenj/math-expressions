@@ -7,8 +7,12 @@
 //! The oracle is **own-reducedness**, not tree-match to JS (see §7e). For each
 //! input we check three things about our `simplify`:
 //!
-//! - **meaning-preserving** — `equals(simplify(input), input)`. A failure here
-//!   is a correctness bug and is never acceptable (asserted, no snapshot).
+//! - **meaning-preserving** — `equals(simplify(input), input)`, widened by the
+//!   certified sample-point check ([`certified_verdicts`]) for the folds
+//!   float sampling cannot confirm, and *narrowed* by the same check: a
+//!   certified counterexample fails the test even when the result matches JS.
+//!   A failure here is a correctness bug and is never acceptable (asserted, no
+//!   snapshot).
 //! - **reduced (fixpoint)** — `simplify(simplify(input)) == simplify(input)`
 //!   structurally. Also a hard invariant of the design (asserted).
 //! - **JS agreement (advisory)** — `equals(simplify(input), <JS's tree>)`. This is
@@ -60,28 +64,56 @@ fn involves_nonfinite(e: &Expr) -> bool {
     })
 }
 
-/// Certify `simplified == input` by exact evaluation of their difference at one
-/// rational point: free symbols are pinned at distinct small integers and
-/// [`eval_exact::is_zero`] must return `Some(true)` (certified zero — it never
-/// lies). This closes `equals`'s one blind spot, a folded `0` against a residue
-/// like `sin(π) ≈ 1.2e-16` that no relative tolerance can absorb, without
-/// making `simplify` the judge of its own output. `false` on `Some(false)` or
-/// `None` (undecided), so it only ever *adds* accepted cases.
-fn certified_zero_at_a_point(input: &Expr, simplified: &Expr) -> bool {
+/// The integers the free symbols are pinned at, one round per entry (symbol
+/// `i` of a round gets `base + 2i`, so a round's assignment is injective).
+/// Deliberately not 0, ±1 or 2: `2 + 2 = 2·2 = 2² = 4`, so a symbol pinned at 2
+/// makes a whole family of wrong rewrites agree.
+const CERTIFY_POINTS: [i64; 3] = [3, 5, 11];
+
+/// Exactly evaluate `input − simplified` once per entry in [`CERTIFY_POINTS`],
+/// returning [`eval_exact::is_zero`]'s verdict for each: `Some(true)` =
+/// certified zero there, `Some(false)` = certified *nonzero* there, `None` =
+/// undecided (what a pole such as `1/(x−3)` at `x = 3` yields, and why a
+/// missing verdict is tolerated rather than treated as failure).
+///
+/// The two directions are **not** equally strong, and the caller uses them
+/// differently:
+///
+/// * one `Some(false)` is a *proof* that the rewrite changed the value — the
+///   exact tower fully decided both sides at that point and they differ;
+/// * all-`Some(true)` is *evidence only*. Agreement at finitely many points
+///   cannot certify equality (`x·(x−3)` also vanishes at 3), so it is used
+///   solely to widen the accepted set, layered on top of the many float points
+///   `equals` already sampled — never as the sole warrant for a new rule.
+///
+/// It exists for the folds `equals` structurally cannot confirm: against a
+/// folded `0` the residue `sin(π) ≈ 1.2e-16` has no relative tolerance that
+/// closes. Deliberately not built out of `simplify`, which would let a
+/// consistently-wrong special-value table rubber-stamp its own output.
+fn certified_verdicts(input: &Expr, simplified: &Expr) -> Vec<Option<bool>> {
     let diff = Expr::Add(vec![
         input.clone(),
         Expr::Neg(Box::new(simplified.clone())),
     ]);
-    // `variables` reports the named constants too; substituting those would
-    // destroy the very special values this check exists to certify.
-    let subs: HashMap<String, Expr> = math_expressions::variables(&diff)
+    // `variables` reports the named constants (`pi`, `e`, `i`) too; substituting
+    // those would destroy the very special values this check exists to certify.
+    // Same filter `eval_exact` itself uses to decide what counts as free.
+    let free: Vec<String> = math_expressions::variables(&diff)
         .into_iter()
-        .filter(|v| !matches!(v.as_str(), "pi" | "e" | "i" | "infinity"))
-        .enumerate()
-        .map(|(i, v)| (v, Expr::int(2 + 3 * i as i64)))
+        .filter(|v| !math_expressions::expr::sym::is_constant_symbol(v))
         .collect();
-    let at = math_expressions::substitute(&diff, &subs);
-    eval_exact::is_zero(&at, &Assumptions::new()) == Some(true)
+    CERTIFY_POINTS
+        .iter()
+        .map(|base| {
+            let subs: HashMap<String, Expr> = free
+                .iter()
+                .enumerate()
+                .map(|(i, v)| (v.clone(), Expr::int(base + 2 * i as i64)))
+                .collect();
+            let at = math_expressions::substitute(&diff, &subs);
+            eval_exact::is_zero(&at, &Assumptions::new())
+        })
+        .collect()
 }
 
 /// The set of inputs where our `simplify` result is NOT `equals` to JS's
@@ -130,40 +162,44 @@ fn collect_js_gaps(assert_invariants: bool) -> BTreeSet<String> {
             // the input OR equal to JS's reduced output — JS being the
             // real-domain correctness oracle (§7e).
             //
-            // KNOWN HOLE in the `agrees ||` escape: a rewrite that changes
-            // meaning but happens to reproduce JS's tree passes unchecked (by
-            // construction it cannot be distinguished from a sanctioned
-            // real-domain identity). Acceptable while rules are designed from
-            // identities and JS is only a cross-check; if a rule is ever
-            // authored by pattern-matching JS output, tighten this to an
-            // explicit allowlist of sanctioned divergences (or a real-domain
-            // `equals` mode) instead. `Blank` inputs are exempt
-            // (the equals stage-0 guard rejects them outright), as are non-finite
-            // results (∞/NaN/poles): `equals` samples finite complex points and
-            // has no verdict there, so it cannot judge meaning either way.
+            // The `agrees ||` escape used to be an unchecked hole: a rewrite
+            // that changes meaning but happens to reproduce JS's tree could not
+            // be told apart from a sanctioned real-domain identity. The
+            // certified verdicts below now close it for everything the exact
+            // tower can decide — a certified counterexample fails the test
+            // regardless of what JS produced. What remains uncovered is the
+            // class `eval_exact` answers `None` on; if a rule is ever authored
+            // by pattern-matching JS output, tighten the escape to an explicit
+            // allowlist of sanctioned divergences (or a real-domain `equals`
+            // mode) instead. `Blank` inputs are exempt (the equals stage-0
+            // guard rejects them outright), as are non-finite results
+            // (∞/NaN/poles): `equals` samples finite complex points and has no
+            // verdict there, so it cannot judge meaning either way.
             let judgeable = !contains_blank(&parsed)
                 && !contains_blank(&simplified)
                 && !involves_nonfinite(&parsed)
                 && !involves_nonfinite(&simplified);
             if judgeable {
+                let verdicts = catch(|| certified_verdicts(&parsed, &simplified)).unwrap_or_default();
+                // Proof direction: `input − simplified` is certified *nonzero*
+                // at a point, so the rewrite is wrong however JS spells it.
+                assert!(
+                    !verdicts.contains(&Some(false)),
+                    "simplify changed the value of {:?} at a certified point: got {:?}",
+                    c.input,
+                    simplified,
+                );
+                // Evidence direction: certified zero at every sample point.
+                // This is what accepts the sound special-value folds
+                // (`sin(π)·x → 0`) that the float-sampling `equals` cannot
+                // confirm — `sin(π)` samples as ~1e-16, and against a folded
+                // `0` the relative comparison never closes. JS never folded
+                // them either, so `agrees` is false too.
+                let certified =
+                    !verdicts.is_empty() && verdicts.iter().all(|v| *v == Some(true));
                 let preserves = agrees
                     || catch(|| equals(&simplified, &parsed, &opts)).unwrap_or(false)
-                    // Sound special-value folds (`sin(π)·x → 0`, `exp(ln x) → x`, …)
-                    // that the now-aggressive `simplify` performs are correct, but
-                    // the float-sampling `equals` cannot confirm them: `sin(π)`
-                    // samples as ~1e-16, and against a folded `0` the relative
-                    // comparison never closes. JS never folded them either, so
-                    // `agrees` is false too.
-                    //
-                    // Certify those via the *difference* instead, using the exact
-                    // algebraic zero tester rather than `simplify` itself: an
-                    // oracle built out of `simplify` would rubber-stamp any
-                    // consistently-wrong special-value table. `is_zero` never
-                    // lies (`Some(true)` means certified zero), and it needs a
-                    // variable-free expression, so free symbols are pinned at
-                    // distinct small integers first — a single certified point,
-                    // on top of the many float points `equals` already sampled.
-                    || catch(|| certified_zero_at_a_point(&parsed, &simplified)).unwrap_or(false);
+                    || certified;
                 assert!(
                     preserves,
                     "simplify changed the meaning of {:?}: got {:?}",

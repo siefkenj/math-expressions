@@ -102,20 +102,24 @@ fn push_not(e: &Expr) -> Expr {
     map_children(e, push_not)
 }
 
-/// [`simplify`] without the final presentation pass: the result is canonical,
-/// for internal callers that pattern-match on canonical shapes.
+/// The **base** rewrite rounds without the final presentation pass: the result
+/// is canonical, for internal callers that pattern-match on canonical shapes.
+/// This is [`simplify_base_with`] minus `present`, *not* the public (now
+/// aggressive) [`simplify`] minus `present` — the special-value and
+/// rational-cancellation passes are not run. Callers that want those want
+/// [`full_simplify`](crate::full_simplify).
 pub(crate) fn simplify_core(e: &Expr) -> Expr {
     simplify_core_with(e, &Assumptions::new())
 }
 
-/// [`simplify_with`] without the final presentation pass.
+/// [`simplify_base_with`] without the final presentation pass.
 pub(crate) fn simplify_core_with(e: &Expr, assumptions: &Assumptions) -> Expr {
     simplify_rounds(canonicalize(e), assumptions)
 }
 
-/// Simplify a tree that is *already canonical*, skipping the initial
-/// canonicalize. `equals` calls this after its canonical fast path so the
-/// canonicalization it already paid for is not repeated.
+/// The base rewrite rounds on a tree that is *already canonical*, skipping the
+/// initial canonicalize. `equals` calls this after its canonical fast path so
+/// the canonicalization it already paid for is not repeated.
 pub(crate) fn simplify_canonical(cur: Expr) -> Expr {
     simplify_rounds(cur, &Assumptions::new())
 }

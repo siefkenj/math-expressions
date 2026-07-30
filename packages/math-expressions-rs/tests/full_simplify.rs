@@ -77,6 +77,21 @@ fn idempotent() {
     }
 }
 
+/// The fixpoint driver terminates on the round counter alone, and the counter
+/// is clamped to at least one round — so even at a budget of 0 (which reduces
+/// the base simplify to plain canonicalization) the special-value pass still
+/// runs once, instead of `full_simplify` silently degrading to `canonicalize`.
+#[test]
+fn fixpoint_is_bounded_by_the_round_budget() {
+    use math_expressions::resource_limits::{self, ResourceLimits};
+    let floor = ResourceLimits {
+        max_simplify_rounds: 0,
+        ..Default::default()
+    };
+    let out = resource_limits::with(floor, || fs("exp(ln(x))"));
+    assert_eq!(out, p("x"), "the clamped single round must still fold");
+}
+
 #[test]
 fn meaning_preserving_on_reliable_inputs() {
     // Use `equals` only where it is reliable (polynomial/rational). The new

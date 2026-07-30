@@ -40,6 +40,13 @@ pub fn integrate(f: &Expr, x: &str, assumptions: &Assumptions) -> Option<Expr> {
     // identity layer; if it actually changed the shape, integrating the result
     // can succeed where the raw form could not. This runs only on the failure
     // path, so the common case pays nothing.
+    //
+    // Budget: the retry re-enters the pipeline from the top and therefore gets
+    // its own `max_integration_steps`, so a worst-case `integrate` costs two
+    // budgets rather than one. Deliberate — the two attempts run on
+    // structurally different integrands, and sharing one budget would let a
+    // hopeless first attempt starve the retry. Still a constant factor: there
+    // are exactly two attempts, and `fs != fc` cannot re-trigger the retry.
     let fs = crate::normalize::simplify(&fc);
     if fs != fc {
         return integrate_verified(&fs, x, assumptions);
