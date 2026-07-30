@@ -82,6 +82,32 @@ the wasm end-to-end suite, and the drop-in suite. The Rust suite includes
 differential corpora checked against the original JS/mathjs behavior
 (`packages/math-expressions-rs/tests/fixtures/`).
 
+## Module map (2026-07 reorganization)
+
+The core crate's modules were regrouped by concern.
+`packages/math-expressions-rs/src/lib.rs` documents the resulting facade tiers;
+the table below translates the old names, which the historical design notes in
+`active-plans/` still use.
+
+| was                                    | is now                                          |
+| -------------------------------------- | ----------------------------------------------- |
+| `norm/`                                | `normalize/`                                    |
+| `exact.rs`                             | `eval_exact/`                                   |
+| `precise/`                             | `eval_numeric/certified_digits/`                |
+| `eval/`                                | `eval_numeric/complex.rs`                       |
+| `functions/`                           | `special_functions/`                            |
+| `output/`                              | `print/`                                        |
+| `diff.rs`, `integrate/`                | `calculus/diff.rs`, `calculus/integrate/`       |
+| `factor.rs`, `ratform.rs`, `rootof.rs` | `polynomials/{factor,ratform,rootof}.rs`        |
+| `poly/`, `upoly.rs`                    | `polynomials/{multivariate,univariate}.rs`      |
+| `numeric.rs`, `ode.rs`                 | `mathjs_compat/{dense_f64,ode}.rs`              |
+| `expr.rs`, `sym.rs`, `js_tree.rs`      | `expr/{tree,sym,serde}.rs`                      |
+| `js_match.rs`                          | `math-expressions-rs-wasm/src-rust/js_match.rs` |
+| `matrix/kernels.rs`                    | `matrix/elimination.rs`                         |
+
+`ops.rs`, `num.rs`, `assumptions/mod.rs` and `functions/mod.rs` were also split
+into submodules; each new barrel module's `//!` docs list its parts.
+
 ## History
 
 The pre-port JavaScript library (`lib/`) and its Vitest suite (`spec/`) now live

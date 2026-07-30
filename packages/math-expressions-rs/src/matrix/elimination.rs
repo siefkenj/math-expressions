@@ -231,7 +231,7 @@ fn entry_nonzero(e: &Expr, assumptions: &Assumptions) -> Option<bool> {
         .iter()
         .all(|v| crate::expr::sym::is_constant_symbol(v));
     if variable_free {
-        // exact::is_zero never samples on variable-free input.
+        // eval_exact::is_zero never samples on variable-free input.
         return crate::eval_exact::is_zero(e, assumptions).map(|z| !z);
     }
     None

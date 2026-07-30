@@ -113,7 +113,7 @@ fn quotient_nullspace(
 }
 
 /// Eigenvectors: for each eigenvalue, the nullspace of `A − λI` computed over
-/// ℚ[t]/(minimal factor), components emerging as polynomials in the abstract
+/// `ℚ[t]`/(minimal factor), components emerging as polynomials in the abstract
 /// eigenvalue. Rational literal matrices only; `None` = honest refusal.
 pub fn eigenvectors(e: &Expr, _assumptions: &crate::assumptions::Assumptions) -> Option<Vec<EigenPair>> {
     let c = canonicalize(e);

@@ -1,9 +1,14 @@
 # Symbolic Integration Plan
 
-> **PROGRESS (audited 2026-07-20):** PARTIAL — I1–I2 shipped (indefinite
-> integration, differentiation-gated; wasm `integrate`). I3–I5 open
-> (`WHATS_LEFT.md` §B.2, items 27–29): by-parts/trig clusters/√-substitutions,
-> hypergeometric terminal node, `integrate_with_story` + presentation polish.
+> **PROGRESS (audited 2026-07-28):** PARTIAL — I1–I2 shipped (indefinite
+> integration, differentiation-gated; wasm `integrate`). The engine now lives
+> in `src/calculus/integrate/` (a `mod.rs` pipeline driver over the
+> `rational` / `table` / `usub` stages). Added 2026-07-28: integer powers of
+> `sin`/`cos` with a linear argument, via the power-reduction recursion, and a
+> retry of the whole pipeline on the *simplified* integrand when the raw form
+> fails (so `∫ sin²x + cos²x dx` succeeds). I3–I5 open (`WHATS_LEFT.md` §B.2,
+> items 27–29): by-parts/trig clusters/√-substitutions, hypergeometric terminal
+> node, `integrate_with_story` + presentation polish.
 
 Design for symbolic (indefinite) integration in `math-expressions-rs`, based
 on an investigation of the Rubi rule-based integrator as foundation, with
@@ -14,9 +19,11 @@ non-elementary antiderivatives. Companion documents: `active-plans/DONE_MATRIX_P
 there, §5; numeric self-verification uses its quadrature hooks).
 
 **This is new capability, not porting.** The JS library has no symbolic
-integration (only `integrateNumerically`, itself unported — PORTING_PLAN
-§17). Everything here is beyond-JS, consistent with the divergence pattern
-already established (assumptions-driven `abs`, matrices, precision).
+integration — only `integrateNumerically`, which is now covered by the
+certified quadrature (`Expression::integrate_numerically`, 2026-07-28; see
+`NUMERIC_INTEGRATION_F64_PLAN.md`). Everything here is beyond-JS, consistent
+with the divergence pattern already established (assumptions-driven `abs`,
+matrices, precision).
 
 ---
 

@@ -1,8 +1,10 @@
-//! `full_simplify` — the aggressive (non-oracle) simplifier that exposes the
-//! landed S1–S4 sound passes (FULL_SIMPLIFY_PLAN). Unlike `simplify`, it may
-//! fold `exp(ln x) → x` and trig special values the JS corpus never had.
+//! `full_simplify` — the aggressive simplifier that runs the landed S1–S4 sound
+//! passes (FULL_SIMPLIFY_PLAN): it folds `exp(ln x) → x` and the trig special
+//! values the JS corpus never had. It is now the engine behind the public
+//! `simplify` (no assumptions) and `simplify_with` (with assumptions), so this
+//! file also pins that the three agree.
 
-use math_expressions::{full_simplify, simplify, Assumptions, Expr, TextToAst};
+use math_expressions::{full_simplify, simplify, simplify_with, Assumptions, Expr, TextToAst};
 
 fn p(s: &str) -> Expr {
     TextToAst::new(Default::default())
@@ -91,10 +93,42 @@ fn meaning_preserving_on_reliable_inputs() {
 fn simplify_now_folds_like_full_simplify() {
     // `simplify` is now the aggressive simplifier: it folds `exp(ln x) → x` and
     // the trig/exp/log special values (previously only `full_simplify` did), so
-    // the two are equivalent. (The JS-corpus-compatible base is retained
-    // internally as `simplify_base`, but is no longer the public `simplify`.)
+    // the two are equivalent. (The JS-corpus-compatible base survives only as
+    // the crate-internal `simplify_base_with`.)
     assert_eq!(simplify(&p("exp(ln(x))")), p("x"));
     for s in ["exp(ln(x))", "sin(pi/6)", "ln(1) + e^0", "cos(0)*x"] {
         assert_eq!(simplify(&p(s)), fs(s), "simplify != full_simplify on {s:?}");
     }
+}
+
+#[test]
+fn simplify_with_no_assumptions_equals_simplify() {
+    // Adding assumptions must never make the simplifier *weaker*: `simplify_with`
+    // runs the same aggressive pipeline, so with an empty set it is `simplify`.
+    for s in [
+        "exp(ln(x))",
+        "cos(pi/3)",
+        "(x^2-1)/(x-1)",
+        "sin(x)^2 + cos(x)^2",
+        "ln(1) + e^0",
+    ] {
+        assert_eq!(
+            simplify_with(&p(s), &Assumptions::new()),
+            simplify(&p(s)),
+            "simplify_with(∅) != simplify on {s:?}"
+        );
+    }
+}
+
+#[test]
+fn simplify_with_assumptions_keeps_the_aggressive_folds() {
+    // The assumption-aware rules layer *on top of* the aggressive passes rather
+    // than replacing them: `sqrt(x^2)` resolves by sign AND `exp(ln …)` folds.
+    let mut a = Assumptions::new();
+    a.add(&p("x > 0"));
+    assert_eq!(simplify_with(&p("sqrt(x^2)"), &a), simplify(&p("x")));
+    assert_eq!(
+        simplify_with(&p("exp(ln(x)) + sqrt(x^2)"), &a),
+        simplify(&p("2*x"))
+    );
 }

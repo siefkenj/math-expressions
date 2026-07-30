@@ -32,32 +32,38 @@ use super::{add, canonicalize, mul, split_coeff};
 /// (`normalize::present`): polynomial term order, division instead of negative
 /// exponents, explicit `Neg`.
 ///
-/// This is now the **aggressive** simplifier — it always runs [`full_simplify`]:
-/// the base canonical simplify plus the sound special-value (`exp(ln x) → x`,
-/// trig at the π/12 lattice, `ln 1`, …) and rational-cancellation passes,
-/// iterated to a fixpoint. (Previously `simplify` was the base only, kept
-/// byte-compatible with the JS `.simplify()` corpus; the aggressive form was the
-/// opt-in `full_simplify`.) Internal code that specifically needs the base
-/// behavior uses [`simplify_base`]; code that needs the canonical (non-display)
+/// This is the **aggressive** simplifier — it is exactly
+/// [`full_simplify`](crate::full_simplify) with no assumptions: the base
+/// canonical simplify plus the sound special-value (`exp(ln x) → x`, trig at
+/// the π/12 lattice, `ln 1`, …) and rational-cancellation passes, iterated to a
+/// fixpoint. (Previously `simplify` was the base only, kept byte-compatible
+/// with the JS `.simplify()` corpus; the aggressive form was the opt-in
+/// `full_simplify`.) Internal code that specifically needs the base behavior
+/// uses [`simplify_base_with`]; code that needs the canonical (non-display)
 /// shape uses [`simplify_core`].
 pub fn simplify(e: &Expr) -> Expr {
     crate::normalize::full_simplify(e, &Assumptions::new())
 }
 
-/// The base canonical simplify in display form — `simplify`'s pre-`full_simplify`
-/// behavior (JS-corpus compatible: no `exp(ln x) → x` etc.). Used by
-/// [`full_simplify`] as its per-round base (so it does not recurse into the now
-/// aggressive public [`simplify`]), and by any internal caller that wants only
-/// the base reductions.
-pub(crate) fn simplify_base(e: &Expr) -> Expr {
-    super::present(&simplify_core(e))
+/// The base canonical simplify in display form — `simplify`'s
+/// pre-`full_simplify` behavior (JS-corpus compatible: no `exp(ln x) → x` etc.)
+/// under the given assumptions. Used by
+/// [`full_simplify`](crate::full_simplify) as its per-round base, so the
+/// fixpoint driver does not recurse into the now-aggressive public
+/// [`simplify`] / [`simplify_with`].
+pub(crate) fn simplify_base_with(e: &Expr, assumptions: &Assumptions) -> Expr {
+    super::present(&simplify_core_with(e, assumptions))
 }
 
-/// Simplify under variable assumptions: everything `simplify` does, plus the
+/// Simplify under variable assumptions: everything [`simplify`] does, plus the
 /// assumption-aware rules (JS `simplify(assumptions)`), e.g.
 /// `sqrt(x²) → x` under `x > 0` and `sqrt(x²) → |x|` under `x ∈ R`.
+///
+/// Like [`simplify`] this runs the full aggressive pipeline, so an empty
+/// `assumptions` set makes it *identical* to [`simplify`] — adding a fact can
+/// only ever make the simplifier stronger, never weaker.
 pub fn simplify_with(e: &Expr, assumptions: &Assumptions) -> Expr {
-    super::present(&simplify_core_with(e, assumptions))
+    crate::normalize::full_simplify(e, assumptions)
 }
 
 /// Port of `me.simplify_logical`: numeric folding under assumptions, then push
@@ -773,7 +779,7 @@ fn simplify_root(degree: i64, radicand: &Expr, root: Root) -> Option<Expr> {
 /// q-th-power-free remainder. `c >= 1`, `q >= 2`.
 ///
 /// Bounded on adversarial input (the "canonicalization must stay cheap on any
-/// input" rule — cf. the factorial and pow caps in norm/mod.rs): the
+/// input" rule — cf. the factorial and pow caps in normalize/constructors.rs): the
 /// perfect-power case is decided in O(log c) by an integer nth-root, and
 /// partial extraction trial-divides only up to a small cap, so
 /// `sqrt(<19-digit prime>)` cannot stall `equals()`. Beyond the cap a large

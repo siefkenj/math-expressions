@@ -172,7 +172,7 @@ fn outer_derivative(fname: &str, arg: &Expr) -> Option<Expr> {
 
 /// The mathjs `d/dx f(x)` output for each supported `f`, as a text template in
 /// the placeholder `x`. The table is `FnDef::derivative` in
-/// `crate::functions` (alias-aware, so `arc*` spellings find the `a*` entry).
+/// `crate::special_functions` (alias-aware, so `arc*` spellings find the `a*` entry).
 fn template_for(fname: &str) -> Option<&'static str> {
     crate::special_functions::derivative_template(fname)
 }

@@ -3,6 +3,7 @@
 ## Status — IMPLEMENTED (Part A + Part B)
 
 Done and green (`cargo test -p math-expressions` passes, no regressions):
+
 - **Part A** — `max_parse_steps` in `resource_limits.rs`; `steps`/`max_steps` +
   `tick()` in the shared parser state (reset in `convert`); `self.tick()?` in
   **all 22 loops** across `shared_grammar.rs` (11), `text.rs` (5), `latex.rs` (6);
@@ -26,7 +27,7 @@ nesting against `MAX_PARSE_DEPTH` (or bound AST depth) so `^`×N errors like `!`
 ## Context
 
 The playground froze when a user typed `\begin{bmatrix}` in LaTeX mode. Investigation
-showed **both** parsers (the canonical JS library *and* the Rust port) infinite-loop
+showed **both** parsers (the canonical JS library _and_ the Rust port) infinite-loop
 on an **opened-but-unclosed environment**. Reproduced against the Rust wasm:
 `parse_latex("\\begin{bmatrix}")` and `parse_latex("\\begin{bmatrix} 1")` never return;
 `\begin{bmatrix} 1 \end{bmatrix}` is fine. The playground has a stop-gap guard
@@ -57,15 +58,16 @@ lexer.rs L1110). The loop condition never becomes false and no token is consumed
 ### Why the existing safeguards miss it
 
 The parsers already bound **recursion depth** (`shared_grammar.rs` `enter()`/`leave()`
-+ `depth`, cap `MAX_PARSE_DEPTH = 64` in `common.rs`) — that catches nesting/prefix
-chains (`(((…`, `----x`). It does **not** bound **loop iterations**, and the matrix
-loop is a flat `while`, not recursion. `resource_limits.rs` is the crate's single
-source of truth for deterministic operation budgets (`max_expand_terms`,
-`max_integration_steps`, …) but has **no parse-step budget**. That is the gap.
+
+- `depth`, cap `MAX_PARSE_DEPTH = 64` in `common.rs`) — that catches nesting/prefix
+  chains (`(((…`, `----x`). It does **not** bound **loop iterations**, and the matrix
+  loop is a flat `while`, not recursion. `resource_limits.rs` is the crate's single
+  source of truth for deterministic operation budgets (`max_expand_terms`,
+  `max_integration_steps`, …) but has **no parse-step budget**. That is the gap.
 
 ### Goal
 
-1. A **blanket fix — parse fuel**: a deterministic per-parse step budget so *any*
+1. A **blanket fix — parse fuel**: a deterministic per-parse step budget so _any_
    loop that fails to make progress (this bug and any future one) aborts with a
    clean `ParseError` instead of hanging.
 2. A **deterministic adversarial + enumeration test suite** that proves termination
@@ -83,22 +85,27 @@ depth budget. It is deterministic (operation count, never wall-clock — matches
 `resource_limits` doctrine), so verdicts are identical on every machine.
 
 ### A1. Budget lives in `resource_limits.rs`
+
 Add to `ResourceLimits`:
+
 ```rust
 /// Total parser steps (loop iterations across a single parse) before the
 /// input is refused. Far above any real expression; low enough that a
 /// non-progressing loop aborts in microseconds.
 pub max_parse_steps: usize,   // default e.g. 5_000_000 (usize: matches depth, wasm32-native)
 ```
+
 Wire into `Default` and any preset constructors. Scopable via the existing
 `resource_limits::with(...)` — tests set a tiny budget to exercise the abort path
 deterministically.
 
 ### A2. Fuel counter in the shared parser state (`shared_grammar.rs`)
+
 Alongside `depth`, add `steps: usize`. Reset in `convert()` (which already does
 `self.depth = 0`). Read the cap once from `resource_limits::current().max_parse_steps`.
 
 ### A3. A `tick()` method (mirrors `enter()`)
+
 ```rust
 fn tick(&mut self) -> R<()> {
     self.steps += 1;
@@ -110,19 +117,23 @@ fn tick(&mut self) -> R<()> {
 ```
 
 ### A4. Call `self.tick()?` at the top of every unbounded loop
+
 Both files, every `while` / `loop`. Inventory (from grep):
+
 - `latex.rs`: matrix env L407 (**the bug**); prime L579; caret L583;
   `non_minus_factor` while-let L769; `loop {}` L886.
 - `text.rs`: prime L368; caret L373; `non_minus_factor` L498; `loop {}` L615.
 - `shared_grammar.rs`: `statement_list` comma loop L43.
 
 (Bounded index loops like `while i + 1 < ops.len()` don't need it, but ticking them
-is harmless and keeps the rule mechanical: *every loop ticks*.) Each iteration now
+is harmless and keeps the rule mechanical: _every loop ticks_.) Each iteration now
 consumes fuel, so a non-advancing loop burns the budget and aborts.
 
 ### A5. Local hardening (defense-in-depth + good UX)
+
 Fuel is the backstop; add the precise fix so the common case gives a good message,
 not the generic budget error:
+
 - Matrix loop: terminate on `Tok::Eof` too —
   `while !matches!(self.token.ttype, Tok::EndEnvironment | Tok::Eof)`. The existing
   post-loop check then yields `"Expecting \end{bmatrix}"`.
@@ -130,12 +141,13 @@ not the generic budget error:
   path that can spin without advancing; give each an explicit `Eof` exit.
 
 ### A6. (Optional) debug-only forward-progress assertion
+
 In debug builds, record the lexer byte offset at each advance-driven loop head and
 `debug_assert!` it strictly increases (or a structural counter did) — catches a
-missing EOF exit *at its source* during development, with the fuel budget as the
+missing EOF exit _at its source_ during development, with the fuel budget as the
 release-mode guarantee. Ship fuel; keep this behind `cfg!(debug_assertions)`.
 
-**Why fuel is the right blanket:** it bounds total work regardless of *why* a loop
+**Why fuel is the right blanket:** it bounds total work regardless of _why_ a loop
 won't stop (missing EOF exit, mis-lexed token, pathological-but-progressing input),
 so it covers the whole class — including loops added in the future — in one place.
 
@@ -148,15 +160,16 @@ Build on the repo's precedent: `tests/rootof_adversarial.rs` (adversarial naming
 check).
 
 **Everything here is fully deterministic — no randomness, no RNG, no seeded
-generators.** Coverage comes from *systematic enumeration* (truncation sweeps,
+generators.** Coverage comes from _systematic enumeration_ (truncation sweeps,
 bounded exhaustive combinations, and deterministic single-edit mutations), not
 sampling. `proptest` is deliberately **not** used. Every run parses exactly the same
 inputs, so a failure is always reproducible and CI is never flaky.
 
 ### B1. Curated adversarial corpus — `tests/parse_adversarial.rs`
+
 A table of hand-written pathological inputs, each asserted to return `Ok|Err`
 (never panic, never hang) for **both** `parse_text` and `parse_latex`, under a small
-`resource_limits::with` budget so termination is *proven by the budget*, not timing:
+`resource_limits::with` budget so termination is _proven by the budget_, not timing:
 
 - **Unclosed / mismatched environments** — `\begin{bmatrix}`, `\begin{bmatrix} 1`,
   `\begin{bmatrix} 1 & 2`, `\begin{bmatrix}\end{pmatrix}`, nested
@@ -173,8 +186,9 @@ Includes the explicit regression: `parse_latex("\\begin{bmatrix}")` → `Err`
 (pre-fix hangs; post-fix returns quickly).
 
 ### B2. Systematic enumeration — `tests/parse_enumeration.rs` (deterministic)
-Three enumerators, no randomness. Each asserts *"parse returns (Ok|Err) without
-panic under the fuel budget"* for both parsers on **every** generated input:
+
+Three enumerators, no randomness. Each asserts _"parse returns (Ok|Err) without
+panic under the fuel budget"_ for both parsers on **every** generated input:
 
 1. **Truncation sweep** — the highest-yield method for unclosed-construct bugs, and
    fully deterministic. Take a fixed list of known-good expressions (text + LaTeX,
@@ -182,23 +196,24 @@ panic under the fuel budget"* for both parsers on **every** generated input:
    `s[..i]` for `i` in `0..=s.len()` (respecting char boundaries). This mechanically
    produces every half-open construct — `\begin{bmatrix}`, `\begin{bmatrix}1&`,
    `\frac{`, `\sqrt{2` — which is exactly the bug family.
-2. **Bounded exhaustive combinations** — a small curated alphabet of *dangerous
-   tokens* (`\begin{bmatrix}`, `\end{bmatrix}`, `&`, `\\`, `^`, `_`, `!`, `(`, `{`,
+2. **Bounded exhaustive combinations** — a small curated alphabet of _dangerous
+   tokens_ (`\begin{bmatrix}`, `\end{bmatrix}`, `&`, `\\`, `^`, `_`, `!`, `(`, `{`,
    `[`, `|`, `1`, `x`) and enumerate **all** sequences up to length `k` (e.g. k=4 →
    ≤ 13⁴ ≈ 28k cases, a fixed, exhaustive set). Catches ordering-dependent loops
    (e.g. `\begin{bmatrix}` followed only by `&`/`\\` and then EOF).
 3. **Deterministic single-edit mutations** — for each corpus/known-good input, apply
-   *every* single-token deletion, duplication, and dangerous-token insertion at
-   *every* position (a full, ordered sweep — no random choice). Surfaces "valid input
+   _every_ single-token deletion, duplication, and dangerous-token insertion at
+   _every_ position (a full, ordered sweep — no random choice). Surfaces "valid input
    minus one delimiter" hangs.
 
 All counts are fixed and enumerated in source order; the exact same inputs run every
 time. Sizes are chosen so the whole suite stays well under a second.
 
 ### B3. Test-harness safety net (rollout only)
-So a *latent* loop lacking a `tick()` fails the suite instead of hanging CI, run each
+
+So a _latent_ loop lacking a `tick()` fails the suite instead of hanging CI, run each
 enumerated parse on a worker thread with a join timeout (native tests only) and fail
-on timeout. This is a fixed per-input wall-clock *ceiling in the harness* used only to
+on timeout. This is a fixed per-input wall-clock _ceiling in the harness_ used only to
 convert a hang into a failure — it does not make the inputs or verdicts random, and
 the library itself stays wall-clock-free. Once every loop ticks it never fires; it
 guards loops added later without fuel.

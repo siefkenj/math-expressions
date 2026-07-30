@@ -30,7 +30,7 @@ pub fn normalize_syntactic(e: &Expr) -> Expr {
 //
 // The `function_normalizations`, `create_trig_inverses_for`, and
 // `move_exponents_outside_for` tables now live on `FnDef` in
-// `crate::functions` (aliases / `inverse` / `move_exponent_spellings`);
+// `crate::special_functions` (aliases / `inverse` / `move_exponent_spellings`);
 // the passes below query the registry.
 
 // ---- Pass 1: normalize_function_names ----

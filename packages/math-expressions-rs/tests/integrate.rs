@@ -210,6 +210,11 @@ fn u_substitution() {
     assert_integrates_to("ln(x)/x", "ln(x)^2/2");
     assert_integrates_to("x/sqrt(1-x^4)", "asin(x^2)/2");
     assert_integrates_to("cos(sqrt(x))/sqrt(x)", "2 sin(sqrt(x))");
+    // A candidate list where an *earlier* candidate leads nowhere: `u = x^2` is
+    // proposed before `u = sin(x^2)`, and integrating in `u` fails for it. The
+    // search must move on to the next candidate rather than abandon the whole
+    // substitution stage.
+    assert_integrates_to("x sin(x^2) cos(x^2)", "-cos(x^2)^2/4");
 }
 
 #[test]

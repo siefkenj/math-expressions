@@ -27,12 +27,18 @@
 //!   f64 shims Doenet needs — graduating out as native features land),
 //!   [`eval_numeric::complex`] (the equality tester's complex sampler),
 //!   [`expr::serde`] (`Expr` ⇄ JS `Tree` JSON codec), [`ops::pm`], [`notation`],
-//!   [`resource_limits`], [`print`], [`parse`]. Each module's import path is its
+//!   [`resource_limits`], [`mod@print`], [`parse`]. Each module's import path is its
 //!   physical path — no re-export aliasing.
 //! - **Everything else** (`normalize`, `equality*`, `special_functions`, `ops`,
 //!   `matrix`, `calculus`, `polynomials`, …) is `pub` for the integration-test
-//!   suite, not a
-//!   stability surface; new external callers should go through the tiers above.
+//!   suite, not a stability surface; new external callers should go through the
+//!   tiers above.
+
+// The barrel modules above document their private submodules by name
+// (`[`canonicalize`]`, `[`table`]`, …). Those links resolve only under
+// `--document-private-items`, which is how this crate's internals are meant to
+// be read; the lint would otherwise bury the *real* broken-link warnings.
+#![allow(rustdoc::private_intra_doc_links)]
 
 pub mod assumptions;
 pub mod calculus;

@@ -1,10 +1,10 @@
 //! Registry snapshot tests (tmp/IMPROVEMENT_PLAN.md Phase 1 step 1).
 //!
 //! The `crate::special_functions` registry replaced per-subsystem tables in
-//! `parse/`, `norm/`, `diff.rs`, and `integrate/`. These tests pin the
-//! derived views to the *historical* table contents, so registry edits that
-//! would silently change parser defaults or normalization behavior fail
-//! loudly. When a change is intentional, update the literals here.
+//! `parse/`, `normalize/`, `calculus/diff.rs`, and `calculus/integrate/`. These
+//! tests pin the derived views to the *historical* table contents, so registry
+//! edits that would silently change parser defaults or normalization behavior
+//! fail loudly. When a change is intentional, update the literals here.
 
 use math_expressions::special_functions;
 use math_expressions::eval_numeric::certified_digits::kernels;

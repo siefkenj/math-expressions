@@ -34,7 +34,14 @@ pub(super) fn usub(e: &Expr, x: &str, fuel: &mut i64) -> Option<Expr> {
         if depends_on(&replaced, x) {
             continue;
         }
-        let inner = integ(&canonicalize(&replaced), U, fuel)?;
+        // The substituted integrand is x-free but may still be unintegrable
+        // (`u = x²` turns `x·sin(x²)·cos(x²)` into `sin(u)cos(u)/2`, which then
+        // needs its own u-sub). Move on to the next candidate rather than
+        // abandoning the whole stage — the shared `fuel` still bounds the total
+        // work, and `integ` refuses immediately once it runs out.
+        let Some(inner) = integ(&canonicalize(&replaced), U, fuel) else {
+            continue;
+        };
         let subs = std::collections::HashMap::from([(U.to_string(), u.clone())]);
         return Some(canonicalize(&crate::ops::substitute(&inner, &subs)));
     }

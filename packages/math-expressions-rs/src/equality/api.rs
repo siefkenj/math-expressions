@@ -96,12 +96,6 @@ pub fn equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
         return discrete_infinite::equals_discrete_infinite(&ca, &cb, opts);
     }
 
-    // Stage 2: finite-field rejection. Exact evaluation in ℤ/pℤ catches
-    // additive/structural differences that floating-point sampling can mask
-    // (`e^(10x)` vs `e^(10x)+C`), and it is the filter that makes lenient
-    // complex sampling safe. It never confirms equality — only rejects.
-    // (Skipped under a number-error allowance: exact field arithmetic would
-    // reject the pairs the allowance is meant to accept — mirrors JS.)
     // Stage 1c: certified exact equality (accept-only, sound). When the
     // difference is *provably* zero — surd/π/rational identities the structural
     // stages miss, e.g. `cos(π/3) − 1/2` or `√8 − 2√2` — confirm it here. This
@@ -114,7 +108,12 @@ pub fn equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
         return true;
     }
 
-    // Stage 2: finite-field rejection.
+    // Stage 2: finite-field rejection. Exact evaluation in ℤ/pℤ catches
+    // additive/structural differences that floating-point sampling can mask
+    // (`e^(10x)` vs `e^(10x)+C`), and it is the filter that makes lenient
+    // complex sampling safe. It never confirms equality — only rejects.
+    // (Skipped under a number-error allowance: exact field arithmetic would
+    // reject the pairs the allowance is meant to accept — mirrors JS.)
     if opts.allowed_error_in_numbers == 0.0 && finite_field::definitely_unequal(&ca, &cb) {
         return false;
     }
@@ -123,13 +122,14 @@ pub fn equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     equals_numerical(&ca, &cb, opts)
 }
 
-/// Accept-only exact-equality certificate (Stage 2.5): is `ca − cb` *provably*
-/// zero? Uses the certified, sampling-free `exact::certified_zero` (S1), so a
-/// `true` is a proof of equality and a `false` is merely "not certified" (fall
-/// through to sampling). Gated to variable-free operands: the exact tower
-/// decides constants (`cos(π/3)`, surds) cheaply and definitively, whereas
-/// expressions with free variables are the sampler's job and would only pay
-/// `expand`/`ratform` cost here for little gain.
+/// Accept-only exact-equality certificate (stage 1c): is `ca − cb` *provably*
+/// zero? Sampling-free — it evaluates the difference in the certified exact
+/// tower ([`crate::eval_exact::exact_eval`], FULL_SIMPLIFY S1) — so a `true` is
+/// a proof of equality and a `false` is merely "not certified" (fall through to
+/// the rejection stages and sampling). Gated to variable-free operands: the
+/// exact tower decides constants (`cos(π/3)`, surds) cheaply and definitively,
+/// whereas expressions with free variables are the sampler's job and would only
+/// pay `expand`/`ratform` cost here for little gain.
 fn certified_equal(ca: &Expr, cb: &Expr) -> bool {
     let var_free = |e: &Expr| {
         crate::ops::variables(e)
@@ -140,9 +140,9 @@ fn certified_equal(ca: &Expr, cb: &Expr) -> bool {
         return false;
     }
     // Direct exact evaluation of the difference — NOT the full
-    // `exact::certified_zero`, whose `expand`/`ratform` stages target *variable*
-    // rational identities and are wasted on constants (they roughly doubled the
-    // corpus cost). `exact_eval` on the canonical difference decides the
+    // `eval_exact::certified_zero`, whose `expand`/`ratform` stages target
+    // *variable* rational identities and are wasted on constants (they roughly
+    // doubled the corpus cost). `exact_eval` on the canonical difference decides the
     // constant tower (ℚ, surds, π, e, trig/exp/log special values) directly;
     // a value it can't evaluate returns `None` and falls through to sampling.
     let diff = crate::normalize::canonicalize(&Expr::Add(vec![

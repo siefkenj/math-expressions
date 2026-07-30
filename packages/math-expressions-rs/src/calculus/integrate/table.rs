@@ -179,7 +179,7 @@ fn concave_quadratic(
     Expr,
 )> {
     use num_rational::BigRational;
-    use num_traits::Signed;
+    use num_traits::{One, Signed};
     let Expr::Add(ts) = base else { return None };
     let mut c: Option<BigRational> = None;
     let mut quad: Option<(BigRational, Expr)> = None;
@@ -191,11 +191,14 @@ fn concave_quadratic(
                 }
                 c = n.to_bigrational();
             }
+            // A bare `w²` term: coefficient +1. (Rejected below by the
+            // `a < 0` check — `c + w²` is convex, not the `c − b·w²` shape —
+            // but recorded here so a *second* quadratic term is still caught.)
             Expr::Pow(w, k) if matches!(&**k, Expr::Num(Number::Int(2))) => {
                 if quad.is_some() {
                     return None;
                 }
-                quad = Some((-BigRational::from_integer((-1).into()), (**w).clone()));
+                quad = Some((BigRational::one(), (**w).clone()));
             }
             Expr::Mul(fs) => {
                 let mut coeff: Option<BigRational> = None;

@@ -4,12 +4,12 @@
 > Full native suite 422 passing; clippy clean throughout. All paths below are
 > relative to `packages/math-expressions-rs/` (crate moved this session).
 >
-> **S1 — exact eval + `is_zero`** (`src/exact.rs`, `tests/exact_is_zero.rs`):
+> **S1 — exact eval + `is_zero`** (`src/eval_exact/`, `tests/exact_is_zero.rs`):
 > exact-constant evaluator over ℚ(π, e, surds) + certified
 > `is_zero(e, &Assumptions) -> Tri`. `max_exact_eval_ops` (10 000) added to
 > `ResourceLimits`. Consequence wired: the `integrate` I2 gate accepts iff
 > sampled `equals` OR the certified exact stages confirm `F'−f ≡ 0`
-> (`exact::certified_zero`, the accept-only pipeline without the sampling
+> (`eval_exact::certified_zero`, the accept-only pipeline without the sampling
 > refuter). Post-review note: `equals` runs first — the naive is_zero-first
 > gate cost ~35× on the integrate suite because the refuter burns its full
 > arbitrary-precision budget precisely on true zeros; the disjunction is
@@ -17,59 +17,70 @@
 > (measured 0.090s vs 0.089s baseline vs 3.09s naive, release, warm).
 > wasm: `Expression.is_zero()`.
 >
-> **S2 — rational normal form** (`src/ratform.rs`, `tests/ratform.rs`):
-> `together`/`cancel` over the multivariate poly GCD (`src/poly`) with opaque
+> **S2 — rational normal form** (`src/polynomials/ratform.rs`,
+> `tests/ratform.rs`): `together`/`cancel` over the multivariate poly GCD
+> (`src/polynomials/multivariate.rs`) with opaque
 > **kernels** (`sin x`, `√x`, `π` held fixed via fresh `$k` indeterminates).
 > `max_ratform_terms` (512) + a 6-indeterminate cap guard blow-up. `is_zero`
 > **stage (d)** now decides rational identities exactly
 > (`1/(x+1)+1/(x-1)-2x/(x²-1) → 0`). wasm: `Expression.together()`.
 >
-> **S3 — trig/exp/log special values + parity** (`src/norm/special_values.rs`,
-> `tests/special_values.rs`): `fold_special_values` — sin/cos/tan/cot/sec/csc
+> **S3 — trig/exp/log special values + parity**
+> (`src/normalize/special_values.rs`, `tests/special_values.rs`):
+> `fold_special_values` — sin/cos/tan/cot/sec/csc
 > on the π/12 lattice (reusing S1's tables + new `Exact::to_expr`), parity,
 > integer-π-shift, `e^{ln u}→u`, gated `ln(e^u)→u`, `ln e`, `ln 1`, `e^0`.
 > Answers the `sin(2π) ↛ 0` gap. No wasm surface (per §10; consumed by S7).
 >
-> **S4 — factorization over ℚ** (`src/factor.rs`, `tests/factor_s4.rs`):
-> Kronecker splitting of the no-rational-root remainder into irreducibles
+> **S4 — factorization over ℚ** (`src/polynomials/factor.rs`,
+> `tests/factor_s4.rs`): Kronecker splitting of the no-rational-root remainder
+> into irreducibles
 > (`x⁶−1 → (x−1)(x+1)(x²+x+1)(x²−x+1)`; `x⁴+1` correctly kept irreducible),
 > product-exact and `equals`-gated. Added `factor_terms` (numeric-content +
 > common-monomial pull-out, kernel-aware: `6x²+9x → 3x(2x+3)`,
 > `sin(x)a+sin(x)b → sin(x)(a+b)`). wasm: `factor` (pre-existing).
 > Post-review fixes: `factor_terms` output was HashMap-order nondeterministic
 > (violates the S7 wasm/native-agreement requirement) — factor lists now
-> sorted by `norm::cmp`; `factor_int` re-normalizes to primitive-int at every
-> recursion level (an interpolated factor can be a non-integer rational
+> sorted by `normalize::cmp`; `factor_int` re-normalizes to primitive-int at
+> every recursion level (an interpolated factor can be a non-integer rational
 > multiple of the true factor, which broke the divisor enumeration's
 > completeness — correctness was never at risk, every split is
 > division-verified). Known limits: `factor_terms` skips negative-power
 > commons (gate rejects, input returned unchanged); Kronecker budget (200k
 > combos) is a hardcoded const, not a `ResourceLimits` field.
 >
-> **`full_simplify` entry point — LANDED EARLY (2026-07-22, MVP form).**
-> `norm::full_simplify(e, &Assumptions) -> Expr` (`src/norm/full.rs`,
-> `tests/full_simplify.rs`; wasm `Expression.full_simplify()`). This is the
-> *staged* form of the S7 driver: it iterates the landed sound passes —
-> `simplify` → `fold_special_values` (S3) → `reduce_rational` (S2) — to a
-> fixpoint, rather than doing the cost-directed beam search over a complexity
+> **`full_simplify` — LANDED EARLY (2026-07-22, MVP form), then promoted to
+> *be* `simplify`.** `normalize::full_simplify(e, &Assumptions) -> Expr`
+> (`src/normalize/full.rs`, `tests/full_simplify.rs`). This is the *staged*
+> form of the S7 driver: it iterates the landed sound passes — the base
+> canonical simplify → `fold_special_values` (S3) → `reduce_rational` (S2) — to
+> a fixpoint, rather than doing the cost-directed beam search over a complexity
 > measure. Every pass is sound and canonical-in/out, so the result is always
 > value-equal to the input; S7 upgrades the *strategy* (assumption-gated rules,
-> expand-vs-factor scoring), not the soundness. Exposes `exp(ln x) → x`,
-> `cos(π/3) → 1/2`, `(x²−1)/(x−1) → x+1`, etc. — the folds `simplify` withholds
-> to stay JS-corpus-compatible. (Also fixed here: `exact::to_expr` now emits
-> `sqrt(r)` not `r^(1/2)`, so its surds unify with the canonical form.)
+> expand-vs-factor scoring), not the soundness. It folds `exp(ln x) → x`,
+> `cos(π/3) → 1/2`, `(x²−1)/(x−1) → x+1`, etc.
+>
+> The public `simplify(e)` and `simplify_with(e, a)` are now *defined* as
+> `full_simplify(e, ∅)` and `full_simplify(e, a)` — the JS-corpus-compatible
+> base survives only as the crate-internal `simplify_base_with`, and JS tree
+> agreement is advisory (`tests/simplify_corpus.rs` snapshots the gaps). There
+> is deliberately no separate `full_simplify` wasm binding: it would be a
+> synonym for `Expression.simplify()`. (Also fixed here: `Exact::to_expr` now
+> emits `sqrt(r)` not `r^(1/2)`, so its surds unify with the canonical form.)
 >
 > **Deferred consequences:** ✅ done — `diverge.rs` PiLin collapsed onto
-> `exact::exact_eval`; matrix pivot/discriminant zero-tests → `exact::
-> certified_zero`; ±1-ulp unified as `MpFix::excludes_zero`. Still deferred:
-> matrix eigenvalue root ladder → `factor` (today's `factor` is weaker — S4
-> tail); integrate I1 → `ratform` (different representations). True
+> `eval_exact::exact_eval`; matrix pivot/discriminant zero-tests →
+> `eval_exact::certified_zero`; ±1-ulp unified as `MpFix::excludes_zero`. Still
+> deferred: matrix eigenvalue root ladder → `factor` (today's `factor` is
+> weaker — S4 tail); integrate I1 → `ratform` (different representations). True
 > multivariate irreducible factorization (beyond `factor_terms` content) is not
 > yet implemented.
 >
-> **Next: S5** (assumption/sign propagation — will let `full_simplify` consult
-> its `&Assumptions`), **S6** (radical denesting), **S7** (trig restructuring +
-> upgrading the `full_simplify` fixpoint to the cost-directed driver). See
+> **Next: S5** (assumption/sign propagation — the deeper sign reasoning
+> `full_simplify` should get; it already threads its `&Assumptions` through the
+> base simplify's assumption-aware rules), **S6** (radical denesting), **S7**
+> (trig restructuring + upgrading the `full_simplify` fixpoint to the
+> cost-directed driver). See
 > `WHATS_LEFT.md` §B.5.
 
 Status: DRAFT (not started). Chunked so every phase lands independently,

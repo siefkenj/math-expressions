@@ -22,7 +22,7 @@ macro_rules! shared_grammar_methods {
     // the whole-tree `flatten`, per STRUCTURAL_COMPARISON §3's inverted design),
     // so form analysis can see the tree closer to as-typed. `flatten` is instead
     // the leading step of the *consumers* that need a canonical shape —
-    // `normalize_syntactic`, the output formatters, `js_tree::to_js`, and
+    // `normalize_syntactic`, the output formatters, `expr::serde::to_js`, and
     // `check_structural_comparison` — while the value path (`equals`/`simplify`/…)
     // flattens implicitly via `canonicalize`.
     /// Parse `input` to an expression tree, erroring if any tokens remain. The

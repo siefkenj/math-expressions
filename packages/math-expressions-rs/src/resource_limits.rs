@@ -94,10 +94,10 @@ pub struct ResourceLimits {
     /// is returned unfactored. Bounds the dense-coefficient allocation an
     /// adversarial exponent (`x^10^9`) would otherwise force.
     pub max_factor_degree: usize,
-    /// Node/operation budget for the exact-constant evaluator (`exact.rs`).
+    /// Node/operation budget for the exact-constant evaluator (`eval_exact`).
     /// Bounds the certified `is_zero` tower evaluation.
     pub max_exact_eval_ops: i64,
-    /// Trial-division bound for `exact::squarefree_part` (radical
+    /// Trial-division bound for `eval_exact::squarefree_part` (radical
     /// normalization). A radicand whose square factor isn't found below this
     /// divisor makes the evaluator decline (`None`), never stall.
     pub max_squarefree_trial_divisor: u64,

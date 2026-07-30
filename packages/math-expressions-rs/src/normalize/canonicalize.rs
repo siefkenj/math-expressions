@@ -259,7 +259,7 @@ fn factorial_of(n: i64) -> Option<Number> {
 
 /// The inverse of an invertible (trig/hyperbolic) function, using the
 /// normalized `a…` spelling. `None` for functions without a notated inverse.
-/// (Table: `FnDef::inverse` in `crate::functions`.)
+/// (Table: `FnDef::inverse` in `crate::special_functions`.)
 fn inverse_function_name(name: &str) -> Option<&'static str> {
     crate::special_functions::inverse_of(name)
 }
@@ -277,7 +277,7 @@ fn normalize_head(head: Expr) -> Expr {
 
 /// The function-name normalization table (lib/expression/normalization/
 /// standard_form.js `function_normalizations`; now `FnDef::aliases` in
-/// `crate::functions`).
+/// `crate::special_functions`).
 fn normalize_function_name(name: &str) -> Option<&'static str> {
     crate::special_functions::canonical_name(name)
 }

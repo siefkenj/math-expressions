@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// One function's precise-evaluation obligations. Rows live on
-/// `FnDef::kernel` in `crate::functions` (one place per function); the
+/// `FnDef::kernel` in `crate::special_functions` (one place per function); the
 /// runtime array indexed by `Op::Call(u32)` is derived from the function
 /// registry by [`registry`].
 pub struct FnKernel {

@@ -2,7 +2,7 @@
 //!
 //! [`fold_special_values`] is an *unconditionally sound* rewrite pass, applied
 //! bottom-up to a fixpoint. It is independent of the oracle-compatible
-//! `simplify`; `exact::is_zero` uses it as a pre-pass. Three families:
+//! `simplify`; `eval_exact::is_zero` uses it as a pre-pass. Three families:
 //!
 //! * **Lattice values** — sin/cos/tan/cot/sec/csc at rational multiples of π on
 //!   the π/12 lattice, via the tested tables in [`crate::eval_exact`]

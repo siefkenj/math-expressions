@@ -14,9 +14,11 @@
 //! - [`constructors`] — the `add`/`mul`/`pow` smart constructors
 //! - [`matrix_ops`]   — literal-matrix helpers used by the constructors
 //! - [`units`]        — scaling-unit desugaring (`%`, `deg`, `$`)
+//! - [`full`]         — the aggressive `full_simplify` fixpoint driver that the
+//!   public `simplify` / `simplify_with` delegate to
 //!
-//! plus the pre-existing `expand`, `order`, `present`, `simplify`,
-//! `special_values`, and `syntactic` passes.
+//! plus the `expand`, `order`, `present`, `simplify` (the base rewrite
+//! clusters), `special_values`, and `syntactic` passes.
 
 mod canonicalize;
 mod constructors;
@@ -34,7 +36,7 @@ pub(crate) mod syntactic;
 pub(crate) use expand::expand_core;
 pub(crate) use order::cmp;
 pub(crate) use present::present;
-pub(crate) use simplify::{simplify_base, simplify_canonical, simplify_core};
+pub(crate) use simplify::{simplify_base_with, simplify_canonical, simplify_core};
 pub use expand::expand;
 pub use simplify::{simplify, simplify_logical, simplify_with};
 pub use special_values::fold_special_values;

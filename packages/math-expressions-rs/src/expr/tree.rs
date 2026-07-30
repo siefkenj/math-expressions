@@ -56,7 +56,7 @@ pub enum Expr {
     // Function application. The head is a full expression, NOT just a name:
     //   f'(x) → Apply(Prime(f), [x]);  sin^2(x) → Apply(Pow(sin, 2), [x])
     // Args are native (f(x,y) has two args); the JS single-arg-tuple encoding
-    // lives in js_tree.
+    // lives in expr::serde.
     Apply(Box<Expr>, Vec<Expr>),
 
     // Notation nodes (from the parsers)

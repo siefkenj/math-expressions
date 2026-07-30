@@ -2,7 +2,7 @@
 //!
 //! [`together`] / [`cancel`] put an expression over a single common
 //! denominator and reduce numerator and denominator to lowest terms with the
-//! multivariate polynomial GCD ([`crate::poly`]). Non-rational subtrees —
+//! multivariate polynomial GCD ([`super::multivariate`]). Non-rational subtrees —
 //! `sin x`, `√x`, `π`, `RootOf` leaves, … — are treated as **opaque kernels**:
 //! each distinct one is replaced by a fresh indeterminate before the polynomial
 //! arithmetic and restored afterwards. This is the SymPy trick that lets
@@ -48,7 +48,7 @@ pub fn cancel(e: &Expr) -> Expr {
     together(e)
 }
 
-/// Certified test used by `exact::is_zero` stage (d): `true` iff `e` normalizes
+/// Certified test used by `eval_exact::is_zero` stage (d): `true` iff `e` normalizes
 /// to a zero numerator over a nonzero denominator, i.e. `e ≡ 0` as a rational
 /// function in its variables and kernels. Never `true` for a non-zero `e`.
 pub(crate) fn is_identically_zero(e: &Expr) -> bool {

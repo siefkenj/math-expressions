@@ -5,8 +5,8 @@
 //! notated inverse, and calculus rules. The [`FnDef`] schema lives in [`def`];
 //! definitions live in the family files below; [`registry`] (`ALL` + `lookup`)
 //! registers them; the accessors in [`query`] replace the per-subsystem tables
-//! that used to be scattered across `parse/`, `normalize/`, `diff.rs`, and
-//! `integrate/`.
+//! that used to be scattered across `parse/`, `normalize/`, `calculus/diff.rs`,
+//! and `calculus/integrate/`.
 //!
 //! # Adding a function
 //!

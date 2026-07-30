@@ -220,10 +220,10 @@ fn subst_point(e: &Expr, var: &str, pt: &Expr) -> Expr {
     crate::ops::substitute(e, &subs)
 }
 
-// Uses the shared exact::exact_eval rather than a private ℚ+ℚπ evaluator
+// Uses the shared eval_exact::exact_eval rather than a private ℚ+ℚπ evaluator
 // (which once duplicated its trig/sqrt/log folding).
 /// Is `e(pt)` *exactly* zero? Decided by the shared exact-constant evaluator
-/// (`exact::exact_eval`, the ℚ[π, e, √] tower). The numeric tiers can never
+/// (`eval_exact::exact_eval`, the ℚ[π, e, √] tower). The numeric tiers can never
 /// certify a true zero.
 fn exactly_zero_at(e: &Expr, var: &str, pt: &Expr) -> bool {
     let sub = crate::normalize::canonicalize(&subst_point(e, var, pt));

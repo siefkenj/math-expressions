@@ -540,7 +540,7 @@ fn rel_symbol(op: RelOp) -> &'static str {
 
 /// Non-function symbols with LaTeX control words: greek letters and
 /// notation. Function names live on `FnDef::latex_commands` in
-/// `crate::functions`.
+/// `crate::special_functions`.
 const ALLOWED_LATEX_SYMBOLS: &[&str] = &[
     "alpha",
     "beta",

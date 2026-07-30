@@ -100,7 +100,7 @@ fn head_evaluable(head: &Expr, nargs: usize) -> bool {
 }
 
 /// Can the registry evaluate this head at this arity? (`FnDef::eval1`/
-/// `eval2` in `crate::functions` — canonical spellings only, matching the
+/// `eval2` in `crate::special_functions` — canonical spellings only, matching the
 /// historical hardcoded list.)
 fn known_function(name: &str, nargs: usize) -> bool {
     match nargs {
@@ -140,7 +140,7 @@ fn eval_apply(head: &Expr, args: &[Expr], env: &Env) -> Option<Complex64> {
     let name = s.name();
 
     // The per-function evaluation rules are `FnDef::eval1`/`eval2` in
-    // `crate::functions`; this dispatch only routes by arity.
+    // `crate::special_functions`; this dispatch only routes by arity.
     if let [arg] = args {
         let f = crate::special_functions::eval1(&name)?;
         let z = eval_complex(arg, env)?;

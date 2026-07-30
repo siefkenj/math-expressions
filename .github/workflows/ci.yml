@@ -29,10 +29,15 @@ jobs:
         steps:
             - uses: actions/checkout@v6
 
+            # `--workspace`, not a bare `cargo test`: the wasm-binding crate is
+            # deliberately not a default member (so host builds skip it), but it
+            # carries unit tests (`js_match`, `parse`, `limits`) that must still
+            # run in CI. Its host build is cheap — wasm-bindgen compiles to a
+            # no-op shim off wasm32.
             - name: Run the Rust test suite
               uses: devcontainers/ci@v0.3
               with:
-                  runCmd: cargo test
+                  runCmd: cargo test --workspace
 
     playground-build:
         name: Playground build

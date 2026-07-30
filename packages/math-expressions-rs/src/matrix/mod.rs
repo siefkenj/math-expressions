@@ -12,7 +12,7 @@
 //! - [`linalg`]     — det / inverse / rref / rank / nullspace
 //! - [`elimination`] — shared elimination + cofactor/Bareiss kernels
 //! - [`eigen`]      — char poly, eigenvalues
-//! - [`eigenvectors`] — eigenvectors over the quotient ring ℚ[t]/(f)
+//! - [`eigenvectors`] — eigenvectors over the quotient ring `ℚ[t]/(f)`
 
 mod eigen;
 mod eigenvectors;

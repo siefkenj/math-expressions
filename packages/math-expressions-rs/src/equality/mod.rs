@@ -49,9 +49,9 @@
 //!    it would otherwise wrongly accept — the soundness comes from the exact
 //!    pre-filter, not from an error bound.
 //!
-//! [`equals_via_real`](api::equals_via_real) is the same procedure restricted
+//! [`equals_via_real`] is the same procedure restricted
 //! to real sample points (JS `equalsViaReal`), and
-//! [`equals_syntactic`](api::equals_syntactic) is the form-level whole-tree
+//! [`equals_syntactic`] is the form-level whole-tree
 //! compare shared with [`equality_structural`](crate::equality_structural).
 //!
 //! ## Layout
