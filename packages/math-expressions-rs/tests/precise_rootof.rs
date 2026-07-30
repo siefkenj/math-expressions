@@ -2,7 +2,7 @@
 //! completion): certified dyadic-Newton refinement for real roots, CFix
 //! Newton with the rigorous n·|p(z)/p′(z)| bound for complex ones.
 
-use math_expressions::precise::{evaluate_to_precision, Precise};
+use math_expressions::eval_numeric::certified_digits::{evaluate_to_precision, Precise};
 use math_expressions::{Expr, TextToAst, TextToAstOptions};
 
 fn parse(s: &str) -> Expr {
@@ -85,7 +85,7 @@ fn complex_rootof_components() {
     let Precise::Complex { re: re2, im: im2 } = &p2 else {
         panic!("expected complex")
     };
-    let take = |m: &math_expressions::precise::fix::MpFix, d: usize| -> String {
+    let take = |m: &math_expressions::eval_numeric::certified_digits::fix::MpFix, d: usize| -> String {
         m.to_decimal_string(d)
             .chars()
             .filter(|c| c.is_ascii_digit())
@@ -96,7 +96,7 @@ fn complex_rootof_components() {
     assert_eq!(take(im, 39), take(im2, 39));
     // And both components match the f64 seed to ~1e-12.
     let (rf, if_) = p.to_complex_f64().expect("finite");
-    use math_expressions::eval_numerical::{eval_complex, Env};
+    use math_expressions::eval_numeric::complex::{eval_complex, Env};
     let z = eval_complex(&math_expressions::canonicalize(&e), &Env::new()).expect("numeric");
     assert!((rf - z.re).abs() < 1e-12 && (if_ - z.im).abs() < 1e-12);
     assert!(rf < 0.0 && if_ < 0.0, "index 0 is the (−,−) root");

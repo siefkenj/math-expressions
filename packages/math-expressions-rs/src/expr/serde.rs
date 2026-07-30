@@ -167,7 +167,7 @@ fn from_js_array(arr: &[Value]) -> Result<Expr, String> {
         }
         // everything else (unit, pm, angle, binom, vec, linesegment,
         // derivative_leibniz, forall, arrows, implies, iff, perp, ":", "|", d)
-        other => Expr::OtherOp(crate::sym::Sym::new(other), each()?),
+        other => Expr::OtherOp(crate::expr::sym::Sym::new(other), each()?),
     })
 }
 
@@ -229,7 +229,7 @@ fn to_js_rec(expr: &Expr) -> Value {
         Expr::Num(n) => number_to_js(n),
         // Serialized as its `rootof(p(t), k)` application; deserialization
         // re-canonicalizes that back into the leaf.
-        Expr::RootOf { poly, index } => to_js_rec(&crate::rootof::as_apply(poly, *index)),
+        Expr::RootOf { poly, index } => to_js_rec(&crate::polynomials::rootof::as_apply(poly, *index)),
         Expr::Sym(s) => Value::String(s.name()),
         Expr::Blank => Value::String("\u{ff3f}".to_string()),
         Expr::Ldots => json!(["ldots"]),

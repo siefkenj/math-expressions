@@ -2,7 +2,7 @@
 
 use crate::expr::Expr;
 use crate::normalize::{add, canonicalize};
-use crate::sym::Sym;
+use crate::expr::sym::Sym;
 
 /// Matrix transpose. Literal matrices transpose eagerly; anything else stays
 /// an opaque `transpose(e)` node.

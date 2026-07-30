@@ -17,7 +17,7 @@
 
 use crate::expr::Expr;
 use crate::num::Number;
-use crate::upoly::{self, UPoly};
+use crate::polynomials::univariate::{self, UPoly};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{One, Signed, Zero};
@@ -35,7 +35,7 @@ fn int(i: i64) -> Expr {
 // Layering note (FULL_SIMPLIFY §8, assessed 2026-07-22): this is the
 // univariate rational-function converter — dense `(num, den)` `UPoly` pairs in
 // one named variable, exactly what the LRT integrator consumes. It is
-// deliberately NOT merged with `crate::ratform` (`together`/`cancel`), which is
+// deliberately NOT merged with `crate::polynomials::ratform` (`together`/`cancel`), which is
 // the multivariate Expr-level normal form over `polynomials::Rep` with
 // opaque-kernelization; the two share no representation. If a `Rep`↔`UPoly`
 // converter ever exists, revisit — until then use ratform for Expr rewriting
@@ -56,15 +56,15 @@ pub(crate) fn expr_to_ratfun(e: &Expr, x: &str) -> Option<(UPoly, UPoly)> {
                 let mut acc = (Vec::new(), one());
                 for t in ts {
                     let (c, d) = conv(t, x, cap)?;
-                    let n = upoly::add_p(&upoly::mul(&acc.0, &d), &upoly::mul(&c, &acc.1));
-                    let den = upoly::mul(&acc.1, &d);
-                    if upoly::degree(&n) > cap || upoly::degree(&den) > cap {
+                    let n = univariate::add_p(&univariate::mul(&acc.0, &d), &univariate::mul(&c, &acc.1));
+                    let den = univariate::mul(&acc.1, &d);
+                    if univariate::degree(&n) > cap || univariate::degree(&den) > cap {
                         return None;
                     }
                     // Keep sizes down: cancel the gcd as we fold.
-                    let g = upoly::gcd(&n, &den);
-                    acc = if upoly::degree(&g) >= 1 {
-                        (upoly::divrem(&n, &g).0, upoly::divrem(&den, &g).0)
+                    let g = univariate::gcd(&n, &den);
+                    acc = if univariate::degree(&g) >= 1 {
+                        (univariate::divrem(&n, &g).0, univariate::divrem(&den, &g).0)
                     } else {
                         (n, den)
                     };
@@ -75,8 +75,8 @@ pub(crate) fn expr_to_ratfun(e: &Expr, x: &str) -> Option<(UPoly, UPoly)> {
                 let mut acc = (one(), one());
                 for f in fs {
                     let (c, d) = conv(f, x, cap)?;
-                    acc = (upoly::mul(&acc.0, &c), upoly::mul(&acc.1, &d));
-                    if upoly::degree(&acc.0) > cap || upoly::degree(&acc.1) > cap {
+                    acc = (univariate::mul(&acc.0, &c), univariate::mul(&acc.1, &d));
+                    if univariate::degree(&acc.0) > cap || univariate::degree(&acc.1) > cap {
                         return None;
                     }
                 }
@@ -89,19 +89,19 @@ pub(crate) fn expr_to_ratfun(e: &Expr, x: &str) -> Option<(UPoly, UPoly)> {
                 let (n, d) = conv(b, x, cap)?;
                 let (mut bn, mut bd) = if *k >= 0 { (n, d) } else { (d, n) };
                 let mut kk = k.unsigned_abs();
-                if kk as usize * upoly::degree(&bn).max(upoly::degree(&bd)) > cap {
+                if kk as usize * univariate::degree(&bn).max(univariate::degree(&bd)) > cap {
                     return None;
                 }
                 let (mut rn, mut rd) = (one(), one());
                 while kk > 0 {
                     if kk & 1 == 1 {
-                        rn = upoly::mul(&rn, &bn);
-                        rd = upoly::mul(&rd, &bd);
+                        rn = univariate::mul(&rn, &bn);
+                        rd = univariate::mul(&rd, &bd);
                     }
                     kk >>= 1;
                     if kk > 0 {
-                        bn = upoly::mul(&bn, &bn);
-                        bd = upoly::mul(&bd, &bd);
+                        bn = univariate::mul(&bn, &bn);
+                        bd = univariate::mul(&bd, &bd);
                     }
                 }
                 Some((rn, rd))
@@ -110,13 +110,13 @@ pub(crate) fn expr_to_ratfun(e: &Expr, x: &str) -> Option<(UPoly, UPoly)> {
         }
     }
     let (n, d) = conv(e, x, cap)?;
-    if upoly::is_zero(&d) {
+    if univariate::is_zero(&d) {
         return None;
     }
     // Cancel and normalize the denominator monic.
-    let g = upoly::gcd(&n, &d);
-    let (n, d) = if upoly::degree(&g) >= 1 {
-        (upoly::divrem(&n, &g).0, upoly::divrem(&d, &g).0)
+    let g = univariate::gcd(&n, &d);
+    let (n, d) = if univariate::degree(&g) >= 1 {
+        (univariate::divrem(&n, &g).0, univariate::divrem(&d, &g).0)
     } else {
         (n, d)
     };
@@ -130,20 +130,20 @@ pub(crate) fn expr_to_ratfun(e: &Expr, x: &str) -> Option<(UPoly, UPoly)> {
 /// `∫ num/den dx`, complete over ℚ(x). `None` only on caps/ring failures.
 pub(super) fn integrate_rational(num_p: &UPoly, den: &UPoly, x: &str) -> Option<Expr> {
     let xs = Expr::sym(x);
-    if upoly::degree(den) == 0 {
+    if univariate::degree(den) == 0 {
         // Purely polynomial (den is a constant, made 1 by normalization).
         return Some(integrate_poly(num_p, &xs));
     }
-    let (quot, rem) = upoly::divrem(num_p, den);
+    let (quot, rem) = univariate::divrem(num_p, den);
     let mut terms = vec![integrate_poly(&quot, &xs)];
-    if upoly::is_zero(&rem) {
+    if univariate::is_zero(&rem) {
         return Some(cadd(terms));
     }
     // Ostrogradsky–Hermite: rem/den = (P1/q1)′ + P2/q2.
-    let dq = upoly::derivative(den);
-    let q1 = upoly::gcd(den, &dq);
-    let (a_rem, q2) = if upoly::degree(&q1) >= 1 {
-        let q2 = upoly::divrem(den, &q1).0;
+    let dq = univariate::derivative(den);
+    let q1 = univariate::gcd(den, &dq);
+    let (a_rem, q2) = if univariate::degree(&q1) >= 1 {
+        let q2 = univariate::divrem(den, &q1).0;
         let (p1, p2) = ostrogradsky(&rem, &q1, &q2)?;
         terms.push(cmul(vec![
             poly_expr(&p1, &xs),
@@ -153,7 +153,7 @@ pub(super) fn integrate_rational(num_p: &UPoly, den: &UPoly, x: &str) -> Option<
     } else {
         (rem.clone(), den.clone())
     };
-    if !upoly::is_zero(&a_rem) {
+    if !univariate::is_zero(&a_rem) {
         terms.push(log_part(&a_rem, &q2, &xs)?);
     }
     Some(cadd(terms))
@@ -189,10 +189,10 @@ fn poly_expr(p: &UPoly, xs: &Expr) -> Expr {
 /// deg q1, deg P2 < deg q2, by Gaussian elimination over ℚ.
 #[allow(clippy::needless_range_loop)] // parallel row indexing in one matrix
 fn ostrogradsky(p: &UPoly, q1: &UPoly, q2: &UPoly) -> Option<(UPoly, UPoly)> {
-    let (a, b) = (upoly::degree(q1), upoly::degree(q2));
+    let (a, b) = (univariate::degree(q1), univariate::degree(q2));
     let n = a + b; // deg q — also the equation count (deg p < n)
-    let (t_num, t_rem) = upoly::divrem(&upoly::mul(&upoly::derivative(q1), q2), q1);
-    if !upoly::is_zero(&t_rem) {
+    let (t_num, t_rem) = univariate::divrem(&univariate::mul(&univariate::derivative(q1), q2), q1);
+    if !univariate::is_zero(&t_rem) {
         return None; // cannot happen for q1 = gcd(q, q′); guard anyway
     }
     // Columns: P1 coefficients (a unknowns), then P2 coefficients (b).
@@ -260,8 +260,8 @@ fn ostrogradsky(p: &UPoly, q1: &UPoly, q2: &UPoly) -> Option<(UPoly, UPoly)> {
     }
     let mut p1: UPoly = sol[..a].to_vec();
     let mut p2: UPoly = sol[a..].to_vec();
-    upoly::trim(&mut p1);
-    upoly::trim(&mut p2);
+    univariate::trim(&mut p1);
+    univariate::trim(&mut p2);
     Some((p1, p2))
 }
 
@@ -270,46 +270,46 @@ fn ostrogradsky(p: &UPoly, q1: &UPoly, q2: &UPoly) -> Option<(UPoly, UPoly)> {
 /// `Σ_α α·ln(gcd(q, A − α·q′))` over the roots α of the Rothstein–Trager
 /// resultant — `q` squarefree, deg A < deg q.
 fn log_part(a: &UPoly, q: &UPoly, xs: &Expr) -> Option<Expr> {
-    let dq = upoly::derivative(q);
+    let dq = univariate::derivative(q);
     let r = rt_resultant(q, a, &dq)?;
-    if upoly::degree(&r) == 0 {
-        return upoly::is_zero(a).then(|| int(0));
+    if univariate::degree(&r) == 0 {
+        return univariate::is_zero(a).then(|| int(0));
     }
     // Distinct residues: the radical of R, primitive.
-    let g = upoly::gcd(&r, &upoly::derivative(&r));
-    let radical = if upoly::degree(&g) >= 1 {
-        upoly::divrem(&r, &g).0
+    let g = univariate::gcd(&r, &univariate::derivative(&r));
+    let radical = if univariate::degree(&g) >= 1 {
+        univariate::divrem(&r, &g).0
     } else {
         r
     };
     let mut terms: Vec<Expr> = Vec::new();
-    let (rational_roots, mut rest) = upoly::rational_roots(&radical);
+    let (rational_roots, mut rest) = univariate::rational_roots(&radical);
     for alpha in &rational_roots {
         if alpha.is_zero() {
             continue; // zero residue contributes nothing
         }
         let shifted = shift_by_scalar(a, &dq, alpha);
-        let gcd_q = upoly::gcd(q, &shifted);
+        let gcd_q = univariate::gcd(q, &shifted);
         terms.push(cmul(vec![
             num(alpha),
-            log_expr(poly_expr(&upoly::monic(&gcd_q), xs)),
+            log_expr(poly_expr(&univariate::monic(&gcd_q), xs)),
         ]));
     }
-    if upoly::degree(&rest) == 1 {
+    if univariate::degree(&rest) == 1 {
         let alpha = -&rest[0] / &rest[1];
         if !alpha.is_zero() {
             let shifted = shift_by_scalar(a, &dq, &alpha);
-            let gcd_q = upoly::gcd(q, &shifted);
+            let gcd_q = univariate::gcd(q, &shifted);
             terms.push(cmul(vec![
                 num(&alpha),
-                log_expr(poly_expr(&upoly::monic(&gcd_q), xs)),
+                log_expr(poly_expr(&univariate::monic(&gcd_q), xs)),
             ]));
         }
         rest = Vec::new();
     }
-    if upoly::degree(&rest) == 2 {
+    if univariate::degree(&rest) == 2 {
         terms.push(quadratic_residues(&rest, a, q, &dq, xs)?);
-    } else if upoly::degree(&rest) >= 3 {
+    } else if univariate::degree(&rest) >= 3 {
         terms.push(rootof_residues(&rest, a, q, &dq, xs)?);
     }
     Some(cadd(terms))
@@ -317,16 +317,16 @@ fn log_part(a: &UPoly, q: &UPoly, xs: &Expr) -> Option<Expr> {
 
 /// `A − α·q′` for rational α.
 fn shift_by_scalar(a: &UPoly, dq: &UPoly, alpha: &BigRational) -> UPoly {
-    upoly::sub(a, &upoly::scale(dq, alpha))
+    univariate::sub(a, &univariate::scale(dq, alpha))
 }
 
 /// Resultant `res_x(q, A − t·q′)` in ℚ[t] via evaluation at deg q + 1 good
 /// points and Lagrange interpolation (resultants specialize at any t where
 /// the x-degree does not drop).
 fn rt_resultant(q: &UPoly, a: &UPoly, dq: &UPoly) -> Option<UPoly> {
-    let deg_t = upoly::degree(q);
+    let deg_t = univariate::degree(q);
     // Generic x-degree of A − t·q′.
-    let generic_deg = upoly::degree(a).max(upoly::degree(dq));
+    let generic_deg = univariate::degree(a).max(univariate::degree(dq));
     let mut points: Vec<(BigRational, BigRational)> = Vec::new();
     let mut tj = BigRational::zero();
     let mut tries = 0;
@@ -337,7 +337,7 @@ fn rt_resultant(q: &UPoly, a: &UPoly, dq: &UPoly) -> Option<UPoly> {
         }
         let spec = shift_by_scalar(a, dq, &tj);
         tj += BigRational::one();
-        if upoly::degree(&spec) != generic_deg || upoly::is_zero(&spec) {
+        if univariate::degree(&spec) != generic_deg || univariate::is_zero(&spec) {
             continue; // degree dropped at this t — skip the point
         }
         let val = resultant_q(q, &spec)?;
@@ -351,26 +351,26 @@ fn resultant_q(a: &UPoly, b: &UPoly) -> Option<BigRational> {
     let (mut a, mut b) = (a.clone(), b.clone());
     let mut acc = BigRational::one();
     loop {
-        if upoly::is_zero(&b) {
-            return Some(if upoly::degree(&a) == 0 && !upoly::is_zero(&a) {
+        if univariate::is_zero(&b) {
+            return Some(if univariate::degree(&a) == 0 && !univariate::is_zero(&a) {
                 acc
             } else {
                 BigRational::zero()
             });
         }
-        if upoly::degree(&b) == 0 {
+        if univariate::degree(&b) == 0 {
             // res(A, c) = c^deg A.
             let c = b[0].clone();
             let mut p = BigRational::one();
-            for _ in 0..upoly::degree(&a) {
+            for _ in 0..univariate::degree(&a) {
                 p *= &c;
             }
             return Some(acc * p);
         }
-        let (da, db) = (upoly::degree(&a), upoly::degree(&b));
-        let r = upoly::divrem(&a, &b).1;
-        let dr = if upoly::is_zero(&r) { 0 } else { upoly::degree(&r) };
-        if upoly::is_zero(&r) {
+        let (da, db) = (univariate::degree(&a), univariate::degree(&b));
+        let r = univariate::divrem(&a, &b).1;
+        let dr = if univariate::is_zero(&r) { 0 } else { univariate::degree(&r) };
+        if univariate::is_zero(&r) {
             return Some(BigRational::zero());
         }
         // res(A,B) = (−1)^(da·db) · lc(B)^(da − dr) · res(B, R).
@@ -398,11 +398,11 @@ fn lagrange(points: &[(BigRational, BigRational)]) -> UPoly {
                 continue;
             }
             let denom = xi - xj;
-            basis = upoly::mul(&basis, &[-(xj / &denom), BigRational::one() / denom]);
+            basis = univariate::mul(&basis, &[-(xj / &denom), BigRational::one() / denom]);
         }
-        acc = upoly::add_p(&acc, &basis);
+        acc = univariate::add_p(&acc, &basis);
     }
-    upoly::trim(&mut acc);
+    univariate::trim(&mut acc);
     acc
 }
 
@@ -502,12 +502,12 @@ fn quadratic_residues(f: &UPoly, a: &UPoly, q: &UPoly, dq: &UPoly, xs: &Expr) ->
     // Split G = U(x) + √m·V(x).
     let u: UPoly = {
         let mut v: UPoly = g.iter().map(|c| c.0.clone()).collect();
-        upoly::trim(&mut v);
+        univariate::trim(&mut v);
         v
     };
     let v: UPoly = {
         let mut w: UPoly = g.iter().map(|c| c.1.clone()).collect();
-        upoly::trim(&mut w);
+        univariate::trim(&mut w);
         w
     };
     let (u_e, v_e) = (poly_expr(&u, xs), poly_expr(&v, xs));
@@ -523,11 +523,11 @@ fn quadratic_residues(f: &UPoly, a: &UPoly, q: &UPoly, dq: &UPoly, xs: &Expr) ->
         if !h.is_zero() {
             terms.push(cmul(vec![num(&h), log_expr(usq_vsq)]));
         }
-        if !upoly::is_zero(&v) {
+        if !univariate::is_zero(&v) {
             // Orient the argument with the higher-degree polynomial on top:
             // atan(z) = −atan(1/z) up to a constant, and `atan(x)` is the
             // student form where `−atan(1/x)` is not.
-            let (sign, arg) = if upoly::degree(&u) > upoly::degree(&v) {
+            let (sign, arg) = if univariate::degree(&u) > univariate::degree(&v) {
                 (
                     1,
                     cmul(vec![
@@ -561,17 +561,17 @@ fn quadratic_residues(f: &UPoly, a: &UPoly, q: &UPoly, dq: &UPoly, xs: &Expr) ->
 // ---- RootOf residue class: gcd over ℚ[t]/(F) ----
 
 fn qr_reduce(p: &UPoly, f: &UPoly) -> UPoly {
-    upoly::divrem(p, f).1
+    univariate::divrem(p, f).1
 }
 
 fn qr_mulm(a: &UPoly, b: &UPoly, f: &UPoly) -> UPoly {
-    qr_reduce(&upoly::mul(a, b), f)
+    qr_reduce(&univariate::mul(a, b), f)
 }
 
 /// Inverse in ℚ[t]/(F) or the discovered factor.
 fn qr_invm(x: &UPoly, f: &UPoly) -> Result<UPoly, UPoly> {
-    let (g, s) = upoly::xgcd_mod(x, f);
-    if upoly::degree(&g) == 0 && !upoly::is_zero(&g) {
+    let (g, s) = univariate::xgcd_mod(x, f);
+    if univariate::degree(&g) == 0 && !univariate::is_zero(&g) {
         Ok(s)
     } else {
         Err(g)
@@ -581,7 +581,7 @@ fn qr_invm(x: &UPoly, f: &UPoly) -> Result<UPoly, UPoly> {
 type RPoly = Vec<UPoly>; // dense in x, coefficients in ℚ[t]/(F)
 
 fn rp_trim(p: &mut RPoly) {
-    while p.last().is_some_and(|c| upoly::is_zero(c)) {
+    while p.last().is_some_and(|c| univariate::is_zero(c)) {
         p.pop();
     }
 }
@@ -601,7 +601,7 @@ fn rp_divrem(a: &RPoly, b: &RPoly, f: &UPoly) -> Result<(RPoly, RPoly), UPoly> {
         q[dr - db] = coeff.clone();
         for i in 0..=db {
             let sub = qr_mulm(&b[i], &coeff, f);
-            r[dr - db + i] = upoly::sub(&r[dr - db + i], &sub);
+            r[dr - db + i] = univariate::sub(&r[dr - db + i], &sub);
         }
         rp_trim(&mut r);
     }
@@ -631,7 +631,7 @@ fn rp_gcd(a: &RPoly, b: &RPoly, f: &UPoly) -> Result<RPoly, UPoly> {
 fn rootof_residues(f: &UPoly, a: &UPoly, q: &UPoly, dq: &UPoly, xs: &Expr) -> Option<Expr> {
     let f = {
         // Primitive/positive-lc canonical form so RootOf construction agrees.
-        let ints = upoly::to_primitive_int(f);
+        let ints = univariate::to_primitive_int(f);
         ints.iter()
             .map(|c| BigRational::from_integer(c.clone()))
             .collect::<UPoly>()
@@ -643,19 +643,19 @@ fn rootof_residues(f: &UPoly, a: &UPoly, q: &UPoly, dq: &UPoly, xs: &Expr) -> Op
         let ac = a.get(i).cloned().unwrap_or_else(BigRational::zero);
         let dc = dq.get(i).cloned().unwrap_or_else(BigRational::zero);
         let mut c = vec![ac, -dc];
-        upoly::trim(&mut c);
+        univariate::trim(&mut c);
         shifted.push(qr_reduce(&c, &f));
     }
     rp_trim(&mut shifted);
     let q_r: RPoly = q.iter().map(|c| {
         let mut v = vec![c.clone()];
-        upoly::trim(&mut v);
+        univariate::trim(&mut v);
         v
     }).collect();
     match rp_gcd(&q_r, &shifted, &f) {
         Ok(g) => {
-            let d = upoly::degree(&f);
-            let root0 = crate::rootof::make_rootof(&f, 0)?;
+            let d = univariate::degree(&f);
+            let root0 = crate::polynomials::rootof::make_rootof(&f, 0)?;
             let Expr::RootOf { poly, .. } = &root0 else {
                 unreachable!()
             };
@@ -669,9 +669,9 @@ fn rootof_residues(f: &UPoly, a: &UPoly, q: &UPoly, dq: &UPoly, xs: &Expr) -> Op
                 let arg_terms: Vec<Expr> = g
                     .iter()
                     .enumerate()
-                    .filter(|(_, c)| !upoly::is_zero(c))
+                    .filter(|(_, c)| !univariate::is_zero(c))
                     .map(|(i, c)| {
-                        let coeff = crate::rootof::upoly_in_root(c, &alpha);
+                        let coeff = crate::polynomials::rootof::upoly_in_root(c, &alpha);
                         match i {
                             0 => coeff,
                             _ => cmul(vec![coeff, cpow(xs.clone(), int(i as i64))]),
@@ -685,10 +685,10 @@ fn rootof_residues(f: &UPoly, a: &UPoly, q: &UPoly, dq: &UPoly, xs: &Expr) -> Op
         Err(gfac) => {
             // Discovered factor: split F = gfac·(F/gfac) and recurse the
             // residue ladder on each part.
-            if upoly::degree(&gfac) < 1 || upoly::degree(&gfac) >= upoly::degree(&f) {
+            if univariate::degree(&gfac) < 1 || univariate::degree(&gfac) >= univariate::degree(&f) {
                 return None;
             }
-            let (rest, _) = upoly::divrem(&f, &gfac);
+            let (rest, _) = univariate::divrem(&f, &gfac);
             let left = residues_dispatch(&gfac, a, q, dq, xs)?;
             let right = residues_dispatch(&rest, a, q, dq, xs)?;
             Some(cadd(vec![left, right]))
@@ -698,7 +698,7 @@ fn rootof_residues(f: &UPoly, a: &UPoly, q: &UPoly, dq: &UPoly, xs: &Expr) -> Op
 
 /// Route a residue factor through the ladder by degree (used on split).
 fn residues_dispatch(f: &UPoly, a: &UPoly, q: &UPoly, dq: &UPoly, xs: &Expr) -> Option<Expr> {
-    match upoly::degree(f) {
+    match univariate::degree(f) {
         0 => Some(int(0)),
         1 => {
             let alpha = -&f[0] / &f[1];
@@ -706,10 +706,10 @@ fn residues_dispatch(f: &UPoly, a: &UPoly, q: &UPoly, dq: &UPoly, xs: &Expr) -> 
                 return Some(int(0));
             }
             let shifted = shift_by_scalar(a, dq, &alpha);
-            let g = upoly::gcd(q, &shifted);
+            let g = univariate::gcd(q, &shifted);
             Some(cmul(vec![
                 num(&alpha),
-                log_expr(poly_expr(&upoly::monic(&g), xs)),
+                log_expr(poly_expr(&univariate::monic(&g), xs)),
             ]))
         }
         2 => quadratic_residues(f, a, q, dq, xs),

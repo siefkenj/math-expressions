@@ -3,8 +3,8 @@
 //! every answer is *certified* (exact Sturm counts + certified refinement)
 //! or an honest refusal — never a wrong value or a wrong index order.
 
-use math_expressions::eval_numerical::{eval_complex, Env};
-use math_expressions::precise::{evaluate_to_precision, Precise};
+use math_expressions::eval_numeric::complex::{eval_complex, Env};
+use math_expressions::eval_numeric::certified_digits::{evaluate_to_precision, Precise};
 use math_expressions::{canonicalize, Expr, TextToAst, TextToAstOptions};
 use num_complex::Complex64;
 

@@ -5,7 +5,7 @@
 //! `simplify`; `exact::is_zero` uses it as a pre-pass. Three families:
 //!
 //! * **Lattice values** — sin/cos/tan/cot/sec/csc at rational multiples of π on
-//!   the π/12 lattice, via the tested tables in [`crate::exact`]
+//!   the π/12 lattice, via the tested tables in [`crate::eval_exact`]
 //!   (`sin(2π) → 0`, `cos(π/3) → 1/2`, `sec(π/4) → √2`).
 //! * **Parity + π-shift** — `sin(−u) → −sin u`, `cos(−u) → cos u`, and
 //!   `f(u + kπ)` reduction for integer `k` (`sin(x + 2π) → sin x`,
@@ -18,7 +18,7 @@ use num_rational::BigRational;
 use num_traits::{Signed, Zero};
 
 use crate::expr::{Expr, MathConst};
-use crate::normalize::syntactic::map_children;
+use crate::expr::map_children;
 
 const TRIG: &[&str] = &["sin", "cos", "tan", "cot", "sec", "csc"];
 
@@ -67,7 +67,7 @@ fn fold_node(e: &Expr) -> Expr {
 
 fn fold_trig(name: &str, arg: &Expr) -> Option<Expr> {
     let (sign, new_arg) = normalize_trig_arg(name, arg);
-    let value = crate::exact::trig_special_value(name, &new_arg);
+    let value = crate::eval_exact::trig_special_value(name, &new_arg);
     let arg_changed = new_arg != canon(arg);
     if value.is_none() && sign > 0 && !arg_changed {
         return None; // nothing folded
@@ -164,7 +164,7 @@ fn fold_log(arg: &Expr) -> Option<Expr> {
     // which is always real).
     let inner = exp_arg(arg);
     if let Some(u) = inner {
-        if crate::exact::exact_eval(&u).is_some() {
+        if crate::eval_exact::exact_eval(&u).is_some() {
             return Some(u);
         }
     }

@@ -2,7 +2,7 @@
 //! tier, MVT/exact-point certificates, tail-bounded improper values, the
 //! never-guess adversarial invariant, and front-end consistency.
 
-use math_expressions::precise::{
+use math_expressions::eval_numeric::certified_digits::{
     evaluate_to_precision, integrate_analyzed, integrate_to_precision, IntegralVerdict, Precise,
 };
 use math_expressions::{Expr, TextToAst, TextToAstOptions};

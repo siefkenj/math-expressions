@@ -3,7 +3,7 @@
 //! checked digit-for-digit against `evaluate_to_precision` of the closed
 //! form — an independent code path (symbolic + MpFix vs f64 quadrature).
 
-use math_expressions::precise::{evaluate_to_precision, integrate_to_precision, Precise};
+use math_expressions::eval_numeric::certified_digits::{evaluate_to_precision, integrate_to_precision, Precise};
 use math_expressions::{Expr, TextToAst, TextToAstOptions};
 
 fn parse(s: &str) -> Expr {

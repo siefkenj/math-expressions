@@ -227,7 +227,7 @@ fn subst_point(e: &Expr, var: &str, pt: &Expr) -> Expr {
 /// certify a true zero.
 fn exactly_zero_at(e: &Expr, var: &str, pt: &Expr) -> bool {
     let sub = crate::normalize::canonicalize(&subst_point(e, var, pt));
-    crate::exact::exact_eval(&sub)
+    crate::eval_exact::exact_eval(&sub)
         .map(|v| v.is_zero())
         .unwrap_or(false)
 }
@@ -236,7 +236,7 @@ fn exactly_zero_at(e: &Expr, var: &str, pt: &Expr) -> bool {
 /// contract of the arbitrary-precision path (|mant| ≥ 2 excludes 0).
 fn certified_nonzero_at(e: &Expr, var: &str, pt: &Expr) -> bool {
     let sub = crate::normalize::canonicalize(&subst_point(e, var, pt));
-    if let Some(v) = crate::exact::exact_eval(&sub) {
+    if let Some(v) = crate::eval_exact::exact_eval(&sub) {
         return !v.is_zero();
     }
     match super::evaluate_to_precision(&sub, 12) {
@@ -369,7 +369,7 @@ fn mvt_certificate(div: &Divisor, var: &str, cell: &ZeroCell) -> bool {
     if div.s < 1.0 {
         return false;
     }
-    let dprime = crate::normalize::canonicalize(&crate::diff::derivative(&div.d, var));
+    let dprime = crate::normalize::canonicalize(&crate::calculus::diff::derivative(&div.d, var));
     let Ok(dp_tape) = super::tape::compile(&dprime) else {
         return false;
     };
@@ -411,7 +411,7 @@ fn exact_point_certificate(
     let mut dj = div.d.clone();
     let mut m = 0usize;
     for j in 1..=4 {
-        dj = crate::normalize::canonicalize(&crate::diff::derivative(&dj, var));
+        dj = crate::normalize::canonicalize(&crate::calculus::diff::derivative(&dj, var));
         if exactly_zero_at(&dj, var, pt) {
             continue;
         }
@@ -485,8 +485,8 @@ fn closed_form_candidates(lo: f64, hi: f64) -> Vec<(Expr, f64)> {
 /// `Some(poles)` when the integrand is rational over ℚ and the decision is
 /// exact (empty vec = provably no poles in [lo, hi]); `None` = not rational.
 fn rational_poles(fc: &Expr, var: &str, lo: f64, hi: f64) -> Option<Vec<SingularPoint>> {
-    let (_, den) = crate::integrate::rational::expr_to_ratfun(fc, var)?;
-    if crate::upoly::degree(&den) == 0 {
+    let (_, den) = crate::calculus::integrate::rational::expr_to_ratfun(fc, var)?;
+    if crate::polynomials::univariate::degree(&den) == 0 {
         return Some(Vec::new());
     }
     let lo_r = BigRational::from_float(lo)?;
@@ -494,7 +494,7 @@ fn rational_poles(fc: &Expr, var: &str, lo: f64, hi: f64) -> Option<Vec<Singular
     let mut poles = Vec::new();
     // Endpoint zeros, exactly.
     for (ep_r, ep) in [(lo_r.clone(), lo), (hi_r.clone(), hi)] {
-        if crate::upoly::eval_rat(&den, &ep_r).is_zero() {
+        if crate::polynomials::univariate::eval_rat(&den, &ep_r).is_zero() {
             poles.push(SingularPoint {
                 location: ep,
                 exact: Some(Expr::Num(Number::from_bigrational(ep_r.clone()))),
@@ -503,21 +503,21 @@ fn rational_poles(fc: &Expr, var: &str, lo: f64, hi: f64) -> Option<Vec<Singular
     }
     // Interior roots via exact isolation.
     let radical = {
-        let g = crate::upoly::gcd(&den, &crate::upoly::derivative(&den));
-        if crate::upoly::degree(&g) >= 1 {
-            crate::upoly::divrem(&den, &g).0
+        let g = crate::polynomials::univariate::gcd(&den, &crate::polynomials::univariate::derivative(&den));
+        if crate::polynomials::univariate::degree(&g) >= 1 {
+            crate::polynomials::univariate::divrem(&den, &g).0
         } else {
             den.clone()
         }
     };
-    let intervals = crate::upoly::isolate_real_roots(&radical)?;
+    let intervals = crate::polynomials::univariate::isolate_real_roots(&radical)?;
     for (idx, (a, b)) in intervals.iter().enumerate() {
         // The isolating interval (a, b] holds exactly one root ρ. Its left
         // endpoint may itself be a *different* root (f(a) = 0), so all
         // bisection orients by the sign at b: on (a, ρ) the sign is the
         // opposite of sign(f(b)), flipping exactly once at ρ.
         let (mut a, mut b) = (a.clone(), b.clone());
-        let fb = crate::upoly::eval_rat(&radical, &b);
+        let fb = crate::polynomials::univariate::eval_rat(&radical, &b);
         if fb.is_zero() {
             // ρ = b exactly (a rational root): membership is immediate.
             if b >= lo_r && b <= hi_r {
@@ -533,7 +533,7 @@ fn rational_poles(fc: &Expr, var: &str, lo: f64, hi: f64) -> Option<Vec<Singular
         let bisect = |a: &mut BigRational, b: &mut BigRational| -> Option<BigRational> {
             // One sign-oriented bisection step; Some(root) on an exact hit.
             let mid = (&*a + &*b) / BigRational::from_integer(2.into());
-            let fm = crate::upoly::eval_rat(&radical, &mid);
+            let fm = crate::polynomials::univariate::eval_rat(&radical, &mid);
             if fm.is_zero() {
                 return Some(mid);
             }
@@ -580,13 +580,13 @@ fn rational_poles(fc: &Expr, var: &str, lo: f64, hi: f64) -> Option<Vec<Singular
                 break;
             }
         }
-        let location = crate::upoly::refine_to_f64(&radical, a.clone(), b.clone())
+        let location = crate::polynomials::univariate::refine_to_f64(&radical, a.clone(), b.clone())
             .unwrap_or_else(|| ((&a + &b) / BigRational::from_integer(2.into())).to_f64().unwrap_or(f64::NAN));
         // Exact form: a low-denominator rational root, else RootOf(radical, idx)
         // (real roots come first in canonical index order, ascending).
         let exact = rational_root_in(&radical, &a, &b)
             .map(|r| Expr::Num(Number::from_bigrational(r)))
-            .or_else(|| crate::rootof::make_rootof(&radical, idx as u32));
+            .or_else(|| crate::polynomials::rootof::make_rootof(&radical, idx as u32));
         poles.push(SingularPoint { location, exact });
     }
     Some(poles)
@@ -600,7 +600,7 @@ fn rational_root_in(p: &[BigRational], a: &BigRational, b: &BigRational) -> Opti
         // n ranges over the integers with n/q ∈ [a, b], i.e. n ∈ [q·a, q·b].
         while BigRational::from_integer(n.clone()) <= qb {
             let cand = BigRational::new(n.clone(), q.into());
-            if &cand > a && crate::upoly::eval_rat(p, &cand).is_zero() {
+            if &cand > a && crate::polynomials::univariate::eval_rat(p, &cand).is_zero() {
                 return Some(cand);
             }
             n += 1;
@@ -789,7 +789,7 @@ fn exact_zero_order(d: &Expr, var: &str, pt: &Expr) -> Option<usize> {
     }
     let mut dj = d.clone();
     for j in 1..=4 {
-        dj = crate::normalize::canonicalize(&crate::diff::derivative(&dj, var));
+        dj = crate::normalize::canonicalize(&crate::calculus::diff::derivative(&dj, var));
         if exactly_zero_at(&dj, var, pt) {
             continue;
         }
@@ -835,7 +835,7 @@ pub fn integrate_analyzed(
     let fc = crate::normalize::simplify_core(f);
     if crate::ops::variables(&fc)
         .iter()
-        .any(|v| v != var && !crate::sym::is_constant_symbol(v))
+        .any(|v| v != var && !crate::expr::sym::is_constant_symbol(v))
     {
         return IntegralVerdict::Unknown("free variables besides the integration variable".into());
     }
@@ -919,7 +919,7 @@ fn cell_tail_bound(
         // derivatives vanish exactly, making the Taylor form valid).
         let mut dm = div.d.clone();
         for _ in 0..m {
-            dm = crate::normalize::canonicalize(&crate::diff::derivative(&dm, var));
+            dm = crate::normalize::canonicalize(&crate::calculus::diff::derivative(&dm, var));
         }
         let dm_tape = super::tape::compile(&dm).ok()?;
         let dm_iv = interval_eval(&dm_tape, iv)?;
@@ -948,7 +948,7 @@ fn cell_tail_bound(
     if let Some(&li) = cell.vanishing_logs.first() {
         let lf = logs.get(li)?;
         // u has a certified simple zero here: K_u|x−ρ| ≤ |u| ≤ M_u|x−ρ|.
-        let du = crate::normalize::canonicalize(&crate::diff::derivative(&lf.u, var));
+        let du = crate::normalize::canonicalize(&crate::calculus::diff::derivative(&lf.u, var));
         let du_tape = super::tape::compile(&du).ok()?;
         let du_iv = interval_eval(&du_tape, iv)?;
         if !(du_iv.lo > 0.0 || du_iv.hi < 0.0) {

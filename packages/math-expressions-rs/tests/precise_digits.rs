@@ -11,7 +11,7 @@
 //! sourced constants in `precise.rs`, and the leading 16 with f64 libm, so a
 //! transcription error on either side would be caught twice over.
 
-use math_expressions::precise::{evaluate_to_precision, Precise};
+use math_expressions::eval_numeric::certified_digits::{evaluate_to_precision, Precise};
 use math_expressions::{Expr, TextToAst, TextToAstOptions};
 
 fn parse(s: &str) -> Expr {

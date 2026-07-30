@@ -1,25 +1,11 @@
 //! Unit annotations: stripping and adding `["unit", …]` wrappers, port of
-//! `me.remove_units` / `me.remove_scaling_units` / `me.add_unit`.
+//! `me.remove_units` / `me.remove_scaling_units` / `me.add_unit`. The
+//! `["unit", …]` node layout itself is owned by [`crate::normalize`] (the
+//! scaling-unit engine); this module is the `me.*`-parity façade over it.
 
+use crate::expr::map_children;
 use crate::expr::Expr;
-use crate::normalize::syntactic::map_children;
-
-/// The known scaling-unit spellings the parsers emit (see
-/// `lib/expression/units.js`): `%`, `deg` (and its LaTeX spelling `circ`),
-/// and the prefix `$`.
-fn is_unit_symbol(e: &Expr) -> bool {
-    matches!(e, Expr::Sym(s) if matches!(s.name().as_str(), "%" | "$" | "deg" | "circ"))
-}
-
-/// The value operand of a `["unit", …]` node — the operand that is not the
-/// unit symbol itself (prefix `$` puts the symbol first, postfix units last).
-fn unit_body(args: &[Expr]) -> Option<&Expr> {
-    match args {
-        [a, b] if is_unit_symbol(a) => Some(b),
-        [a, b] if is_unit_symbol(b) => Some(a),
-        _ => None,
-    }
-}
+use crate::normalize::unit_body;
 
 /// `me.remove_units`: strip unit annotations. With `scale_based_on_unit`, the
 /// scaling units are applied (`50%` → `1/2`, `90 deg` → `pi/2`) via
@@ -54,5 +40,5 @@ pub fn add_unit(e: &Expr, unit: &str) -> Expr {
     } else {
         vec![e.clone(), Expr::sym(unit)]
     };
-    Expr::OtherOp(crate::sym::Sym::new("unit"), args)
+    Expr::OtherOp(crate::expr::sym::Sym::new("unit"), args)
 }

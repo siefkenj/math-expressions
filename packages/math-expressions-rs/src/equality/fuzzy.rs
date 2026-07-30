@@ -3,7 +3,7 @@
 //! the sampling stages add to their per-point comparisons.
 
 use super::EqOptions;
-use crate::eval_numerical::{eval_complex, Env};
+use crate::eval_numeric::complex::{eval_complex, Env};
 use crate::expr::Expr;
 use num_complex::Complex64;
 
@@ -98,7 +98,7 @@ pub(super) fn build_fuzzy_tol(expr: &Expr, vars: &[String], opts: &EqOptions) ->
     }
     let mut terms = Vec::new();
     for (name, val) in &params {
-        let d = crate::diff::derivative(&with_params, name);
+        let d = crate::calculus::diff::derivative(&with_params, name);
         let term = if opts.allowed_error_is_absolute {
             d
         } else {
@@ -154,7 +154,7 @@ fn replace_numbers(
             Box::new(replace_numbers(b, vars, include_exponents, params)),
             x.clone(),
         ),
-        _ => crate::normalize::syntactic::map_children(e, |c| {
+        _ => crate::expr::map_children(e, |c| {
             replace_numbers(c, vars, include_exponents, params)
         }),
     }

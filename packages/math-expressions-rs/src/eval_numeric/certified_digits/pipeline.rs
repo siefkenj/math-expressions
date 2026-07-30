@@ -1,32 +1,20 @@
-//! Arbitrary-precision evaluation.
+//! The arbitrary-precision evaluation pipeline and the [`Precise`] result type.
 //!
-//! Pipeline: canonical tree → flat tape (`tape.rs`, iterative) → Tier R
-//! (exact rational — the canonicalizer already folded it) → Tier 0 (f64 with
-//! certified error bounds, `tier0.rs`) → Tier 2 (`MpFix` fixed point at a
-//! working precision chosen by a magnitude-informed backward planning pass,
-//! escalated by a Ziv loop). Failures are values (`Precise::Unknown`), never
-//! hangs or panics; every loop is operation-counted under the configured
-//! resource limits.
+//! canonical tree → flat tape → Tier R (exact rational) → Tier 0 (f64 with
+//! certified error bounds, [`float_bounds`](super::float_bounds)) → Tier 2
+//! ([`MpFix`](super::fix) fixed point at a working precision chosen by a
+//! magnitude-informed backward planning pass, escalated by a Ziv loop).
+//! Failures are values (`Precise::Unknown`), never hangs or panics; every loop
+//! is operation-counted under the configured resource limits.
 
-pub mod complex;
-pub mod diverge;
-pub mod fix;
-pub mod kernels;
-pub mod quad;
-pub mod tape;
-pub mod tier0;
-
+use super::fix::MpFix;
+use super::kernels::{registry, Budget, FixId};
+use super::tape::{arity, compile, CompileError, CompiledExpr, Op};
+use super::{cfix, fix, float_bounds, kernels};
 use crate::expr::Expr;
 use crate::num::Number;
-use fix::MpFix;
-use kernels::{registry, Budget, FixId};
 use num_bigint::BigInt;
 use num_traits::{Signed, Zero};
-use tape::{arity, CompiledExpr, Op};
-
-pub use diverge::{integrate_analyzed, IntegralVerdict, SingularPoint};
-pub use quad::integrate_to_precision;
-pub use tape::{compile, CompileError};
 
 /// How a precision readout renders its significant digits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -114,7 +102,7 @@ impl Precise {
     }
 }
 
-fn needed_bits(digits: usize) -> u32 {
+pub(super) fn needed_bits(digits: usize) -> u32 {
     (digits as f64 * std::f64::consts::LOG2_10).ceil() as u32 + 4
 }
 
@@ -132,7 +120,7 @@ pub fn evaluate_to_precision(e: &Expr, digits: usize) -> Precise {
     let c = crate::normalize::simplify_core(e);
     if crate::ops::variables(&c)
         .iter()
-        .any(|v| !crate::sym::is_constant_symbol(v))
+        .any(|v| !crate::expr::sym::is_constant_symbol(v))
     {
         return Precise::Unknown("free variables");
     }
@@ -154,8 +142,8 @@ pub fn evaluate_to_precision(e: &Expr, digits: usize) -> Precise {
 pub fn eval_tape(tape: &CompiledExpr, bindings: &[f64], digits: usize) -> Precise {
     // ---- Tier 0 (real) ----
     let mut record: Vec<f64> = Vec::new();
-    let t0 = tier0::run(tape, bindings, &mut record);
-    if let tier0::Tier0Outcome::Ok(a) = &t0 {
+    let t0 = float_bounds::run(tape, bindings, &mut record);
+    if let float_bounds::Tier0Outcome::Ok(a) = &t0 {
         // Success criterion: err small enough for the requested digits.
         if a.val != 0.0 && digits <= 15 {
             let tol = 0.5 * a.val.abs() * 10f64.powi(1 - digits as i32);
@@ -168,7 +156,7 @@ pub fn eval_tape(tape: &CompiledExpr, bindings: &[f64], digits: usize) -> Precis
         }
     }
     let est_msb = match &t0 {
-        tier0::Tier0Outcome::Ok(a) if a.val != 0.0 => Some(a.val.abs().log2().ceil() as i64),
+        float_bounds::Tier0Outcome::Ok(a) if a.val != 0.0 => Some(a.val.abs().log2().ceil() as i64),
         _ => None,
     };
     let real = real_ziv(tape, bindings, &record, digits, est_msb);
@@ -220,8 +208,8 @@ fn real_ziv(
 fn complex_path(tape: &CompiledExpr, bindings: &[f64], digits: usize) -> Precise {
     use num_complex::Complex64;
     let mut crecord: Vec<Complex64> = Vec::new();
-    let ct0 = tier0::run_complex(tape, bindings, &mut crecord);
-    if let tier0::CTier0Outcome::Ok(a) = &ct0 {
+    let ct0 = float_bounds::run_complex(tape, bindings, &mut crecord);
+    if let float_bounds::CTier0Outcome::Ok(a) = &ct0 {
         let mag = a.val.norm();
         if mag != 0.0 && digits <= 15 {
             let tol = 0.5 * mag * 10f64.powi(1 - digits as i32);
@@ -240,7 +228,7 @@ fn complex_path(tape: &CompiledExpr, bindings: &[f64], digits: usize) -> Precise
         }
     }
     let est_msb = match &ct0 {
-        tier0::CTier0Outcome::Ok(a) if a.val.norm() != 0.0 => {
+        float_bounds::CTier0Outcome::Ok(a) if a.val.norm() != 0.0 => {
             Some(a.val.norm().log2().ceil() as i64)
         }
         _ => None,
@@ -417,7 +405,7 @@ fn tier2_run(
             Op::I => return Tier2Outcome::Unknown("imaginary unit in the real tier"),
             Op::Root(ri) => {
                 let (poly, idx) = &tape.roots[*ri as usize];
-                match crate::rootof::refine_real(poly, *idx, s) {
+                match crate::polynomials::rootof::refine_real(poly, *idx, s) {
                     Some(m) => m,
                     None => {
                         return Tier2Outcome::Unknown("root not refinable in the real tier")
@@ -642,7 +630,7 @@ fn estimate_mag(tape: &CompiledExpr, record: &[f64], i: usize) -> f64 {
 // ---- P4: complex Tier 2 ----
 
 enum Tier2Outcome2 {
-    Value(complex::CFix),
+    Value(cfix::CFix),
     Unknown(&'static str),
 }
 
@@ -655,7 +643,7 @@ fn tier2_run_complex(
     crecord: &[num_complex::Complex64],
     target_scale: i32,
 ) -> Tier2Outcome2 {
-    use complex::CFix;
+    use cfix::CFix;
     let lim = crate::resource_limits::current();
     let n = tape.ops.len();
     let mag = |i: usize| -> f64 {
@@ -765,13 +753,13 @@ fn tier2_run_complex(
             Op::I => Some(CFix::i(s)),
             Op::Root(ri) => {
                 let (poly, idx) = &tape.roots[*ri as usize];
-                crate::rootof::refine_complex(poly, *idx, s, &mut budget)
+                crate::polynomials::rootof::refine_complex(poly, *idx, s, &mut budget)
             }
             Op::Add(k) => {
                 let k = *k as usize;
                 let start = stack.len() - k;
                 let items: Vec<&CFix> = stack[start..].iter().collect();
-                let out = complex::cadd(&items, s);
+                let out = cfix::cadd(&items, s);
                 drop(items);
                 stack.truncate(start);
                 Some(out)
@@ -783,7 +771,7 @@ fn tier2_run_complex(
                 let mut acc = stack[start].clone();
                 let mut ok = true;
                 for x in &stack[start + 1..] {
-                    match complex::cmul(&acc, x, work) {
+                    match cfix::cmul(&acc, x, work) {
                         Some(m) => acc = m,
                         None => {
                             ok = false;
@@ -796,30 +784,30 @@ fn tier2_run_complex(
             }
             Op::PowInt(k) => {
                 let x = stack.pop().unwrap();
-                complex::cpowint(&x, *k, s, &mut budget)
+                cfix::cpowint(&x, *k, s, &mut budget)
             }
             Op::Pow => {
                 let b = stack.pop().unwrap();
                 let a = stack.pop().unwrap();
-                complex::cpow(&a, &b, s, &mut budget)
+                cfix::cpow(&a, &b, s, &mut budget)
             }
             Op::Call(id) => {
                 let x = stack.pop().unwrap();
                 match registry()[*id as usize].fix {
-                    Some(FixId::Sqrt) => complex::csqrt(&x, s, &mut budget),
-                    Some(FixId::Exp) => complex::cexp(&x, s, &mut budget),
-                    Some(FixId::Ln) => complex::cln(&x, s, &mut budget),
-                    Some(FixId::Abs) => complex::cabs(&x, s, &mut budget),
-                    Some(FixId::Sin) => complex::csin(&x, s, &mut budget),
-                    Some(FixId::Cos) => complex::ccos(&x, s, &mut budget),
-                    Some(FixId::Tan) => complex::ctan(&x, s, &mut budget),
-                    Some(FixId::Asin) => complex::casin(&x, s, &mut budget),
-                    Some(FixId::Acos) => complex::cacos(&x, s, &mut budget),
-                    Some(FixId::Atan) => complex::catan(&x, s, &mut budget),
-                    Some(FixId::Sinh) => complex::csinh(&x, s, &mut budget),
-                    Some(FixId::Cosh) => complex::ccosh(&x, s, &mut budget),
-                    Some(FixId::Tanh) => complex::ctanh(&x, s, &mut budget),
-                    Some(FixId::Log10) => complex::clog10(&x, s, &mut budget),
+                    Some(FixId::Sqrt) => cfix::csqrt(&x, s, &mut budget),
+                    Some(FixId::Exp) => cfix::cexp(&x, s, &mut budget),
+                    Some(FixId::Ln) => cfix::cln(&x, s, &mut budget),
+                    Some(FixId::Abs) => cfix::cabs(&x, s, &mut budget),
+                    Some(FixId::Sin) => cfix::csin(&x, s, &mut budget),
+                    Some(FixId::Cos) => cfix::ccos(&x, s, &mut budget),
+                    Some(FixId::Tan) => cfix::ctan(&x, s, &mut budget),
+                    Some(FixId::Asin) => cfix::casin(&x, s, &mut budget),
+                    Some(FixId::Acos) => cfix::cacos(&x, s, &mut budget),
+                    Some(FixId::Atan) => cfix::catan(&x, s, &mut budget),
+                    Some(FixId::Sinh) => cfix::csinh(&x, s, &mut budget),
+                    Some(FixId::Cosh) => cfix::ccosh(&x, s, &mut budget),
+                    Some(FixId::Tanh) => cfix::ctanh(&x, s, &mut budget),
+                    Some(FixId::Log10) => cfix::clog10(&x, s, &mut budget),
                     None => None,
                 }
             }
@@ -845,9 +833,9 @@ impl CompiledExpr {
     /// abscissa workhorse for quadrature: no bignum, one stack sweep.
     pub fn eval_f64(&self, bindings: &[f64]) -> Option<(f64, f64)> {
         let mut record = Vec::new();
-        match tier0::run(self, bindings, &mut record) {
-            tier0::Tier0Outcome::Ok(a) => Some((a.val, a.err)),
-            tier0::Tier0Outcome::Escalate(_) => None,
+        match float_bounds::run(self, bindings, &mut record) {
+            float_bounds::Tier0Outcome::Ok(a) => Some((a.val, a.err)),
+            float_bounds::Tier0Outcome::Escalate(_) => None,
         }
     }
 

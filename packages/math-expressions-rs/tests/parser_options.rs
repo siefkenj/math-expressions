@@ -5,7 +5,7 @@
 //! splitSymbols off, custom symbol lists, simplified application disabled,
 //! Leibniz parsing disabled, and the non-scientific-notation lexer.
 
-use math_expressions::js_tree::to_js;
+use math_expressions::expr::serde::to_js;
 use math_expressions::{LatexToAst, LatexToAstOptions, TextToAst, TextToAstOptions};
 use serde_json::{json, Value};
 

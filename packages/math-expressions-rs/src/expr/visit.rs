@@ -1,7 +1,9 @@
-//! Read-only traversal and n-ary flattening of the [`Expr`] tree.
+//! Traversal and n-ary flattening of the [`Expr`] tree.
 //!
-//! [`Expr::children`] is the single full-variant traversal every contains-X
-//! predicate is built on; [`flatten`] merges nested associative operators.
+//! [`Expr::children`] is the single full-variant read-only traversal every
+//! contains-X predicate is built on; [`map_children`] is its rebuilding
+//! (structure-preserving map) counterpart; [`flatten`] merges nested
+//! associative operators.
 
 use super::Expr;
 
@@ -136,5 +138,56 @@ pub fn flatten(expr: Expr) -> Expr {
         | Expr::RootOf { .. }
         | Expr::Blank
         | Expr::Ldots) => leaf,
+    }
+}
+
+/// Apply `f` to every immediate `Expr` child, rebuilding the node; leaves are
+/// returned unchanged. The rebuilding counterpart of [`Expr::children`] and the
+/// crate's generic structure-preserving tree map — shared by the syntactic
+/// passes, `normalize::simplify`, and the `ops` rewrites. Generic over `FnMut`
+/// so callers can thread state (e.g. a change flag).
+pub(crate) fn map_children<F: FnMut(&Expr) -> Expr>(e: &Expr, mut f: F) -> Expr {
+    match e {
+        Expr::Num(_)
+        | Expr::Sym(_)
+        | Expr::Const(_)
+        | Expr::RootOf { .. }
+        | Expr::Blank
+        | Expr::Ldots => e.clone(),
+        Expr::Add(xs) => Expr::Add(xs.iter().map(&mut f).collect()),
+        Expr::Mul(xs) => Expr::Mul(xs.iter().map(&mut f).collect()),
+        Expr::And(xs) => Expr::And(xs.iter().map(&mut f).collect()),
+        Expr::Or(xs) => Expr::Or(xs.iter().map(&mut f).collect()),
+        Expr::Union(xs) => Expr::Union(xs.iter().map(&mut f).collect()),
+        Expr::Intersect(xs) => Expr::Intersect(xs.iter().map(&mut f).collect()),
+        Expr::Div(a, b) => Expr::Div(Box::new(f(a)), Box::new(f(b))),
+        Expr::Pow(a, b) => Expr::Pow(Box::new(f(a)), Box::new(f(b))),
+        Expr::Index(a, b) => Expr::Index(Box::new(f(a)), Box::new(f(b))),
+        Expr::Neg(x) => Expr::Neg(Box::new(f(x))),
+        Expr::Not(x) => Expr::Not(Box::new(f(x))),
+        Expr::Prime(x) => Expr::Prime(Box::new(f(x))),
+        Expr::Apply(h, xs) => {
+            let h = f(h);
+            Expr::Apply(Box::new(h), xs.iter().map(&mut f).collect())
+        }
+        Expr::Seq(k, xs) => Expr::Seq(*k, xs.iter().map(&mut f).collect()),
+        Expr::Interval { endpoints, closed } => Expr::Interval {
+            endpoints: Box::new((f(&endpoints.0), f(&endpoints.1))),
+            closed: *closed,
+        },
+        Expr::Relation { operands, ops } => Expr::Relation {
+            operands: operands.iter().map(&mut f).collect(),
+            ops: ops.clone(),
+        },
+        Expr::Matrix {
+            rows,
+            cols,
+            entries,
+        } => Expr::Matrix {
+            rows: *rows,
+            cols: *cols,
+            entries: entries.iter().map(&mut f).collect(),
+        },
+        Expr::OtherOp(name, xs) => Expr::OtherOp(*name, xs.iter().map(&mut f).collect()),
     }
 }

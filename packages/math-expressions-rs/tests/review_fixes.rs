@@ -3,7 +3,7 @@
 //! silently regress. Under the workspace `panic = "abort"` profile, the
 //! panic/abort cases here would be full wasm-worker crashes if they regressed.
 
-use math_expressions::precise::{evaluate_to_precision, integrate_to_precision, Precise};
+use math_expressions::eval_numeric::certified_digits::{evaluate_to_precision, integrate_to_precision, Precise};
 use math_expressions::{canonicalize, det, Expr, LatexToAst, LatexToAstOptions, Number, NumberNotation};
 
 fn parse_latex(nt: NumberNotation, s: &str) -> Result<Expr, math_expressions::ParseError> {

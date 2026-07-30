@@ -91,7 +91,7 @@ impl Expression {
     /// provably nonzero, `undefined` = undecided. Never certifies a wrong
     /// answer (adversarial almost-zeros return `undefined`, not `true`).
     pub fn is_zero(&self) -> Option<bool> {
-        math_expressions::exact::is_zero(&self.0, &Assumptions::new())
+        math_expressions::eval_exact::is_zero(&self.0, &Assumptions::new())
     }
 
     // ---- analyticity (item 7) ----

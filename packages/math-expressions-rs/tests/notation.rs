@@ -7,7 +7,7 @@
 //!   * notation independence: `parse(t, comma) == parse(equiv_t, period)`.
 
 use math_expressions::{
-    js_tree, to_latex, to_text, Expr, LatexOpts, LatexToAst, LatexToAstOptions, NumberNotation,
+    expr, to_latex, to_text, Expr, LatexOpts, LatexToAst, LatexToAstOptions, NumberNotation,
     ParseError, TextOpts, TextToAst, TextToAstOptions,
 };
 use serde_json::Value;
@@ -119,7 +119,7 @@ fn conformance_cases() {
         if let Some(t) = &c.input_text {
             let e = parse_text(&nt, t)
                 .unwrap_or_else(|err| panic!("{}: text parse {t:?}: {err:?}", c.name));
-            assert_eq!(js_tree::to_js(&e), c.expected_ast, "{}: text AST", c.name);
+            assert_eq!(expr::serde::to_js(&e), c.expected_ast, "{}: text AST", c.name);
             if let Some(exp) = &c.expected_text_out {
                 assert_eq!(&text_out(&nt, &e), exp, "{}: text output", c.name);
             }
@@ -127,7 +127,7 @@ fn conformance_cases() {
         if let Some(l) = &c.input_latex {
             let e = parse_latex(&nt, l)
                 .unwrap_or_else(|err| panic!("{}: latex parse {l:?}: {err:?}", c.name));
-            assert_eq!(js_tree::to_js(&e), c.expected_ast, "{}: latex AST", c.name);
+            assert_eq!(expr::serde::to_js(&e), c.expected_ast, "{}: latex AST", c.name);
             if let Some(exp) = &c.expected_latex_out {
                 assert_eq!(&latex_out(&nt, &e), exp, "{}: latex output", c.name);
             }
@@ -167,8 +167,8 @@ fn round_trip_law() {
             let back = parse_text(&nt, &printed)
                 .unwrap_or_else(|err| panic!("{}: reparse text {printed:?}: {err:?}", c.name));
             assert_eq!(
-                js_tree::to_js(&e),
-                js_tree::to_js(&back),
+                expr::serde::to_js(&e),
+                expr::serde::to_js(&back),
                 "{}: text round-trip via {printed:?}",
                 c.name
             );
@@ -179,8 +179,8 @@ fn round_trip_law() {
             let back = parse_latex(&nt, &printed)
                 .unwrap_or_else(|err| panic!("{}: reparse latex {printed:?}: {err:?}", c.name));
             assert_eq!(
-                js_tree::to_js(&e),
-                js_tree::to_js(&back),
+                expr::serde::to_js(&e),
+                expr::serde::to_js(&back),
                 "{}: latex round-trip via {printed:?}",
                 c.name
             );
@@ -210,8 +210,8 @@ fn notation_independence() {
         let ec = parse_text(&comma, c).unwrap();
         let ep = parse_text(&period, p).unwrap();
         assert_eq!(
-            js_tree::to_js(&ec),
-            js_tree::to_js(&ep),
+            expr::serde::to_js(&ec),
+            expr::serde::to_js(&ep),
             "independence: {c:?} (comma) vs {p:?} (period)"
         );
     }
@@ -224,7 +224,7 @@ fn a2_defaults_are_period_notation() {
     assert_eq!(NumberNotation::default(), NumberNotation::period());
     let def = NumberNotation::default();
     let e = parse_text(&def, "f(1.5, 2)").unwrap();
-    assert_eq!(js_tree::to_js(&e), serde_json::json!(["apply", "f", ["tuple", 1.5, 2]]));
+    assert_eq!(expr::serde::to_js(&e), serde_json::json!(["apply", "f", ["tuple", 1.5, 2]]));
     assert_eq!(text_out(&def, &e), "f(1.5, 2)");
 }
 
@@ -316,5 +316,5 @@ fn scientific_notation_uses_argument_separator_delimiter() {
     // notation a list `1E2;3` closes the exponent at ';'.
     let comma = NumberNotation::comma();
     let e = parse_text(&comma, "1E2;3").unwrap();
-    assert_eq!(js_tree::to_js(&e), serde_json::json!(["list", 100, 3]));
+    assert_eq!(expr::serde::to_js(&e), serde_json::json!(["list", 100, 3]));
 }

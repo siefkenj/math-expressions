@@ -1,6 +1,6 @@
 //! Shared fixture-test harness for the parser integration tests.
 
-use math_expressions::js_tree::to_js;
+use math_expressions::expr::serde::to_js;
 use math_expressions::{Expr, ParseError};
 use serde_json::Value;
 
@@ -16,7 +16,7 @@ pub struct ErrorCase {
     pub error: String,
 }
 
-/// Run every tree case through `parse`, comparing the js_tree encoding of the
+/// Run every tree case through `parse`, comparing the js::tree encoding of the
 /// result with the fixture. Panics with a report of all failures.
 pub fn run_tree_cases(fixture_json: &str, mut parse: impl FnMut(&str) -> Result<Expr, ParseError>) {
     let cases: Vec<TreeCase> = serde_json::from_str(fixture_json).unwrap();

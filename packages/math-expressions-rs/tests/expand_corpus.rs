@@ -4,7 +4,7 @@
 //! snapshotted. Regenerate: `node scripts/generate-expand-corpus.mjs`.
 //!   UPDATE_KNOWN_FAILURES=1 cargo test --test expand_corpus
 
-use math_expressions::{equals, expand, js_tree, EqOptions, Expr, TextToAst, TextToAstOptions};
+use math_expressions::{equals, expand, expr, EqOptions, Expr, TextToAst, TextToAstOptions};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -43,7 +43,7 @@ fn collect_failures() -> BTreeSet<String> {
     for c in &cases {
         let ok = catch(|| {
             let got = expand(&parse(&c.input)?);
-            Some(equals(&got, &js_tree::try_from_js(&c.expanded).expect("fixture tree"), &opts))
+            Some(equals(&got, &expr::serde::try_from_js(&c.expanded).expect("fixture tree"), &opts))
         })
         .flatten()
         .unwrap_or(false);

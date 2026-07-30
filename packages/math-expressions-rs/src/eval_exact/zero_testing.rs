@@ -57,7 +57,7 @@ fn certify_canonical(c: &Expr, vars: &[String]) -> MaybeBool {
     // combined numerator cancels to zero is certified zero — this decides
     // `1/(x+1) + 1/(x-1) - 2x/(x²-1)` and the like, treating opaque kernels as
     // independent indeterminates (sound: never `true` for a nonzero value).
-    if crate::ratform::is_identically_zero(c) {
+    if crate::polynomials::ratform::is_identically_zero(c) {
         return Some(true);
     }
     if vars.is_empty() {
@@ -76,7 +76,7 @@ fn certify_canonical(c: &Expr, vars: &[String]) -> MaybeBool {
 fn free_vars(c: &Expr) -> Vec<String> {
     crate::ops::variables(c)
         .into_iter()
-        .filter(|v| !crate::sym::is_constant_symbol(v))
+        .filter(|v| !crate::expr::sym::is_constant_symbol(v))
         .collect()
 }
 
@@ -103,9 +103,9 @@ fn refute_by_sampling(e: &Expr, vars: &[String]) -> MaybeBool {
             })
             .collect();
         let at = crate::ops::substitute(e, &subs);
-        match crate::precise::evaluate_to_precision(&at, 15) {
-            crate::precise::Precise::Exact(n) if !n.is_zero() => return Some(false),
-            crate::precise::Precise::Bounded(m) if certified_nonzero(&m) => return Some(false),
+        match crate::eval_numeric::certified_digits::evaluate_to_precision(&at, 15) {
+            crate::eval_numeric::certified_digits::Precise::Exact(n) if !n.is_zero() => return Some(false),
+            crate::eval_numeric::certified_digits::Precise::Bounded(m) if certified_nonzero(&m) => return Some(false),
             _ => {}
         }
     }
@@ -114,6 +114,6 @@ fn refute_by_sampling(e: &Expr, vars: &[String]) -> MaybeBool {
 
 /// The ±1-ulp arbitrary-precision contract, via the single shared test on
 /// `MpFix` (see `MpFix::excludes_zero`).
-fn certified_nonzero(m: &crate::precise::fix::MpFix) -> bool {
+fn certified_nonzero(m: &crate::eval_numeric::certified_digits::fix::MpFix) -> bool {
     m.excludes_zero()
 }

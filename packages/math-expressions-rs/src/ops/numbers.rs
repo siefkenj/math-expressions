@@ -4,7 +4,8 @@
 //! `constants_to_floats`).
 
 use crate::expr::Expr;
-use crate::normalize::{canonicalize, present, syntactic::map_children};
+use crate::expr::map_children;
+use crate::normalize::{canonicalize, present};
 use crate::num::Number;
 use std::collections::BTreeSet;
 
@@ -98,7 +99,7 @@ fn reduce_node(e: &Expr) -> Expr {
 fn collect_var_names(e: &Expr, out: &mut BTreeSet<String>) {
     if let Expr::Sym(s) = e {
         let name = s.name();
-        if !crate::sym::is_constant_symbol(&name) {
+        if !crate::expr::sym::is_constant_symbol(&name) {
             out.insert(name);
         }
     }

@@ -7,7 +7,7 @@
 //! loudly. When a change is intentional, update the literals here.
 
 use math_expressions::special_functions;
-use math_expressions::precise::kernels;
+use math_expressions::eval_numeric::certified_digits::kernels;
 
 /// The text parser's default `applied_function_symbols` exactly as it stood
 /// before the registry migration (parse/text.rs history).

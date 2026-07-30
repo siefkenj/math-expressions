@@ -17,7 +17,7 @@
 //! These agree fully today (zero divergences), so any failure is a real
 //! regression to investigate, not an expected-divergence snapshot to bump.
 
-use math_expressions::{equals, js_tree, EqOptions, Expr, TextToAst, TextToAstOptions};
+use math_expressions::{equals, expr, EqOptions, Expr, TextToAst, TextToAstOptions};
 use serde_json::Value;
 use std::time::{Duration, Instant};
 
@@ -67,7 +67,7 @@ fn parse_matches_js() {
     std::panic::set_hook(Box::new(|_| {}));
     let mut diffs = Vec::new();
     for c in &corpus().parse {
-        let got = catch(|| parse(&c.input).map(|e| js_tree::to_js(&e))).flatten();
+        let got = catch(|| parse(&c.input).map(|e| expr::serde::to_js(&e))).flatten();
         if got.as_ref() != Some(&c.tree) {
             diffs.push(format!("  {:?}\n    JS:   {}\n    Rust: {:?}", c.input, c.tree, got));
         }

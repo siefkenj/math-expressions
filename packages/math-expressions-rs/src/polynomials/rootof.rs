@@ -4,7 +4,7 @@
 
 use crate::expr::Expr;
 use crate::num::Number;
-use crate::upoly::{self, UPoly};
+use crate::polynomials::univariate::{self, UPoly};
 use num_complex::Complex64;
 use num_rational::BigRational;
 use num_traits::{One, Zero};
@@ -18,19 +18,19 @@ use std::collections::HashMap;
 /// unevaluated form).
 pub(crate) fn make_rootof(coeffs: &[BigRational], index: u32) -> Option<Expr> {
     let mut p = coeffs.to_vec();
-    upoly::trim(&mut p);
-    if upoly::degree(&p) < 1 {
+    univariate::trim(&mut p);
+    if univariate::degree(&p) < 1 {
         return None;
     }
-    let g = upoly::gcd(&p, &upoly::derivative(&p));
-    if upoly::degree(&g) >= 1 {
-        p = upoly::divrem(&p, &g).0;
+    let g = univariate::gcd(&p, &univariate::derivative(&p));
+    if univariate::degree(&g) >= 1 {
+        p = univariate::divrem(&p, &g).0;
     }
-    let d = upoly::degree(&p);
+    let d = univariate::degree(&p);
     if d < 1 || d > crate::resource_limits::current().max_rootof_degree || (index as usize) >= d {
         return None;
     }
-    let ints = upoly::to_primitive_int(&p);
+    let ints = univariate::to_primitive_int(&p);
     Some(Expr::RootOf {
         poly: ints
             .into_iter()
@@ -148,7 +148,7 @@ fn expr_to_upoly(e: &Expr, var: &str) -> Option<UPoly> {
         }
         out[d] += c;
     }
-    upoly::trim(&mut out);
+    univariate::trim(&mut out);
     Some(out)
 }
 
@@ -160,12 +160,12 @@ pub(crate) fn power_reduced(root: &Expr, n: i64) -> Option<Expr> {
         return None;
     };
     let p = coeffs_to_upoly(poly)?;
-    let d = upoly::degree(&p);
+    let d = univariate::degree(&p);
     let r = if n >= 0 {
         if (n as usize) < d {
             return None;
         }
-        upoly::power_mod(n as u64, &p)
+        univariate::power_mod(n as u64, &p)
     } else {
         // t is invertible in ℚ[t]/(p): the canonical form has p(0) ≠ 0
         // (a zero constant coefficient would make p divisible by t, and 0
@@ -175,15 +175,15 @@ pub(crate) fn power_reduced(root: &Expr, n: i64) -> Option<Expr> {
             return None;
         }
         let mut inv: UPoly = (1..=d).map(|i| -(&p[i] / &p[0])).collect();
-        upoly::trim(&mut inv);
+        univariate::trim(&mut inv);
         let mut acc: UPoly = vec![BigRational::one()];
         let mut base = inv;
         let mut k = n.unsigned_abs();
         while k > 0 {
             if k & 1 == 1 {
-                acc = upoly::divrem(&upoly::mul(&acc, &base), &p).1;
+                acc = univariate::divrem(&univariate::mul(&acc, &base), &p).1;
             }
-            base = upoly::divrem(&upoly::mul(&base, &base), &p).1;
+            base = univariate::divrem(&univariate::mul(&base, &base), &p).1;
             k >>= 1;
         }
         acc
@@ -267,7 +267,7 @@ pub(crate) fn numeric_root(poly: &[Number], index: u32) -> Option<Complex64> {
     let roots = match cached {
         Some(r) => r,
         None => {
-            let computed = coeffs_to_upoly(poly).and_then(|p| upoly::all_roots_ordered(&p));
+            let computed = coeffs_to_upoly(poly).and_then(|p| univariate::all_roots_ordered(&p));
             ROOT_CACHE.with(|c| insert_capped(&mut c.borrow_mut(), key, computed.clone()));
             computed
         }
@@ -277,9 +277,9 @@ pub(crate) fn numeric_root(poly: &[Number], index: u32) -> Option<Complex64> {
 
 // ---- arbitrary-precision refinement (ARBITRARY_PERCISION_PLAN §2d hook) ----
 
-use crate::precise::complex::{self, CFix};
-use crate::precise::fix::{div_round, MpFix};
-use crate::precise::kernels::Budget;
+use crate::eval_numeric::certified_digits::cfix::{self, CFix};
+use crate::eval_numeric::certified_digits::fix::{div_round, MpFix};
+use crate::eval_numeric::certified_digits::kernels::Budget;
 use num_bigint::BigInt;
 use num_traits::Signed;
 
@@ -295,7 +295,7 @@ fn isolating_intervals(poly: &[Number]) -> IsoIntervals {
     match cached {
         Some(v) => v,
         None => {
-            let computed = coeffs_to_upoly(poly).and_then(|p| upoly::isolate_real_roots(&p));
+            let computed = coeffs_to_upoly(poly).and_then(|p| univariate::isolate_real_roots(&p));
             ISO_CACHE.with(|c| insert_capped(&mut c.borrow_mut(), key, computed.clone()));
             computed
         }
@@ -339,7 +339,7 @@ pub(crate) fn refine_real(poly: &[Number], index: u32, target_scale: i32) -> Opt
         return None; // complex root — not this tier's job
     }
     let seed = numeric_root(poly, index)?.re;
-    let dp = upoly::derivative(&p);
+    let dp = univariate::derivative(&p);
     let lim = crate::resource_limits::current();
     if i64::from(-target_scale) > 4 * i64::from(lim.max_eval_precision_bits) {
         return None;
@@ -360,11 +360,11 @@ pub(crate) fn refine_real(poly: &[Number], index: u32, target_scale: i32) -> Opt
             } else {
                 s.saturating_mul(2).max(final_scale)
             };
-            let fx = upoly::eval_rat(&p, &x);
+            let fx = univariate::eval_rat(&p, &x);
             if fx.is_zero() {
                 return mpfix_from_rational(&x, target_scale);
             }
-            let dfx = upoly::eval_rat(&dp, &x);
+            let dfx = univariate::eval_rat(&dp, &x);
             if dfx.is_zero() {
                 break; // Newton undefined; try more guard or give up
             }
@@ -379,11 +379,11 @@ pub(crate) fn refine_real(poly: &[Number], index: u32, target_scale: i32) -> Opt
         // e.g. from an astronomically wide Cauchy-bound interval — needs
         // the extra iterations), then certify.
         for _ in 0..64 {
-            let fx = upoly::eval_rat(&p, &x);
+            let fx = univariate::eval_rat(&p, &x);
             if fx.is_zero() {
                 break;
             }
-            let dfx = upoly::eval_rat(&dp, &x);
+            let dfx = univariate::eval_rat(&dp, &x);
             if dfx.is_zero() {
                 break;
             }
@@ -395,8 +395,8 @@ pub(crate) fn refine_real(poly: &[Number], index: u32, target_scale: i32) -> Opt
             }
         }
         let h = pow2_rational(target_scale - 2);
-        let lo = upoly::eval_rat(&p, &(&x - &h));
-        let hi = upoly::eval_rat(&p, &(&x + &h));
+        let lo = univariate::eval_rat(&p, &(&x - &h));
+        let hi = univariate::eval_rat(&p, &(&x + &h));
         let sgn = |v: &BigRational| -> i8 {
             if v.is_zero() {
                 0
@@ -419,9 +419,9 @@ fn horner_cfix(coeffs: &[Number], z: &CFix, s: i32) -> Option<CFix> {
     let cs = s.min(0) - 4;
     let mut acc = CFix::real(MpFix::from_number(coeffs.last()?, cs)?);
     for c in coeffs.iter().rev().skip(1) {
-        acc = complex::cmul(&acc, z, s)?;
+        acc = cfix::cmul(&acc, z, s)?;
         let cc = CFix::real(MpFix::from_number(c, cs)?);
-        acc = complex::cadd(&[&acc, &cc], s.min(acc.re.scale));
+        acc = cfix::cadd(&[&acc, &cc], s.min(acc.re.scale));
     }
     Some(acc)
 }
@@ -498,8 +498,8 @@ pub(crate) fn refine_complex(
         let work = s - 8;
         let pz = horner_cfix(poly, &z, work)?;
         let dpz = horner_cfix(&dcoeffs, &z, work)?;
-        let step = complex::cdiv(&pz, &dpz, s, budget)?;
-        z = complex::cadd(&[&z, &step.neg()], s);
+        let step = cfix::cdiv(&pz, &dpz, s, budget)?;
+        z = cfix::cadd(&[&z, &step.neg()], s);
         if s == w {
             break;
         }

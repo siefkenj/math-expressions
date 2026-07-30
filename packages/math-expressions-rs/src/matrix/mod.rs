@@ -10,13 +10,13 @@
 //! - [`ops`]        — eager ops: transpose, trace, matmul
 //! - [`vector`]     — vector arithmetic: add/sub/dot/cross
 //! - [`linalg`]     — det / inverse / rref / rank / nullspace
-//! - [`kernels`]    — shared numeric elimination + cofactor/Bareiss kernels
+//! - [`elimination`] — shared elimination + cofactor/Bareiss kernels
 //! - [`eigen`]      — char poly, eigenvalues
 //! - [`eigenvectors`] — eigenvectors over the quotient ring ℚ[t]/(f)
 
 mod eigen;
 mod eigenvectors;
-mod kernels;
+mod elimination;
 mod linalg;
 mod ops;
 mod vector;

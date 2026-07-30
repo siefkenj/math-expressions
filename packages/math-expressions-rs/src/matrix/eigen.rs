@@ -4,12 +4,12 @@
 use crate::expr::Expr;
 use crate::normalize::{add, canonicalize, mul, pow};
 use crate::num::Number;
-use crate::upoly::{self, UPoly};
+use crate::polynomials::univariate::{self, UPoly};
 use num_complex::Complex64;
 use num_rational::BigRational;
 use num_traits::{One, ToPrimitive, Zero};
 
-use super::kernels::{as_rationals, det_cofactor, is_zero, square_literal};
+use super::elimination::{as_rationals, det_cofactor, is_zero, square_literal};
 
 /// Characteristic polynomial `det(λI − A)` in `var` (monic). Rational
 /// entries go through Faddeev–LeVerrier exactly at any dimension under
@@ -116,7 +116,7 @@ pub(super) struct EigenItem {
 }
 
 fn numeric_of(value: &Expr) -> Option<Complex64> {
-    crate::eval_numerical::eval_complex(value, &std::collections::HashMap::new())
+    crate::eval_numeric::complex::eval_complex(value, &std::collections::HashMap::new())
 }
 
 fn sort_key(z: Complex64) -> (u8, f64, f64, f64) {
@@ -130,10 +130,10 @@ fn refine_by_splits(f: UPoly, splits: &[UPoly]) -> Vec<UPoly> {
     for s in splits {
         let mut next = Vec::new();
         for piece in pieces {
-            let g = upoly::gcd(&piece, s);
-            let dg = upoly::degree(&g);
-            if dg >= 1 && dg < upoly::degree(&piece) {
-                let (q, _) = upoly::divrem(&piece, &g);
+            let g = univariate::gcd(&piece, s);
+            let dg = univariate::degree(&g);
+            if dg >= 1 && dg < univariate::degree(&piece) {
+                let (q, _) = univariate::divrem(&piece, &g);
                 next.push(g);
                 next.push(q);
             } else {
@@ -156,8 +156,8 @@ fn refine_by_splits(f: UPoly, splits: &[UPoly]) -> Vec<UPoly> {
 /// canonical order. `None` on any cap or certification refusal.
 pub(super) fn eigen_items(p: &UPoly, splits: &[UPoly]) -> Option<Vec<EigenItem>> {
     let mut items: Vec<EigenItem> = Vec::new();
-    for (f, m) in upoly::squarefree_decomposition(p) {
-        let (rats, rest) = upoly::rational_roots(&f);
+    for (f, m) in univariate::squarefree_decomposition(p) {
+        let (rats, rest) = univariate::rational_roots(&f);
         for r in &rats {
             let value = Expr::Num(Number::from_bigrational(r.clone()));
             let z = Complex64::new(r.to_f64()?, 0.0);
@@ -169,7 +169,7 @@ pub(super) fn eigen_items(p: &UPoly, splits: &[UPoly]) -> Option<Vec<EigenItem>>
             });
         }
         for piece in refine_by_splits(rest, splits) {
-            match upoly::degree(&piece) {
+            match univariate::degree(&piece) {
                 0 => {}
                 1 => {
                     let r = -&piece[0] / &piece[1];
@@ -205,13 +205,13 @@ pub(super) fn eigen_items(p: &UPoly, splits: &[UPoly]) -> Option<Vec<EigenItem>>
                         items.push(EigenItem {
                             value,
                             mult: m,
-                            factor: upoly::monic(&piece),
+                            factor: univariate::monic(&piece),
                             z,
                         });
                     }
                 }
                 d => {
-                    let root0 = crate::rootof::make_rootof(&piece, 0)?;
+                    let root0 = crate::polynomials::rootof::make_rootof(&piece, 0)?;
                     let Expr::RootOf { poly, .. } = &root0 else {
                         unreachable!()
                     };
@@ -221,11 +221,11 @@ pub(super) fn eigen_items(p: &UPoly, splits: &[UPoly]) -> Option<Vec<EigenItem>>
                             index: k as u32,
                         };
                         // Ordering certification: every index must evaluate.
-                        let z = crate::rootof::numeric_root(poly, k as u32)?;
+                        let z = crate::polynomials::rootof::numeric_root(poly, k as u32)?;
                         items.push(EigenItem {
                             value,
                             mult: m,
-                            factor: upoly::monic(&piece),
+                            factor: univariate::monic(&piece),
                             z,
                         });
                     }

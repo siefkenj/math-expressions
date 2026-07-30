@@ -8,7 +8,7 @@
 //! against regression and shrink over time. Regenerate the snapshot:
 //!   UPDATE_KNOWN_FAILURES=1 cargo test --test derivative_corpus
 
-use math_expressions::{derivative, equals, js_tree, EqOptions, Expr, TextToAst, TextToAstOptions};
+use math_expressions::{derivative, equals, expr, EqOptions, Expr, TextToAst, TextToAstOptions};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -37,7 +37,7 @@ fn collect_failures() -> BTreeSet<String> {
         let ok = catch(|| {
             let input = parse(&c.input)?;
             let got = derivative(&input, "x");
-            let want = js_tree::try_from_js(&c.deriv).expect("fixture tree");
+            let want = expr::serde::try_from_js(&c.deriv).expect("fixture tree");
             Some(equals(&got, &want, &opts))
         })
         .flatten()

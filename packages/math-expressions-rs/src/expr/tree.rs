@@ -14,7 +14,7 @@
 //! flattening ([`flatten`](super::flatten)) live in [`visit`](super::visit).
 
 use crate::num::Number;
-use crate::sym::Sym;
+use crate::expr::sym::Sym;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {

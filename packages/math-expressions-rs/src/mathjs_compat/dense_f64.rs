@@ -61,7 +61,7 @@ pub fn lusolve(a: &[f64], b: &[f64], n: usize) -> Option<Vec<f64>> {
 // ---- eigendecomposition ----
 
 /// One eigenpair of a real matrix: possibly-complex value and vector.
-pub struct EigenPair {
+pub struct NumericEigenPair {
     pub value: Complex64,
     pub vector: Vec<Complex64>,
 }
@@ -78,7 +78,7 @@ pub struct EigenPair {
 ///
 /// `None` when QR fails to converge within the fixed iteration cap (rare;
 /// mathjs `eigs` throws in the same situations).
-pub fn eigs(a: &[f64], n: usize) -> Option<Vec<EigenPair>> {
+pub fn eigs(a: &[f64], n: usize) -> Option<Vec<NumericEigenPair>> {
     if a.len() != n * n || n == 0 {
         return None;
     }
@@ -241,7 +241,7 @@ pub fn eigs(a: &[f64], n: usize) -> Option<Vec<EigenPair>> {
     // 4. Eigenvectors: null vector of A − λI by complex elimination.
     let pairs = values
         .into_iter()
-        .map(|value| EigenPair {
+        .map(|value| NumericEigenPair {
             vector: null_vector(a, n, value),
             value,
         })

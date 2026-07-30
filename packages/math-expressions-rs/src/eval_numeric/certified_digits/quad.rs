@@ -22,7 +22,7 @@ use super::tape::{compile, CompiledExpr, Op};
 use super::{kernels::registry, kernels::FixId, needed_bits, Precise};
 use crate::expr::Expr;
 use crate::num::Number;
-use crate::precise::fix::MpFix;
+use crate::eval_numeric::certified_digits::fix::MpFix;
 use std::collections::BinaryHeap;
 
 const EPS: f64 = f64::EPSILON;
@@ -83,7 +83,7 @@ pub(crate) fn interval_eval(tape: &CompiledExpr, x: Iv) -> Option<Iv> {
             Op::I => return None,
             Op::Root(i) => {
                 let (poly, idx) = &tape.roots[*i as usize];
-                let z = crate::rootof::numeric_root(poly, *idx)?;
+                let z = crate::polynomials::rootof::numeric_root(poly, *idx)?;
                 if z.im != 0.0 {
                     return None;
                 }
@@ -370,7 +370,7 @@ pub fn integrate_to_precision(
     let fc = crate::normalize::simplify_core(f);
     if crate::ops::variables(&fc)
         .iter()
-        .any(|v| v != var && !crate::sym::is_constant_symbol(v))
+        .any(|v| v != var && !crate::expr::sym::is_constant_symbol(v))
     {
         return Precise::Unknown("free variables besides the integration variable");
     }
@@ -399,7 +399,7 @@ pub(crate) fn compile_pair(
     };
     let mut d = fc.clone();
     for _ in 0..4 {
-        d = crate::normalize::simplify_core(&crate::diff::derivative(&d, var));
+        d = crate::normalize::simplify_core(&crate::calculus::diff::derivative(&d, var));
     }
     let Ok(tape_d4) = compile(&d) else {
         return Err("fourth derivative not numerically compilable");

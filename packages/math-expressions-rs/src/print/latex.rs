@@ -50,7 +50,7 @@ impl Writer<'_> {
             Expr::RootOf { poly, index } => (
                 format!(
                     "\\operatorname{{rootof}}\\left({}{}{}\\right)",
-                    self.emit(&crate::rootof::poly_display(poly, "t"), 0),
+                    self.emit(&crate::polynomials::rootof::poly_display(poly, "t"), 0),
                     self.arg_sep(),
                     index
                 ),
@@ -215,7 +215,7 @@ impl Writer<'_> {
         for (i, t) in terms.iter().enumerate() {
             // A `\pm` term carries its own operator, so it is joined with a plain
             // space rather than ` + ` — `5 + \pm 3` would be wrong.
-            if i > 0 && crate::pm::is_pm(t) {
+            if i > 0 && crate::ops::pm::is_pm(t) {
                 out.push(' ');
                 out.push_str(&self.emit(t, prec::ADD + 1));
                 continue;

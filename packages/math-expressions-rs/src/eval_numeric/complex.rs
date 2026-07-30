@@ -27,7 +27,7 @@ pub fn eval_complex(e: &Expr, env: &Env) -> Option<Complex64> {
         Expr::Num(n) => number_to_complex(n),
         // A numeric constant: the k-th root of its polynomial, isolation
         // cached per polynomial (MATRIX_PLAN §2d).
-        Expr::RootOf { poly, index } => return crate::rootof::numeric_root(poly, *index),
+        Expr::RootOf { poly, index } => return crate::polynomials::rootof::numeric_root(poly, *index),
         Expr::Const(c) => match c {
             MathConst::Pi => Complex64::new(std::f64::consts::PI, 0.0),
             MathConst::E => Complex64::new(std::f64::consts::E, 0.0),
@@ -168,7 +168,7 @@ pub fn free_symbols(e: &Expr, out: &mut std::collections::BTreeSet<String>) {
         Expr::Sym(s) => {
             // Constant symbols (`pi`/`e`/`i`) are not sample variables.
             let name = s.name();
-            if !crate::sym::is_constant_symbol(&name) {
+            if !crate::expr::sym::is_constant_symbol(&name) {
                 out.insert(name);
             }
         }

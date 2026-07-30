@@ -1,7 +1,39 @@
-//! Scaling-unit desugaring (`%`, `deg`, `$`) — the equality-time analogue of
-//! JS `remove_scaling_units` combined with numerical unit removal.
+//! Scaling units (`%`, `deg`, `$`): the single source of truth for the
+//! `["unit", …]` node layout, plus the equality-time desugaring pass.
+//!
+//! [`is_scaling_unit_symbol`] and [`unit_body`] own the operand-layout
+//! knowledge (which operand is the symbol, which is the value); the `me.*`
+//! stripping façade in [`crate::ops`] (`remove_units` / `add_unit`) delegates
+//! here rather than re-deriving it. [`desugar_units`] is the equality-time
+//! analogue of JS `remove_scaling_units` combined with numerical unit removal.
 
 use crate::expr::Expr;
+
+/// The scaling-unit spellings the parsers emit (see `lib/expression/units.js`):
+/// `%`, `deg` (LaTeX spelling `circ`), and the prefix `$`. This is the *symbol*
+/// set — a superset of what [`desugar_units`] rewrites (`circ` is recognized as
+/// a unit but has no numeric desugaring rule, so it is stripped but not scaled).
+pub(crate) fn is_scaling_unit_symbol(e: &Expr) -> bool {
+    matches!(e, Expr::Sym(s) if matches!(s.name().as_str(), "%" | "$" | "deg" | "circ"))
+}
+
+/// Decode the `["unit", …]` operand layout the parsers emit into
+/// `(symbol, value)`: prefix `$` is `[unit, value]`; postfix `%`/`deg` is
+/// `[value, unit]` (mirrors `get_unit_value_of_tree` in
+/// lib/expression/units.js).
+fn unit_parts(args: &[Expr]) -> Option<(&Expr, &Expr)> {
+    match args {
+        [a, b] if is_scaling_unit_symbol(a) => Some((a, b)),
+        [a, b] if is_scaling_unit_symbol(b) => Some((b, a)),
+        _ => None,
+    }
+}
+
+/// The value operand of a `["unit", …]` node (the operand that is not the unit
+/// symbol). The shared layout primitive behind `me.remove_units`.
+pub(crate) fn unit_body(args: &[Expr]) -> Option<&Expr> {
+    unit_parts(args).map(|(_, value)| value)
+}
 
 /// The three scaling units from lib/expression/units.js.
 enum Unit {
@@ -14,26 +46,19 @@ enum Unit {
     Deg,
 }
 
-/// Match the `["unit", …]` operand layout the parsers emit: prefix `$` is
-/// `[unit, value]`; postfix `%`/`deg` is `[value, unit]` (mirrors
-/// `get_unit_value_of_tree` in lib/expression/units.js).
+/// Classify a `["unit", …]` node into its desugarable [`Unit`] and value.
+/// `None` for a non-unit node or the `circ` spelling (recognized as a unit
+/// symbol, but with no numeric scaling rule).
 fn unit_value(args: &[Expr]) -> Option<(Unit, &Expr)> {
-    if args.len() != 2 {
-        return None;
-    }
-    if let Expr::Sym(s) = &args[0] {
-        if s.name() == "$" {
-            return Some((Unit::Dollar, &args[1]));
-        }
-    }
-    if let Expr::Sym(s) = &args[1] {
-        match s.name().as_str() {
-            "%" => return Some((Unit::Percent, &args[0])),
-            "deg" => return Some((Unit::Deg, &args[0])),
-            _ => {}
-        }
-    }
-    None
+    let (symbol, value) = unit_parts(args)?;
+    let Expr::Sym(s) = symbol else { return None };
+    let unit = match s.name().as_str() {
+        "$" => Unit::Dollar,
+        "%" => Unit::Percent,
+        "deg" => Unit::Deg,
+        _ => return None,
+    };
+    Some((unit, value))
 }
 
 /// Rewrite scaling-unit nodes into plain arithmetic. This is the equality-time
@@ -82,5 +107,5 @@ pub fn desugar_units(e: &Expr) -> Expr {
             }
         }
     }
-    crate::normalize::syntactic::map_children(e, desugar_units)
+    crate::expr::map_children(e, desugar_units)
 }

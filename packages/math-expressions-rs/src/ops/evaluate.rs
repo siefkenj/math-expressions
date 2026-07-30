@@ -1,7 +1,7 @@
 //! Numeric evaluation of an expression at variable bindings, port of
 //! `me.evaluate` / `me.evaluate_to_constant`.
 
-use crate::eval_numerical::{eval_complex, Env};
+use crate::eval_numeric::complex::{eval_complex, Env};
 use crate::expr::Expr;
 use crate::normalize::simplify_core;
 use crate::ops::variables;
@@ -30,7 +30,7 @@ pub fn evaluate(e: &Expr, bindings: &HashMap<String, f64>) -> Option<Complex64> 
 pub fn evaluate_to_constant(e: &Expr) -> Option<Complex64> {
     if variables(e)
         .iter()
-        .any(|v| !crate::sym::is_constant_symbol(v))
+        .any(|v| !crate::expr::sym::is_constant_symbol(v))
     {
         return None;
     }

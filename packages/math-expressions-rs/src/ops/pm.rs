@@ -15,7 +15,7 @@
 //! Callers should not place `±` inside matrices or intervals.
 
 use crate::expr::Expr;
-use crate::normalize::syntactic::map_children;
+use crate::expr::map_children;
 
 /// Maximum number of `pm` operators allowed for sign-expansion.
 /// `expand_pm_signs` produces `2^n` variants, so this caps the work at 1024.

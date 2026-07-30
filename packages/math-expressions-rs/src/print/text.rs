@@ -58,7 +58,7 @@ impl Writer<'_> {
             // Prints as its function-application spelling, which reparses to
             // the same leaf.
             Expr::RootOf { poly, index } => {
-                self.render(&crate::rootof::as_apply(poly, *index))
+                self.render(&crate::polynomials::rootof::as_apply(poly, *index))
             }
             Expr::Sym(s) => {
                 let name = s.name();
@@ -271,7 +271,7 @@ impl Writer<'_> {
         for (i, t) in terms.iter().enumerate() {
             // A `±` term carries its own operator (`± …`), so it is joined with a
             // plain space rather than ` + ` — `5 + ±3` would be wrong.
-            if i > 0 && crate::pm::is_pm(t) {
+            if i > 0 && crate::ops::pm::is_pm(t) {
                 out.push(' ');
                 out.push_str(&self.emit(t, prec::ADD + 1));
                 continue;

@@ -3,7 +3,7 @@
 //! (results at d and 2d digits agree on the first d), identity round-trips,
 //! and a differential run against `evaluate_to_constant` (P1 exit criterion).
 
-use math_expressions::precise::{compile, evaluate_to_precision, Precise};
+use math_expressions::eval_numeric::certified_digits::{compile, evaluate_to_precision, Precise};
 use math_expressions::{Expr, TextToAst, TextToAstOptions};
 
 fn parse(s: &str) -> Expr {
@@ -213,7 +213,7 @@ fn differential_against_evaluate_to_constant() {
             .map(|v| binds.get(v).and_then(|x| x.as_f64()))
             .collect();
         let Some(bindings) = bindings else { continue };
-        match math_expressions::precise::eval_tape(&tape, &bindings, 12) {
+        match math_expressions::eval_numeric::certified_digits::eval_tape(&tape, &bindings, 12) {
             Precise::Unknown(_) => {}
             p => {
                 covered += 1;
@@ -247,7 +247,7 @@ fn deep_trees_do_not_grow_the_native_stack() {
             let tape = compile(&e).expect("compiles");
             assert!(tape.len() >= 50_001);
             // Tier-0 evaluation over the tape (value converges to 1).
-            let p = math_expressions::precise::eval_tape(&tape, &[], 10);
+            let p = math_expressions::eval_numeric::certified_digits::eval_tape(&tape, &[], 10);
             let v = p.to_f64().expect("evaluates");
             assert!((v - 1.0).abs() < 1e-9);
             // Dropping a 50k-deep Expr recurses; leak it deliberately.

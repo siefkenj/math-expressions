@@ -21,7 +21,7 @@ use crate::assumptions::{is_nonnegative, is_real, Assumptions};
 use crate::expr::{Expr, MathConst, SeqKind};
 use crate::num::Number;
 
-use super::syntactic::map_children;
+use crate::expr::map_children;
 use super::{add, canonicalize, mul, split_coeff};
 
 // Max rewrite rounds: resource_limits::current().max_simplify_rounds (§7f). Every
@@ -289,7 +289,7 @@ fn is_zero_pole(e: &Expr) -> bool {
 fn is_infnan_constant(e: &Expr) -> bool {
     matches!(e, Expr::Num(_) | Expr::Const(_))
         || is_zero_pole(e)
-        || matches!(e, Expr::Sym(s) if crate::sym::is_constant_symbol(&s.name()))
+        || matches!(e, Expr::Sym(s) if crate::expr::sym::is_constant_symbol(&s.name()))
 }
 
 fn fold_infnan_pow(base: &Expr, exp: &Expr) -> Option<Expr> {

@@ -67,7 +67,7 @@ impl Expression {
     /// (e.g. `["+", 1, "x", 3]`), so it lines up with the JS library's
     /// `expr.tree`. Intended for inspection/tooling (§13 `to_json`).
     pub fn tree_json(&self) -> String {
-        math_expressions::js_tree::to_js(&self.0).to_string()
+        math_expressions::expr::serde::to_js(&self.0).to_string()
     }
 
     /// Mathematical equality with another expression.
@@ -267,7 +267,7 @@ impl Expression {
     #[wasm_bindgen(js_name = "mod")]
     pub fn modulo(&self, other: &Expression) -> Expression {
         self.derive(Expr::OtherOp(
-            math_expressions::sym::Sym::new("mod"),
+            math_expressions::expr::sym::Sym::new("mod"),
             vec![self.0.clone(), other.0.clone()],
         ))
     }

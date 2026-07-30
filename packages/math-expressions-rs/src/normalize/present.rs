@@ -22,7 +22,7 @@ use crate::expr::Expr;
 use crate::num::{BigNumber, Number};
 use std::cmp::Ordering;
 
-use super::syntactic::map_children;
+use crate::expr::map_children;
 
 /// Convert a canonical tree to its display form (see module docs).
 pub(crate) fn present(e: &Expr) -> Expr {
@@ -240,7 +240,7 @@ fn deg_key(t: &Expr) -> DegKey {
 
 fn collect_deg(t: &Expr, mult: f64, vars: &mut Vec<(String, f64)>) {
     match t {
-        Expr::Sym(s) if !crate::sym::is_constant_symbol(&s.name()) => {
+        Expr::Sym(s) if !crate::expr::sym::is_constant_symbol(&s.name()) => {
             vars.push((s.name().to_string(), mult));
         }
         Expr::Pow(b, x) => {

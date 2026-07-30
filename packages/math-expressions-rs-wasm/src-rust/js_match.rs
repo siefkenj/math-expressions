@@ -328,13 +328,13 @@ fn unflatten(tree: &Value, left: bool) -> Value {
 mod tests {
     //! The JS-tree utility surface Doenet uses via `me.utils`: default-mode
     //! template `match`, `flatten`/`unflatten{Left,Right}` (all `js_match`),
-    //! plus `js_tree::to_js` structural equality and the crate `substitute`
+    //! plus `expr::serde::to_js` structural equality and the crate `substitute`
     //! (core-crate items, exercised here through the same JS-tree surface).
     //! Ported from `spec/quick_trees.spec.js`; only the **default** match mode
     //! is ported (opt-in JS params are deliberately unported — see this file's
     //! module docs and JS_TEST_COVERAGE_AUDIT.md).
     use super::{flatten_tree, match_template, unflatten_left, unflatten_right};
-    use math_expressions::js_tree::to_js;
+    use math_expressions::expr::serde::to_js;
     use math_expressions::{equals, substitute, EqOptions, Expr, TextToAst, TextToAstOptions};
     use serde_json::{json, Value};
     use std::collections::HashMap;

@@ -44,4 +44,5 @@ pub use canonicalize::canonicalize;
 pub use full::full_simplify;
 pub use units::desugar_units;
 pub(crate) use constructors::{add, mul, pow, split_coeff};
+pub(crate) use units::unit_body;
 pub(crate) use matrix_ops::{identity_matrix, is_matrix_valued, matmul_literal};

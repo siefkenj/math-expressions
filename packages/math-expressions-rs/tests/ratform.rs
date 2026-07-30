@@ -8,8 +8,8 @@
 //! asserted directly.
 
 use math_expressions::assumptions::Assumptions;
-use math_expressions::exact::is_zero;
-use math_expressions::ratform::{cancel, together};
+use math_expressions::eval_exact::is_zero;
+use math_expressions::polynomials::ratform::{cancel, together};
 use math_expressions::{Expr, TextToAst};
 
 fn parse(s: &str) -> Expr {

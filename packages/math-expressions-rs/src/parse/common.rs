@@ -3,7 +3,7 @@
 //! routines; here they live once. Everything is pure — no parser state.
 
 use crate::expr::{Expr, MathConst};
-use crate::sym::Sym;
+use crate::expr::sym::Sym;
 
 // `statement` must be among the counted frames: its bar-fallback catches
 // errors, rewinds, and re-descends, so budget freed by the failed descent's

@@ -15,7 +15,7 @@ use super::numeric::{
 };
 use super::relations::{as_comparison, proportional, Comparison};
 use super::{equals, EqOptions};
-use crate::eval_numerical::{eval_complex, free_symbols};
+use crate::eval_numeric::complex::{eval_complex, free_symbols};
 use crate::expr::{Expr, RelOp};
 use crate::normalize::{canonicalize, simplify_canonical};
 use num_complex::Complex64;
@@ -79,7 +79,7 @@ fn a_is_equation(e: &Expr) -> bool {
 /// Product of the *distinct* sign-expansion branches of `e` (each simplified for
 /// dedup). `None` if there are too many `pm` operators to enumerate.
 fn pm_branch_product(e: &Expr) -> Option<Expr> {
-    let branches = crate::pm::expand_pm_signs(e).ok()?;
+    let branches = crate::ops::pm::expand_pm_signs(e).ok()?;
     let mut kept: Vec<Expr> = Vec::new();
     for br in branches {
         let s = simplify_canonical(canonicalize(&br));
@@ -100,7 +100,7 @@ fn pm_branch_product(e: &Expr) -> Option<Expr> {
 /// from the `a` (LHS) side only, mirroring `component_equals`.
 fn pm_multiset_equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     let (Ok(a_variants), Ok(b_variants)) =
-        (crate::pm::expand_pm_signs(a), crate::pm::expand_pm_signs(b))
+        (crate::ops::pm::expand_pm_signs(a), crate::ops::pm::expand_pm_signs(b))
     else {
         return false;
     };

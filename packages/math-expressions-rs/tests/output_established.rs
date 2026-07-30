@@ -18,7 +18,7 @@
 //! BLESS=1 cargo test --test output_established
 //! ```
 
-use math_expressions::js_tree::try_from_js;
+use math_expressions::expr::serde::try_from_js;
 use math_expressions::{to_latex, to_text, LatexOpts, TextOpts};
 use serde_json::Value;
 use std::collections::BTreeMap;

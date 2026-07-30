@@ -11,7 +11,7 @@
 //!   is a correctness bug and is never acceptable (asserted, no snapshot).
 //! - **reduced (fixpoint)** — `simplify(simplify(input)) == simplify(input)`
 //!   structurally. Also a hard invariant of the design (asserted).
-//! - **JS agreement (advisory)** — `equals(simplify(input), js_tree)`. This is
+//! - **JS agreement (advisory)** — `equals(simplify(input), js::tree)`. This is
 //!   the reduction-progress signal: how often we reach something equal to JS's
 //!   reduced form. It is *reported*, and its remaining gaps are snapshotted in
 //!   `fixtures/simplify-known-failures.json` so we catch regressions and can
@@ -21,7 +21,7 @@
 //!   UPDATE_KNOWN_FAILURES=1 cargo test --test simplify_corpus
 
 use math_expressions::{
-    contains_blank, equals, js_tree, simplify, EqOptions, Expr, TextToAst, TextToAstOptions,
+    contains_blank, equals, expr, simplify, EqOptions, Expr, TextToAst, TextToAstOptions,
 };
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -84,7 +84,7 @@ fn collect_js_gaps(assert_invariants: bool) -> BTreeSet<String> {
                 continue;
             }
         };
-        let want = js_tree::try_from_js(&c.tree).expect("fixture tree");
+        let want = expr::serde::try_from_js(&c.tree).expect("fixture tree");
         let agrees = catch(|| equals(&simplified, &want, &opts)).unwrap_or(false);
 
         if assert_invariants {

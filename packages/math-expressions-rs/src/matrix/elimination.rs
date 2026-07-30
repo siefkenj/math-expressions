@@ -1,7 +1,11 @@
-//! Shared numeric/symbolic kernels for the linear-algebra layer: exact
-//! elimination over `Number`, cofactor expansion, fraction-free Bareiss, the
+//! Shared elimination kernels for the linear-algebra layer: exact elimination
+//! over `Number`, cofactor expansion, fraction-free Bareiss, the
 //! assumption-gated rref, and the literal-matrix extraction helpers used by
 //! both [`super::linalg`] and the eigen modules.
+//!
+//! ("Elimination", not "kernels", because in linear algebra *kernel* means the
+//! null space — which [`super::linalg::nullspace`] computes using these
+//! routines.)
 
 use crate::assumptions::{is_nonzero, Assumptions};
 use crate::expr::Expr;
@@ -63,7 +67,7 @@ pub(super) fn is_zero(e: &Expr) -> bool {
         // Atoms other than numbers are never zero (symbols are indeterminates
         // here; π/e are nonzero constants).
         Expr::Sym(_) | Expr::Const(_) => false,
-        _ => crate::exact::certified_zero(e, &crate::assumptions::Assumptions::new()),
+        _ => crate::eval_exact::certified_zero(e, &crate::assumptions::Assumptions::new()),
     }
 }
 
@@ -225,10 +229,10 @@ fn entry_nonzero(e: &Expr, assumptions: &Assumptions) -> Option<bool> {
     }
     let variable_free = crate::ops::variables(e)
         .iter()
-        .all(|v| crate::sym::is_constant_symbol(v));
+        .all(|v| crate::expr::sym::is_constant_symbol(v));
     if variable_free {
         // exact::is_zero never samples on variable-free input.
-        return crate::exact::is_zero(e, assumptions).map(|z| !z);
+        return crate::eval_exact::is_zero(e, assumptions).map(|z| !z);
     }
     None
 }

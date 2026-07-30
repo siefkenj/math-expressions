@@ -3,7 +3,7 @@
 //! interval coercion, and function-name canonicalization.
 
 use crate::expr::Expr;
-use crate::normalize::syntactic::map_children;
+use crate::expr::map_children;
 use std::collections::HashMap;
 
 /// Simultaneously replace each `Sym(name)` with `subs[name]`. Substitution is

@@ -5,7 +5,7 @@
 //! (Unknown) otherwise. The invariant under test everywhere: it never lies.
 
 use math_expressions::assumptions::Assumptions;
-use math_expressions::exact::is_zero;
+use math_expressions::eval_exact::is_zero;
 use math_expressions::TextToAst;
 
 fn parse(s: &str) -> math_expressions::Expr {

@@ -4,7 +4,7 @@
 //!   node scripts/generate-ops-corpus.mjs
 
 use math_expressions::{
-    equals, js_tree, substitute, variables, EqOptions, Expr, TextToAst, TextToAstOptions,
+    equals, expr, substitute, variables, EqOptions, Expr, TextToAst, TextToAstOptions,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -65,7 +65,7 @@ fn substitute_matches_js() {
         };
         let Some(repl) = parse(&sub.repl) else { continue };
         let map = HashMap::from([(sub.var.clone(), repl)]);
-        let want = js_tree::try_from_js(&sub.tree).expect("fixture tree");
+        let want = expr::serde::try_from_js(&sub.tree).expect("fixture tree");
         let ok = catch(|| equals(&substitute(&e, &map), &want, &opts)).unwrap_or(false);
         if !ok {
             diffs.push(format!("  {:?} [{}->{}]", c.input, sub.var, sub.repl));

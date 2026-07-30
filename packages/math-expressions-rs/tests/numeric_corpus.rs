@@ -1,9 +1,9 @@
-//! Differential corpus for the f64 numeric module and Doenet-interop
+//! Differential corpus for the f64 mathjs_compat module and Doenet-interop
 //! utilities, generated from the JS oracle (`me.math`, `me.utils.match`,
 //! `me.round_numbers_to_precision_plus_decimals`) by
 //! `scripts/generate-numeric-corpus.mjs`.
 
-use math_expressions::{js_tree, numeric, ops};
+use math_expressions::{expr, mathjs_compat, ops};
 use serde_json::Value;
 
 fn corpus() -> Value {
@@ -35,9 +35,9 @@ fn scalar_matches_mathjs() {
     for case in corpus()["scalar"].as_array().unwrap() {
         let (x, y) = (f(&case["x"]), f(&case["y"]));
         let got = match case["op"].as_str().unwrap() {
-            "mod" => numeric::math_mod(x, y),
-            "gcd" => numeric::gcd_f64(x, y),
-            "lcm" => numeric::lcm_f64(x, y),
+            "mod" => mathjs_compat::math_mod(x, y),
+            "gcd" => mathjs_compat::gcd_f64(x, y),
+            "lcm" => mathjs_compat::lcm_f64(x, y),
             other => panic!("unknown op {other}"),
         };
         assert_close(got, f(&case["expected"]), 1e-12, &format!("{case}"));
@@ -48,17 +48,17 @@ fn scalar_matches_mathjs() {
 fn statistics_match_mathjs() {
     for case in corpus()["stats"].as_array().unwrap() {
         let data = fs(&case["data"]);
-        assert_close(numeric::mean(&data), f(&case["mean"]), 1e-12, "mean");
-        assert_close(numeric::median(&data), f(&case["median"]), 1e-12, "median");
+        assert_close(mathjs_compat::mean(&data), f(&case["mean"]), 1e-12, "mean");
+        assert_close(mathjs_compat::median(&data), f(&case["median"]), 1e-12, "median");
         assert_close(
-            numeric::variance(&data),
+            mathjs_compat::variance(&data),
             f(&case["variance"]),
             1e-10,
             "variance",
         );
-        assert_close(numeric::std_dev(&data), f(&case["std"]), 1e-10, "std");
+        assert_close(mathjs_compat::std_dev(&data), f(&case["std"]), 1e-10, "std");
         assert_close(
-            numeric::quantile_seq(&data, f(&case["prob"])),
+            mathjs_compat::quantile_seq(&data, f(&case["prob"])),
             f(&case["quantile"]),
             1e-10,
             "quantile",
@@ -70,7 +70,7 @@ fn statistics_match_mathjs() {
 fn lusolve_matches_mathjs() {
     for case in corpus()["lusolve"].as_array().unwrap() {
         let n = case["n"].as_u64().unwrap() as usize;
-        let x = numeric::lusolve(&fs(&case["a"]), &fs(&case["b"]), n)
+        let x = mathjs_compat::lusolve(&fs(&case["a"]), &fs(&case["b"]), n)
             .unwrap_or_else(|| panic!("lusolve failed on JS-solvable system {case}"));
         let want = fs(&case["x"]);
         for i in 0..n {
@@ -85,7 +85,7 @@ fn eigenvalues_match_mathjs() {
         let n = case["n"].as_u64().unwrap() as usize;
         let a = fs(&case["a"]);
         let norm = a.iter().map(|v| v.abs()).fold(1.0f64, f64::max);
-        let pairs = numeric::eigs(&a, n).expect("eigs converges where mathjs did");
+        let pairs = mathjs_compat::eigs(&a, n).expect("eigs converges where mathjs did");
         // Multiset comparison: each JS value must have a close Rust value
         // (greedy nearest, each used once). Ordering conventions differ.
         let mut ours: Vec<(f64, f64)> = pairs.iter().map(|p| (p.value.re, p.value.im)).collect();
@@ -125,13 +125,13 @@ fn combined_rounding_matches_js() {
         other => f(other),
     };
     for case in corpus()["round"].as_array().unwrap() {
-        let expr = js_tree::try_from_js(&case["tree"]).unwrap();
+        let expr = expr::serde::try_from_js(&case["tree"]).unwrap();
         let rounded = ops::round_numbers_to_precision_plus_decimals(
             &expr,
             inf(&case["digits"]),
             inf(&case["decimals"]),
         );
-        let got = js_tree::to_js(&rounded);
+        let got = expr::serde::to_js(&rounded);
         assert!(
             trees_close(&got, &case["expected"]),
             "round({}, {}, {}): got {got}, JS {}",

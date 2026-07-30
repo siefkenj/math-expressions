@@ -3,12 +3,12 @@
 
 use crate::expr::Expr;
 use crate::normalize::canonicalize;
-use crate::upoly::{self, UPoly};
+use crate::polynomials::univariate::{self, UPoly};
 use num_traits::One;
 use num_rational::BigRational;
 
 use super::eigen::{charpoly_rational, eigen_items};
-use super::kernels::{as_rationals, square_literal};
+use super::elimination::{as_rationals, square_literal};
 
 /// One eigenvalue with its eigenspace. Geometric multiplicity is
 /// `basis.len()`; a defective eigenvalue shows `basis.len() < alg_mult`,
@@ -22,16 +22,16 @@ pub struct EigenPair {
 
 /// Ring element ops: dense polys of degree < deg f, reduced after multiply.
 fn qmul(x: &[BigRational], y: &[BigRational], f: &UPoly) -> UPoly {
-    if upoly::degree(f) == 0 {
+    if univariate::degree(f) == 0 {
         return Vec::new();
     }
-    upoly::divrem(&upoly::mul(x, y), f).1
+    univariate::divrem(&univariate::mul(x, y), f).1
 }
 
 /// Inverse in ℚ[t]/(f), or the discovered factor when `x` is a zero divisor.
 fn qinv(x: &[BigRational], f: &UPoly) -> Result<UPoly, UPoly> {
-    let (g, s) = upoly::xgcd_mod(x, f);
-    if upoly::degree(&g) == 0 && !upoly::is_zero(&g) {
+    let (g, s) = univariate::xgcd_mod(x, f);
+    if univariate::degree(&g) == 0 && !univariate::is_zero(&g) {
         Ok(s)
     } else {
         Err(g)
@@ -55,8 +55,8 @@ fn quotient_nullspace(
             if i == j {
                 p.push(-BigRational::one());
             }
-            upoly::trim(&mut p);
-            m.push(upoly::divrem(&p, f).1);
+            univariate::trim(&mut p);
+            m.push(univariate::divrem(&p, f).1);
         }
     }
     let mut pivots: Vec<usize> = Vec::new();
@@ -65,7 +65,7 @@ fn quotient_nullspace(
         if row == n {
             break;
         }
-        let Some(pr) = (row..n).find(|&r| !upoly::is_zero(&m[r * n + col])) else {
+        let Some(pr) = (row..n).find(|&r| !univariate::is_zero(&m[r * n + col])) else {
             continue;
         };
         if pr != row {
@@ -78,13 +78,13 @@ fn quotient_nullspace(
             m[row * n + k] = qmul(&m[row * n + k], &inv, f);
         }
         for r in 0..n {
-            if r == row || upoly::is_zero(&m[r * n + col]) {
+            if r == row || univariate::is_zero(&m[r * n + col]) {
                 continue;
             }
             let factor = m[r * n + col].clone();
             for k in 0..n {
                 let prod = qmul(&factor, &m[row * n + k], f);
-                m[r * n + k] = upoly::sub(&m[r * n + k], &prod);
+                m[r * n + k] = univariate::sub(&m[r * n + k], &prod);
             }
         }
         pivots.push(col);
@@ -95,11 +95,11 @@ fn quotient_nullspace(
         let mut v: Vec<UPoly> = vec![Vec::new(); n];
         v[free] = vec![BigRational::one()];
         for (r, &pcol) in pivots.iter().enumerate() {
-            v[pcol] = upoly::sub(&[], &m[r * n + free]);
+            v[pcol] = univariate::sub(&[], &m[r * n + free]);
         }
         // Normalize the first nonzero component to 1 (ring inverse — a zero
         // divisor here is another discovered factor).
-        if let Some(first) = v.iter().position(|c| !upoly::is_zero(c)) {
+        if let Some(first) = v.iter().position(|c| !univariate::is_zero(c)) {
             if v[first] != vec![BigRational::one()] {
                 let inv = qinv(&v[first].clone(), f)?;
                 for c in v.iter_mut() {
@@ -122,7 +122,7 @@ pub fn eigenvectors(e: &Expr, _assumptions: &crate::assumptions::Assumptions) ->
     let p = charpoly_rational(&rats, n);
     let mut splits: Vec<UPoly> = Vec::new();
     // Each restart strictly refines a factor, so deg p bounds the restarts.
-    for _attempt in 0..=upoly::degree(&p) {
+    for _attempt in 0..=univariate::degree(&p) {
         let items = eigen_items(&p, &splits)?;
         let mut pairs = Vec::with_capacity(items.len());
         let mut discovered: Option<UPoly> = None;
@@ -133,7 +133,7 @@ pub fn eigenvectors(e: &Expr, _assumptions: &crate::assumptions::Assumptions) ->
                         .into_iter()
                         .map(|v| {
                             v.into_iter()
-                                .map(|coeffs| crate::rootof::upoly_in_root(&coeffs, &item.value))
+                                .map(|coeffs| crate::polynomials::rootof::upoly_in_root(&coeffs, &item.value))
                                 .collect::<Vec<Expr>>()
                         })
                         .collect();

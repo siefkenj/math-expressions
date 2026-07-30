@@ -1,7 +1,7 @@
 //! The six hyperbolic functions.
 
 use super::{apply, FnDef, DEFAULTS};
-use crate::precise::kernels::{FixId, FnKernel};
+use crate::eval_numeric::certified_digits::kernels::{FixId, FnKernel};
 
 pub const SINH: FnDef = FnDef {
     name: "sinh",

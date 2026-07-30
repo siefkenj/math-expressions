@@ -2,7 +2,7 @@
 //! spellings are aliases), plus the two-argument `atan2`.
 
 use super::{apply, int, FnDef, DEFAULTS};
-use crate::precise::kernels::{FixId, FnKernel};
+use crate::eval_numeric::certified_digits::kernels::{FixId, FnKernel};
 use crate::normalize::{add, mul, pow};
 use crate::num::Number;
 use num_complex::Complex64;

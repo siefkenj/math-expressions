@@ -6,7 +6,7 @@ use math_expressions::{Expr, Number};
 use wasm_bindgen::prelude::*;
 
 /// How `evaluate_to_precision` renders its digits (mirrors the core
-/// `math_expressions::precise::DecimalFormat` across the JS boundary).
+/// `math_expressions::eval_numeric::certified_digits::DecimalFormat` across the JS boundary).
 #[wasm_bindgen]
 #[derive(Clone, Copy)]
 pub enum DecimalFormat {
@@ -16,11 +16,11 @@ pub enum DecimalFormat {
     Scientific,
 }
 
-impl From<DecimalFormat> for math_expressions::precise::DecimalFormat {
+impl From<DecimalFormat> for math_expressions::eval_numeric::certified_digits::DecimalFormat {
     fn from(f: DecimalFormat) -> Self {
         match f {
-            DecimalFormat::Plain => math_expressions::precise::DecimalFormat::Plain,
-            DecimalFormat::Scientific => math_expressions::precise::DecimalFormat::Scientific,
+            DecimalFormat::Plain => math_expressions::eval_numeric::certified_digits::DecimalFormat::Plain,
+            DecimalFormat::Scientific => math_expressions::eval_numeric::certified_digits::DecimalFormat::Scientific,
         }
     }
 }
@@ -37,7 +37,7 @@ impl Expression {
         format: Option<DecimalFormat>,
     ) -> Option<String> {
         let fmt = format.unwrap_or(DecimalFormat::Plain).into();
-        let p = math_expressions::precise::evaluate_to_precision(&self.0, digits);
+        let p = math_expressions::eval_numeric::certified_digits::evaluate_to_precision(&self.0, digits);
         p.to_decimal_string_fmt(digits, fmt)
     }
 
@@ -57,7 +57,7 @@ impl Expression {
         b: &Expression,
         digits: usize,
     ) -> Option<String> {
-        math_expressions::precise::integrate_to_precision(&self.0, var, &a.0, &b.0, digits)
+        math_expressions::eval_numeric::certified_digits::integrate_to_precision(&self.0, var, &a.0, &b.0, digits)
             .to_decimal_string(digits)
     }
 
@@ -75,7 +75,7 @@ impl Expression {
     pub fn integrate_numerically(&self, var: &str, lower: f64, upper: f64) -> Option<f64> {
         let a = Expr::Num(Number::from_f64(lower));
         let b = Expr::Num(Number::from_f64(upper));
-        math_expressions::precise::integrate_to_precision(&self.0, var, &a, &b, 10).to_f64()
+        math_expressions::eval_numeric::certified_digits::integrate_to_precision(&self.0, var, &a, &b, 10).to_f64()
     }
 
     /// Three-way definite-integral analysis (DIVERGENCE_PLAN): JSON
@@ -89,8 +89,8 @@ impl Expression {
         b: &Expression,
         digits: usize,
     ) -> String {
-        use math_expressions::precise::IntegralVerdict;
-        let v = math_expressions::precise::integrate_analyzed(&self.0, var, &a.0, &b.0, digits);
+        use math_expressions::eval_numeric::certified_digits::IntegralVerdict;
+        let v = math_expressions::eval_numeric::certified_digits::integrate_analyzed(&self.0, var, &a.0, &b.0, digits);
         match v {
             IntegralVerdict::Value(p) => serde_json::json!({
                 "status": "value",

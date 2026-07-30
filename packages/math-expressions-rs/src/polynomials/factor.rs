@@ -15,7 +15,8 @@
 
 use crate::expr::Expr;
 use crate::num::Number;
-use crate::{normalize, ops, upoly};
+use crate::polynomials::univariate;
+use crate::{normalize, ops};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{One, Signed, Zero};
@@ -36,18 +37,18 @@ fn factor_univariate(e: &Expr) -> Option<Expr> {
     // Fully distribute, then read off dense rational coefficients.
     let expanded = normalize::canonicalize(&normalize::expand(e));
     let coeffs = extract_upoly(&expanded, &var)?;
-    if upoly::degree(&coeffs) < 2 {
+    if univariate::degree(&coeffs) < 2 {
         return None; // degree ≤ 1 is already irreducible
     }
 
     let lc = coeffs.last()?.clone();
     let mut factors: Vec<Expr> = Vec::new();
-    for (sqfree, mult) in upoly::squarefree_decomposition(&coeffs) {
-        let (roots, cofactor) = upoly::rational_roots(&sqfree);
+    for (sqfree, mult) in univariate::squarefree_decomposition(&coeffs) {
+        let (roots, cofactor) = univariate::rational_roots(&sqfree);
         for r in &roots {
             factors.push(with_exponent(linear_factor(r, &var), mult));
         }
-        if upoly::degree(&cofactor) >= 1 {
+        if univariate::degree(&cofactor) >= 1 {
             // Split the no-rational-root remainder into irreducibles over ℚ
             // (S4): `x⁶−1`'s `x⁴+x²+1` becomes `(x²+x+1)(x²−x+1)`.
             for piece in split_over_q(&cofactor) {
@@ -126,7 +127,7 @@ fn with_exponent(base: Expr, n: u32) -> Expr {
 /// of those). `None` if any term is not a monomial in `var`, or if the degree
 /// exceeds `max_factor_degree` (the dense vector below allocates one entry per
 /// degree, so an adversarial `x^10^9` must be refused, not sized).
-fn extract_upoly(e: &Expr, var: &str) -> Option<upoly::UPoly> {
+fn extract_upoly(e: &Expr, var: &str) -> Option<univariate::UPoly> {
     let cap = crate::resource_limits::current().max_factor_degree;
     fn monomial(e: &Expr, var: &str, cap: usize) -> Option<(usize, BigRational)> {
         match e {
@@ -157,7 +158,7 @@ fn extract_upoly(e: &Expr, var: &str) -> Option<upoly::UPoly> {
         Expr::Add(ts) => ts.iter().collect(),
         other => vec![other],
     };
-    let mut out: upoly::UPoly = Vec::new();
+    let mut out: univariate::UPoly = Vec::new();
     for t in terms {
         let (d, c) = monomial(t, var, cap)?;
         if out.len() <= d {
@@ -165,7 +166,7 @@ fn extract_upoly(e: &Expr, var: &str) -> Option<upoly::UPoly> {
         }
         out[d] += c;
     }
-    upoly::trim(&mut out);
+    univariate::trim(&mut out);
     Some(out)
 }
 
@@ -176,8 +177,8 @@ fn extract_upoly(e: &Expr, var: &str) -> Option<upoly::UPoly> {
 /// input **exactly**, so substituting these back into `factor` cannot change
 /// the value. Falls back to `[coeffs]` unchanged when factoring exceeds the
 /// Kronecker budget (a missed factoring, never a wrong one).
-fn split_over_q(coeffs: &upoly::UPoly) -> Vec<upoly::UPoly> {
-    if upoly::degree(coeffs) < 2 {
+fn split_over_q(coeffs: &univariate::UPoly) -> Vec<univariate::UPoly> {
+    if univariate::degree(coeffs) < 2 {
         return vec![coeffs.clone()];
     }
     let mut budget: i64 = 200_000;
@@ -190,12 +191,12 @@ fn split_over_q(coeffs: &upoly::UPoly) -> Vec<upoly::UPoly> {
 /// factors can be taken primitive) — required because an interpolated factor
 /// may be a non-integer rational multiple of the true factor, and the divisor
 /// enumeration below is only exact over ℤ.
-fn factor_int(p: &upoly::UPoly, budget: &mut i64) -> Vec<upoly::UPoly> {
-    if upoly::degree(p) <= 1 {
+fn factor_int(p: &univariate::UPoly, budget: &mut i64) -> Vec<univariate::UPoly> {
+    if univariate::degree(p) <= 1 {
         return vec![p.clone()];
     }
     // p = scale · pp, with pp primitive over ℤ.
-    let pp: upoly::UPoly = upoly::to_primitive_int(p)
+    let pp: univariate::UPoly = univariate::to_primitive_int(p)
         .iter()
         .map(|c| BigRational::from_integer(c.clone()))
         .collect();
@@ -209,8 +210,8 @@ fn factor_int(p: &upoly::UPoly, budget: &mut i64) -> Vec<upoly::UPoly> {
 
     let mut pieces = match find_factor(&pp, budget) {
         Some(g) => {
-            let (q, r) = upoly::divrem(&pp, &g);
-            if !upoly::is_zero(&r) || upoly::degree(&q) < 1 {
+            let (q, r) = univariate::divrem(&pp, &g);
+            if !univariate::is_zero(&r) || univariate::degree(&q) < 1 {
                 vec![pp.clone()] // defensive: not an exact split
             } else {
                 let mut out = factor_int(&g, budget);
@@ -223,7 +224,7 @@ fn factor_int(p: &upoly::UPoly, budget: &mut i64) -> Vec<upoly::UPoly> {
     // Reattach the rational scale to the first piece so ∏ pieces == p.
     if !scale.is_one() {
         if let Some(first) = pieces.first_mut() {
-            *first = upoly::scale(first, &scale);
+            *first = univariate::scale(first, &scale);
         }
     }
     pieces
@@ -232,8 +233,8 @@ fn factor_int(p: &upoly::UPoly, budget: &mut i64) -> Vec<upoly::UPoly> {
 /// Search for a proper factor of `p` of degree `1..=deg/2` by interpolating
 /// through divisors of `p` at integer nodes (Kronecker). `None` when `p` is
 /// irreducible or the search exceeds the divisor / combination budget.
-fn find_factor(p: &upoly::UPoly, budget: &mut i64) -> Option<upoly::UPoly> {
-    let n = upoly::degree(p);
+fn find_factor(p: &univariate::UPoly, budget: &mut i64) -> Option<univariate::UPoly> {
+    let n = univariate::degree(p);
     for d in 1..=n / 2 {
         let nodes: Vec<BigInt> = (0..=d).map(node).collect();
         let vals: Vec<BigInt> = nodes.iter().map(|x| eval_int(p, x)).collect();
@@ -247,7 +248,7 @@ fn find_factor(p: &upoly::UPoly, budget: &mut i64) -> Option<upoly::UPoly> {
         // ± each positive divisor of every value.
         let mut divsets: Vec<Vec<BigInt>> = Vec::with_capacity(nodes.len());
         for v in &vals {
-            let mut ds = upoly::divisors_capped(&v.abs())?;
+            let mut ds = univariate::divisors_capped(&v.abs())?;
             let neg: Vec<BigInt> = ds.iter().map(|d| -d.clone()).collect();
             ds.extend(neg);
             divsets.push(ds);
@@ -264,9 +265,9 @@ fn find_factor(p: &upoly::UPoly, budget: &mut i64) -> Option<upoly::UPoly> {
 fn search_combos(
     nodes: &[BigInt],
     divsets: &[Vec<BigInt>],
-    p: &upoly::UPoly,
+    p: &univariate::UPoly,
     budget: &mut i64,
-) -> Option<upoly::UPoly> {
+) -> Option<univariate::UPoly> {
     let sizes: Vec<usize> = divsets.iter().map(Vec::len).collect();
     if sizes.contains(&0) {
         return None;
@@ -287,10 +288,10 @@ fn search_combos(
             .map(|(i, &j)| BigRational::from_integer(divsets[i][j].clone()))
             .collect();
         if let Some(g) = interpolate(&xs, &ys) {
-            let dg = upoly::degree(&g);
-            if dg >= 1 && dg < upoly::degree(p) {
-                let (q, r) = upoly::divrem(p, &g);
-                if upoly::is_zero(&r) && upoly::degree(&q) >= 1 {
+            let dg = univariate::degree(&g);
+            if dg >= 1 && dg < univariate::degree(p) {
+                let (q, r) = univariate::divrem(p, &g);
+                if univariate::is_zero(&r) && univariate::degree(&q) >= 1 {
                     return Some(g);
                 }
             }
@@ -319,22 +320,22 @@ fn node(i: usize) -> BigInt {
 }
 
 /// `p(x)` at an integer point (`p` has integer coefficients).
-fn eval_int(p: &upoly::UPoly, x: &BigInt) -> BigInt {
-    upoly::eval_rat(p, &BigRational::from_integer(x.clone())).to_integer()
+fn eval_int(p: &univariate::UPoly, x: &BigInt) -> BigInt {
+    univariate::eval_rat(p, &BigRational::from_integer(x.clone())).to_integer()
 }
 
 /// Lagrange interpolation through `(xs[i], ys[i])`. `None` on duplicate nodes.
-fn interpolate(xs: &[BigRational], ys: &[BigRational]) -> Option<upoly::UPoly> {
+fn interpolate(xs: &[BigRational], ys: &[BigRational]) -> Option<univariate::UPoly> {
     let n = xs.len();
-    let mut acc: upoly::UPoly = Vec::new();
+    let mut acc: univariate::UPoly = Vec::new();
     for i in 0..n {
-        let mut num: upoly::UPoly = vec![BigRational::one()];
+        let mut num: univariate::UPoly = vec![BigRational::one()];
         let mut den = BigRational::one();
         for j in 0..n {
             if i == j {
                 continue;
             }
-            num = upoly::mul(&num, &[-xs[j].clone(), BigRational::one()]);
+            num = univariate::mul(&num, &[-xs[j].clone(), BigRational::one()]);
             let diff = &xs[i] - &xs[j];
             if diff.is_zero() {
                 return None;
@@ -342,9 +343,9 @@ fn interpolate(xs: &[BigRational], ys: &[BigRational]) -> Option<upoly::UPoly> {
             den *= diff;
         }
         let scale = &ys[i] / &den;
-        acc = upoly::add_p(&acc, &upoly::scale(&num, &scale));
+        acc = univariate::add_p(&acc, &univariate::scale(&num, &scale));
     }
-    upoly::trim(&mut acc);
+    univariate::trim(&mut acc);
     Some(acc)
 }
 

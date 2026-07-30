@@ -80,14 +80,14 @@ fn eval_op(
         Op::I => return Err("imaginary unit in the real tier"),
         Op::Root(i) => {
             let (poly, idx) = &tape.roots[*i as usize];
-            let Some(z) = crate::rootof::numeric_root(poly, *idx) else {
+            let Some(z) = crate::polynomials::rootof::numeric_root(poly, *idx) else {
                 return Err("root isolation failed");
             };
             if z.im != 0.0 {
                 return Err("complex root in the real tier");
             }
             // Real roots come from exact Sturm bisection refined past f64
-            // resolution (upoly::refine_to_f64's stopping rule), so the
+            // resolution (univariate::refine_to_f64's stopping rule), so the
             // certified bound is a couple of ulps of the value's scale.
             Approx64 {
                 val: z.re,
@@ -266,7 +266,7 @@ fn ceval_op(
         },
         Op::Root(i) => {
             let (poly, idx) = &tape.roots[*i as usize];
-            let Some(z) = crate::rootof::numeric_root(poly, *idx) else {
+            let Some(z) = crate::polynomials::rootof::numeric_root(poly, *idx) else {
                 return Err("root isolation failed");
             };
             if z.im == 0.0 {

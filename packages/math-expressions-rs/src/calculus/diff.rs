@@ -67,7 +67,7 @@ fn diff(e: &Expr, var: &str) -> Expr {
         // (same policy as apply_rule's prime fallback). It samples as an
         // opaque atom in `equals` and renders as `derivative(…, var)`.
         _ => Expr::OtherOp(
-            crate::sym::Sym::new("derivative"),
+            crate::expr::sym::Sym::new("derivative"),
             vec![e.clone(), Expr::sym(var)],
         ),
     }
@@ -213,7 +213,7 @@ fn is_neg_one(e: &Expr) -> bool {
 }
 
 /// Does `e` mention the variable `var` anywhere (full recursion — unlike
-/// `eval_numerical::free_symbols`, which stops at opaque transcendental subtrees)?
+/// `eval_numeric::complex::free_symbols`, which stops at opaque transcendental subtrees)?
 fn contains_var(e: &Expr, var: &str) -> bool {
     e.any_subexpr(&|c| matches!(c, Expr::Sym(s) if s.name() == var))
 }

@@ -20,7 +20,7 @@
 use crate::expr::Expr;
 use crate::num::Number;
 
-use super::syntactic::map_children;
+use crate::expr::map_children;
 use super::{add, mul, pow};
 
 // Caps (resource_limits::current().max_expand_power / max_expand_terms): the exponent
@@ -95,7 +95,7 @@ pub(crate) fn expand_core(e: &Expr) -> Expr {
 /// and on cap overflow (`None`), keep the unexpanded canonical `fallback`.
 fn distribute_guarded(distributed: Option<Expr>, fallback: Expr) -> Expr {
     match distributed {
-        Some(d) if crate::pm::count_pm(&d) <= crate::pm::count_pm(&fallback) => d,
+        Some(d) if crate::ops::pm::count_pm(&d) <= crate::ops::pm::count_pm(&fallback) => d,
         _ => fallback,
     }
 }

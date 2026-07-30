@@ -23,13 +23,13 @@ pub(super) fn rootof_is_zero(e: &Expr) -> MaybeBool {
     let Expr::RootOf { poly, .. } = &root else {
         return None;
     };
-    let p = crate::rootof::coeffs_to_upoly(poly)?;
-    if crate::upoly::degree(&p) == 0 {
+    let p = crate::polynomials::rootof::coeffs_to_upoly(poly)?;
+    if crate::polynomials::univariate::degree(&p) == 0 {
         return None;
     }
     let mut budget = crate::resource_limits::current().max_exact_eval_ops;
     let r = fold_rootof(e, &p, &mut budget)?;
-    crate::upoly::is_zero(&r).then_some(true)
+    crate::polynomials::univariate::is_zero(&r).then_some(true)
 }
 
 /// The one distinct `RootOf` leaf in `e`, or `None` if there are none or more
@@ -56,21 +56,21 @@ fn unique_rootof(e: &Expr) -> Option<Expr> {
 /// modulo `p` after each operation.
 fn fold_rootof(e: &Expr, p: &[BigRational], budget: &mut i64) -> Option<Vec<BigRational>> {
     spend(budget)?;
-    let reduce = |a: Vec<BigRational>| crate::upoly::divrem(&a, p).1;
+    let reduce = |a: Vec<BigRational>| crate::polynomials::univariate::divrem(&a, p).1;
     Some(match e {
         Expr::Num(n) => vec![n.to_bigrational()?],
         Expr::RootOf { .. } => reduce(vec![BigRational::zero(), BigRational::one()]),
         Expr::Add(ts) => {
             let mut acc = Vec::new();
             for t in ts {
-                acc = crate::upoly::add_p(&acc, &fold_rootof(t, p, budget)?);
+                acc = crate::polynomials::univariate::add_p(&acc, &fold_rootof(t, p, budget)?);
             }
             reduce(acc)
         }
         Expr::Mul(fs) => {
             let mut acc = vec![BigRational::one()];
             for f in fs {
-                acc = reduce(crate::upoly::mul(&acc, &fold_rootof(f, p, budget)?));
+                acc = reduce(crate::polynomials::univariate::mul(&acc, &fold_rootof(f, p, budget)?));
             }
             acc
         }
@@ -87,7 +87,7 @@ fn fold_rootof(e: &Expr, p: &[BigRational], budget: &mut i64) -> Option<Vec<BigR
             let mut acc = vec![BigRational::one()];
             for _ in 0..ki {
                 spend(budget)?;
-                acc = reduce(crate::upoly::mul(&acc, &base));
+                acc = reduce(crate::polynomials::univariate::mul(&acc, &base));
             }
             acc
         }

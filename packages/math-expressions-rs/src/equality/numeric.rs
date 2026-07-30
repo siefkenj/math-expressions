@@ -3,7 +3,7 @@
 
 use super::fuzzy::{build_fuzzy_tol, FuzzyTol};
 use super::EqOptions;
-use crate::eval_numerical::{eval_complex, free_symbols, Env};
+use crate::eval_numeric::complex::{eval_complex, free_symbols, Env};
 use crate::expr::Expr;
 use num_complex::Complex64;
 use rand::rngs::SmallRng;

@@ -11,17 +11,18 @@
 //! * [`is_zero`] — `is_zero(e, a) -> Tri` (`Some(true)` = certified zero,
 //!   `Some(false)` = certified nonzero, `None` = undecided). Soundness is the
 //!   invariant: it never answers `Some(_)` unless the answer is certain. The
-//!   service lives in [`zero`]; the single-`RootOf` decider in [`algebraic`].
+//!   service lives in [`zero_testing`]; the single-`RootOf` decider in
+//!   [`algebraic`].
 
 mod algebraic;
 mod eval;
 mod value;
-mod zero;
+mod zero_testing;
 
 pub use eval::exact_eval;
 pub use value::Exact;
-pub use zero::is_zero;
+pub use zero_testing::is_zero;
 
-// Crate-internal entry points (used qualified as `crate::exact::…`).
+// Crate-internal entry points (used qualified as `crate::eval_exact::…`).
 pub(crate) use eval::trig_special_value;
-pub(crate) use zero::certified_zero;
+pub(crate) use zero_testing::certified_zero;

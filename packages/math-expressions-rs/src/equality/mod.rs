@@ -2,7 +2,7 @@
 //! expressions denote the same mathematical object? This is the value axis —
 //! contrast [`equality_structural`](crate::equality_structural), which asks
 //! whether an answer is in a required *form* (factored, reduced, …), and
-//! [`precise`](crate::precise), which is certified arbitrary-precision numeric
+//! [`certified_digits`](crate::eval_numeric::certified_digits), which is certified arbitrary-precision numeric
 //! evaluation.
 //!
 //! ## It is a staged decision procedure, not a numerical test
@@ -12,7 +12,7 @@
 //! Crucially, that final numerical stage is **not certified** — it is a lenient
 //! heuristic made *sound* by the exact stages that run ahead of it (see stage
 //! 7). If you want a guaranteed-accurate-or-`Unknown` number, that is
-//! [`precise`](crate::precise), not this module.
+//! [`certified_digits`](crate::eval_numeric::certified_digits), not this module.
 //!
 //! The stages, in order ([`api::equals`]). Before stage 0, `equals` desugars
 //! scaling units on both sides (`50% → 50/100`, `deg`, `$`) so the stages below

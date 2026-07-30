@@ -10,7 +10,7 @@
 //! the requested form?" check: `(x+y)+z` and `z+x+y` are NOT syntactically
 //! equal, while `ln(x)` and `log(x)`, or `cos^(-1)(x)` and `arccos(x)`, are.
 
-use crate::expr::{flatten, Expr};
+use crate::expr::{flatten, map_children, Expr};
 use crate::num::Number;
 use std::cmp::Ordering;
 
@@ -240,53 +240,4 @@ fn is_int(e: &Expr, v: i64) -> bool {
 
 fn is_move_exponent(base: &Expr) -> bool {
     matches!(base, Expr::Sym(s) if crate::special_functions::moves_exponent_outside(&s.name()))
-}
-
-/// Apply `f` to every immediate `Expr` child, rebuilding the node; leaves are
-/// returned unchanged. Shared by the syntactic passes and `normalize::simplify`
-/// (generic over `FnMut` so callers can thread state, e.g. a change flag).
-pub(crate) fn map_children<F: FnMut(&Expr) -> Expr>(e: &Expr, mut f: F) -> Expr {
-    match e {
-        Expr::Num(_)
-        | Expr::Sym(_)
-        | Expr::Const(_)
-        | Expr::RootOf { .. }
-        | Expr::Blank
-        | Expr::Ldots => e.clone(),
-        Expr::Add(xs) => Expr::Add(xs.iter().map(&mut f).collect()),
-        Expr::Mul(xs) => Expr::Mul(xs.iter().map(&mut f).collect()),
-        Expr::And(xs) => Expr::And(xs.iter().map(&mut f).collect()),
-        Expr::Or(xs) => Expr::Or(xs.iter().map(&mut f).collect()),
-        Expr::Union(xs) => Expr::Union(xs.iter().map(&mut f).collect()),
-        Expr::Intersect(xs) => Expr::Intersect(xs.iter().map(&mut f).collect()),
-        Expr::Div(a, b) => Expr::Div(Box::new(f(a)), Box::new(f(b))),
-        Expr::Pow(a, b) => Expr::Pow(Box::new(f(a)), Box::new(f(b))),
-        Expr::Index(a, b) => Expr::Index(Box::new(f(a)), Box::new(f(b))),
-        Expr::Neg(x) => Expr::Neg(Box::new(f(x))),
-        Expr::Not(x) => Expr::Not(Box::new(f(x))),
-        Expr::Prime(x) => Expr::Prime(Box::new(f(x))),
-        Expr::Apply(h, xs) => {
-            let h = f(h);
-            Expr::Apply(Box::new(h), xs.iter().map(&mut f).collect())
-        }
-        Expr::Seq(k, xs) => Expr::Seq(*k, xs.iter().map(&mut f).collect()),
-        Expr::Interval { endpoints, closed } => Expr::Interval {
-            endpoints: Box::new((f(&endpoints.0), f(&endpoints.1))),
-            closed: *closed,
-        },
-        Expr::Relation { operands, ops } => Expr::Relation {
-            operands: operands.iter().map(&mut f).collect(),
-            ops: ops.clone(),
-        },
-        Expr::Matrix {
-            rows,
-            cols,
-            entries,
-        } => Expr::Matrix {
-            rows: *rows,
-            cols: *cols,
-            entries: entries.iter().map(&mut f).collect(),
-        },
-        Expr::OtherOp(name, xs) => Expr::OtherOp(*name, xs.iter().map(&mut f).collect()),
-    }
 }

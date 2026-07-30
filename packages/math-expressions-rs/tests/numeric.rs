@@ -1,8 +1,8 @@
-//! f64 numeric module (`me.math` replacements) — hand-checkable cases.
+//! f64 mathjs_compat module (`me.math` replacements) — hand-checkable cases.
 //! Differential coverage against the JS mathjs oracle lives in
 //! `numeric_corpus.rs`.
 
-use math_expressions::numeric::*;
+use math_expressions::mathjs_compat::*;
 
 fn assert_close(a: f64, b: f64, tol: f64) {
     assert!((a - b).abs() <= tol, "expected {b}, got {a}");
@@ -93,7 +93,7 @@ fn eigs_companion_and_defective() {
     assert_close(pairs[1].value.re, 1.0, 1e-7);
 }
 
-fn check_residual(a: &[f64], n: usize, p: &EigenPair) {
+fn check_residual(a: &[f64], n: usize, p: &NumericEigenPair) {
     let mut max = 0.0f64;
     for i in 0..n {
         let mut av = num_complex::Complex64::new(0.0, 0.0);

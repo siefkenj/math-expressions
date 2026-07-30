@@ -4,7 +4,7 @@
 //! are text-only: LaTeX `\sqrt[n]{…}` is grammar, not an applied symbol.
 
 use super::{FnDef, DEFAULTS};
-use crate::precise::kernels::{FixId, FnKernel};
+use crate::eval_numeric::certified_digits::kernels::{FixId, FnKernel};
 use crate::expr::Expr;
 use crate::normalize::{mul, pow};
 use crate::num::Number;

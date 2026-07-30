@@ -16,7 +16,7 @@
 //! the sampler). Anything the field can't evaluate (log, factorial, unknown
 //! applications, `pi` for odd `p`) yields NaN and that prime is skipped.
 
-use crate::eval_numerical::{free_symbols, is_opaque_atom, opaque_key};
+use crate::eval_numeric::complex::{free_symbols, is_opaque_atom, opaque_key};
 use crate::expr::{Expr, MathConst};
 use crate::num::Number;
 use rand::rngs::SmallRng;

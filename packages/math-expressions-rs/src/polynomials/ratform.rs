@@ -211,7 +211,7 @@ impl Kernels {
 fn kernelize(e: &Expr, kernels: &mut Kernels) -> Expr {
     match e {
         Expr::Num(_) => e.clone(),
-        Expr::Sym(s) if !crate::sym::is_constant_symbol(&s.name()) => e.clone(),
+        Expr::Sym(s) if !crate::expr::sym::is_constant_symbol(&s.name()) => e.clone(),
         Expr::Add(ts) => Expr::Add(ts.iter().map(|t| kernelize(t, kernels)).collect()),
         Expr::Mul(fs) => Expr::Mul(fs.iter().map(|f| kernelize(f, kernels)).collect()),
         Expr::Neg(a) => Expr::Neg(Box::new(kernelize(a, kernels))),
@@ -235,7 +235,7 @@ fn indeterminates(e: &Expr) -> Vec<String> {
     fn walk(e: &Expr, set: &mut BTreeSet<String>) {
         if let Expr::Sym(s) = e {
             let name = s.name();
-            if !crate::sym::is_constant_symbol(&name) {
+            if !crate::expr::sym::is_constant_symbol(&name) {
                 set.insert(name);
             }
         }

@@ -68,7 +68,7 @@ pub fn equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     // finite-field and single-value sampling stages treat as an opaque atom
     // (and would reject). Dispatch to the pm-aware set comparison before those
     // stages. Port of JS `equality/numerical.js` pm branch + `pm-numerical.js`.
-    if crate::pm::contains_pm(&ca) || crate::pm::contains_pm(&cb) {
+    if crate::ops::pm::contains_pm(&ca) || crate::ops::pm::contains_pm(&cb) {
         return plus_minus::pm_equals(&ca, &cb, opts);
     }
 
@@ -134,7 +134,7 @@ fn certified_equal(ca: &Expr, cb: &Expr) -> bool {
     let var_free = |e: &Expr| {
         crate::ops::variables(e)
             .iter()
-            .all(|v| crate::sym::is_constant_symbol(v))
+            .all(|v| crate::expr::sym::is_constant_symbol(v))
     };
     if !var_free(ca) || !var_free(cb) {
         return false;
@@ -149,7 +149,7 @@ fn certified_equal(ca: &Expr, cb: &Expr) -> bool {
         ca.clone(),
         Expr::Neg(Box::new(cb.clone())),
     ]));
-    crate::exact::exact_eval(&diff).is_some_and(|v| v.is_zero())
+    crate::eval_exact::exact_eval(&diff).is_some_and(|v| v.is_zero())
 }
 
 /// Numerical equality by sampling *real* points only — the port of JS
@@ -223,7 +223,7 @@ fn coerce_seqs(e: Expr, opts: &EqOptions) -> Expr {
             };
             return Expr::Seq(mapped, xs.iter().map(|x| recur(x, opts)).collect());
         }
-        crate::normalize::syntactic::map_children(e, |c| recur(c, opts))
+        crate::expr::map_children(e, |c| recur(c, opts))
     }
     recur(&e, opts)
 }

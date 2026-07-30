@@ -2,7 +2,7 @@
 //! parenthesization, power-tower parens, LaTeX `%` escaping, Leibniz spacing,
 //! and `perp` in text. Trees are built from the JS AST shape via `try_from_js`.
 
-use math_expressions::js_tree::try_from_js;
+use math_expressions::expr::serde::try_from_js;
 use math_expressions::{to_latex, to_text, LatexOpts, TextOpts};
 use serde_json::json;
 

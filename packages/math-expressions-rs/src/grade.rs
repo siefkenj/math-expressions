@@ -5,7 +5,8 @@
 use crate::assumptions::{is_negative, is_nonzero, is_positive, Assumptions};
 use crate::equality::{equals, EqOptions};
 use crate::expr::{Expr, RelOp, SeqKind};
-use crate::normalize::{canonicalize, simplify_with, syntactic::map_children};
+use crate::expr::map_children;
+use crate::normalize::{canonicalize, simplify_with};
 
 /// Does `a` equal `b` after exactly `n` sign flips of subtrees of `a`?
 /// `n = 0` is plain [`equals`]. Port of `equalSpecifiedSignErrors`: every
@@ -185,7 +186,7 @@ pub fn evaluate_membership(e: &Expr, opts: &EqOptions) -> Option<bool> {
     let closed = |x: &Expr| {
         crate::ops::variables(x)
             .iter()
-            .all(|v| crate::sym::is_constant_symbol(v))
+            .all(|v| crate::expr::sym::is_constant_symbol(v))
     };
     if closed(lhs) && members.iter().all(closed) {
         return Some(negate);

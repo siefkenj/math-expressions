@@ -4,7 +4,7 @@
 //! renaming, so `ln^2(x)` must match under its original spelling.
 
 use super::{apply, int, FnDef, DEFAULTS};
-use crate::precise::kernels::{FixId, FnKernel};
+use crate::eval_numeric::certified_digits::kernels::{FixId, FnKernel};
 use crate::normalize::{add, mul, pow};
 
 pub const EXP: FnDef = FnDef {

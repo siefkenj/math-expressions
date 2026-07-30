@@ -335,7 +335,7 @@ pub fn solve_ode_exprs(
         for v in crate::ops::variables(c) {
             if v != ind_var
                 && !state_vars.contains(&v)
-                && !crate::sym::is_constant_symbol(&v)
+                && !crate::expr::sym::is_constant_symbol(&v)
             {
                 return None;
             }
@@ -343,10 +343,10 @@ pub fn solve_ode_exprs(
     }
     // Tape path: compile each RHS and map its variable slots onto
     // [t, y0, y1, …].
-    let tapes: Option<Vec<(crate::precise::tape::CompiledExpr, Vec<usize>)>> = canon
+    let tapes: Option<Vec<(crate::eval_numeric::certified_digits::tape::CompiledExpr, Vec<usize>)>> = canon
         .iter()
         .map(|c| {
-            let tape = crate::precise::compile(c).ok()?;
+            let tape = crate::eval_numeric::certified_digits::compile(c).ok()?;
             let slots: Option<Vec<usize>> = tape
                 .vars()
                 .iter()
@@ -394,13 +394,13 @@ pub fn solve_ode_exprs(
             let states = state_vars.to_vec();
             Some(solve_ode_with(
                 move |t, y, out| {
-                    let mut env = crate::eval_numerical::Env::new();
+                    let mut env = crate::eval_numeric::complex::Env::new();
                     env.insert(ind.clone(), num_complex::Complex64::new(t, 0.0));
                     for (name, &v) in states.iter().zip(y.iter()) {
                         env.insert(name.clone(), num_complex::Complex64::new(v, 0.0));
                     }
                     for (i, c) in canon.iter().enumerate() {
-                        match crate::eval_numerical::eval_complex(c, &env) {
+                        match crate::eval_numeric::complex::eval_complex(c, &env) {
                             Some(z) if z.re.is_finite() && z.im.abs() < 1e-9 * z.re.abs().max(1.0) => {
                                 out[i] = z.re
                             }

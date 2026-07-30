@@ -1,7 +1,7 @@
 //! The six trigonometric functions.
 
 use super::{apply, int, FnDef, DEFAULTS};
-use crate::precise::kernels::{FixId, FnKernel};
+use crate::eval_numeric::certified_digits::kernels::{FixId, FnKernel};
 use crate::normalize::mul;
 
 pub const SIN: FnDef = FnDef {

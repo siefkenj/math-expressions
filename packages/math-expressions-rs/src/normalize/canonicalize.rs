@@ -22,8 +22,8 @@ pub fn canonicalize(e: &Expr) -> Expr {
         // coefficients) for RootOf leaves built outside the smart
         // constructors, e.g. deserialized trees. An unrepresentable one
         // (bad index, degree cap) is kept as-is — it is still a leaf.
-        Expr::RootOf { poly, index } => crate::rootof::coeffs_to_upoly(poly)
-            .and_then(|p| crate::rootof::make_rootof(&p, *index))
+        Expr::RootOf { poly, index } => crate::polynomials::rootof::coeffs_to_upoly(poly)
+            .and_then(|p| crate::polynomials::rootof::make_rootof(&p, *index))
             .unwrap_or_else(|| e.clone()),
 
         Expr::Add(ts) => add(ts.iter().map(canonicalize).collect()),
@@ -37,7 +37,7 @@ pub fn canonicalize(e: &Expr) -> Expr {
             let cx = canonicalize(x);
             // −(±y) → ±y: the value set {y, −y} is closed under negation, so the
             // outer sign is absorbed (port of JS simplify's pm negation rule).
-            if crate::pm::is_pm(&cx) {
+            if crate::ops::pm::is_pm(&cx) {
                 cx
             } else {
                 mul(vec![Expr::Num(Number::Int(-1)), cx])
@@ -182,7 +182,7 @@ fn canon_apply(head: Expr, args: Vec<Expr>) -> Expr {
     // application.
     if let Expr::Sym(s) = &head {
         if s.name() == "rootof" {
-            if let Some(r) = crate::rootof::from_apply_args(&args) {
+            if let Some(r) = crate::polynomials::rootof::from_apply_args(&args) {
                 return r;
             }
         }

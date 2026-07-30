@@ -12,7 +12,7 @@ impl Expression {
     pub fn to_serialized(&self) -> String {
         serde_json::json!({
             "objectType": "math-expression",
-            "tree": math_expressions::js_tree::to_js(&self.0),
+            "tree": math_expressions::expr::serde::to_js(&self.0),
         })
         .to_string()
     }
@@ -24,7 +24,7 @@ impl Expression {
 pub fn from_ast(tree_json: &str) -> Result<Expression, JsError> {
     let value: serde_json::Value =
         serde_json::from_str(tree_json).map_err(|e| JsError::new(&e.to_string()))?;
-    math_expressions::js_tree::try_from_js(&value)
+    math_expressions::expr::serde::try_from_js(&value)
         .map(Expression::with_default_notation)
         .map_err(|e| JsError::new(&e))
 }
@@ -40,7 +40,7 @@ pub fn from_serialized(json: &str) -> Result<Expression, JsError> {
         return Err(JsError::new("not a serialized math-expression"));
     }
     let tree = value.get("tree").ok_or_else(|| JsError::new("missing tree"))?;
-    math_expressions::js_tree::try_from_js(tree)
+    math_expressions::expr::serde::try_from_js(tree)
         .map(Expression::with_default_notation)
         .map_err(|e| JsError::new(&e))
 }

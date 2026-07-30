@@ -373,7 +373,7 @@ pub(crate) fn expr_to_poly(e: &Expr, vars: &[String]) -> Option<Rep> {
         }
         Expr::Sym(s) => {
             let name = s.name();
-            if crate::sym::is_constant_symbol(&name) {
+            if crate::expr::sym::is_constant_symbol(&name) {
                 return None; // pi/e are not rational polynomial coefficients
             }
             let idx = vars.iter().position(|v| *v == name)?;

@@ -48,7 +48,7 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
             // `±x + ±x` has value set {2x, 0, −2x} whereas `2·±x` has {2x, −2x},
             // so coalescing like terms would tie the two sign choices together.
             // Keep every pm-bearing term as its own summand (JS `noPmBase`).
-            Some(r) if crate::pm::contains_pm(&r) => parts.push((r, coeff)),
+            Some(r) if crate::ops::pm::contains_pm(&r) => parts.push((r, coeff)),
             Some(r) => match parts.iter_mut().find(|(k, _)| *k == r) {
                 Some(slot) => slot.1 = slot.1.add(&coeff),
                 None => parts.push((r, coeff)),
@@ -163,14 +163,14 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         let pm_idx: Vec<usize> = flat
             .iter()
             .enumerate()
-            .filter(|(_, f)| crate::pm::is_pm(f))
+            .filter(|(_, f)| crate::ops::pm::is_pm(f))
             .map(|(i, _)| i)
             .collect();
         if pm_idx.len() == 1
             && flat
                 .iter()
                 .enumerate()
-                .all(|(i, f)| i == pm_idx[0] || !crate::pm::contains_pm(f))
+                .all(|(i, f)| i == pm_idx[0] || !crate::ops::pm::contains_pm(f))
         {
             let Expr::OtherOp(_, args) = flat.remove(pm_idx[0]) else {
                 unreachable!()
@@ -180,10 +180,10 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
             let scaled = mul(flat);
             // If the scaled product is itself a ± (the pulled-in factor was a
             // nested ±), it already absorbs this one: ±(±y) = ±y.
-            return if crate::pm::is_pm(&scaled) {
+            return if crate::ops::pm::is_pm(&scaled) {
                 scaled
             } else {
-                crate::pm::make_pm(scaled)
+                crate::ops::pm::make_pm(scaled)
             };
         }
     }
@@ -319,7 +319,7 @@ pub(crate) fn pow(base: Expr, exp: Expr) -> Expr {
     // plus like-term folding.
     if matches!(base, Expr::RootOf { .. }) {
         if let Some(k) = as_int(&exp) {
-            if let Some(reduced) = crate::rootof::power_reduced(&base, k) {
+            if let Some(reduced) = crate::polynomials::rootof::power_reduced(&base, k) {
                 return reduced;
             }
         }

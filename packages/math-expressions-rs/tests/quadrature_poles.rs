@@ -4,7 +4,7 @@
 //! from slow convergence); merely near-singular but smooth integrands must
 //! converge to certified digits, however sharp the spike.
 
-use math_expressions::precise::{evaluate_to_precision, integrate_to_precision, Precise};
+use math_expressions::eval_numeric::certified_digits::{evaluate_to_precision, integrate_to_precision, Precise};
 use math_expressions::{Expr, TextToAst, TextToAstOptions};
 use std::time::Instant;
 

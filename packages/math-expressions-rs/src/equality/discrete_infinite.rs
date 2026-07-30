@@ -340,7 +340,7 @@ pub fn create_discrete_infinite_set(
         .collect();
 
     Some(Expr::OtherOp(
-        crate::sym::Sym::new("discrete_infinite_set"),
+        crate::expr::sym::Sym::new("discrete_infinite_set"),
         tuples,
     ))
 }
