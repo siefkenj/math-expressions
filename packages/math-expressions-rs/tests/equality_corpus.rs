@@ -18,6 +18,8 @@
 //! Regenerate the snapshot after an intended change:
 //!   UPDATE_KNOWN_FAILURES=1 cargo test --test equality_corpus
 
+mod common;
+
 use math_expressions::{equals, equals_syntactic, EqOptions, Expr, TextToAst, TextToAstOptions};
 use std::collections::BTreeSet;
 
@@ -33,7 +35,7 @@ fn verdict(kind: Kind, lhs: &str, rhs: &str) -> Option<bool> {
         Kind::Numeric => equals,
         Kind::Syntactic => equals_syntactic,
     };
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&a, &b, &opts))).ok()
+    common::caught(|| f(&a, &b, &opts))
 }
 
 #[derive(Clone, Copy)]
@@ -95,7 +97,6 @@ fn collect_failures() -> BTreeSet<String> {
 
 #[test]
 fn corpus_no_regressions() {
-    std::panic::set_hook(Box::new(|_| {}));
     let failures = collect_failures();
 
     // Snapshot-update mode: write the current failures and pass.
@@ -156,7 +157,6 @@ fn corpus_no_regressions() {
 /// A headline count so progress is visible in test output.
 #[test]
 fn corpus_pass_rate() {
-    std::panic::set_hook(Box::new(|_| {}));
     let corpus: Corpus = serde_json::from_str(CORPUS).unwrap();
     let total = corpus.equivalences.len()
         + corpus.nonequivalences.len()

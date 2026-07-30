@@ -24,6 +24,8 @@
 //! Regenerate the snapshot after an intended change:
 //!   UPDATE_KNOWN_FAILURES=1 cargo test --test simplify_corpus
 
+mod common;
+
 use math_expressions::assumptions::Assumptions;
 use math_expressions::{
     contains_blank, equals, eval_exact, expr, simplify, EqOptions, Expr, TextToAst,
@@ -46,7 +48,7 @@ const CORPUS: &str = include_str!("fixtures/simplify-corpus.json");
 const KNOWN_FAILURES: &str = include_str!("fixtures/simplify-known-failures.json");
 
 fn catch<T>(f: impl FnOnce() -> T) -> Option<T> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok()
+    common::caught(f)
 }
 
 /// Does the tree involve a value outside `equals`'s finite-sampling domain — an
@@ -89,8 +91,19 @@ const CERTIFY_POINTS: [i64; 3] = [3, 5, 11];
 /// It exists for the folds `equals` structurally cannot confirm: against a
 /// folded `0` the residue `sin(π) ≈ 1.2e-16` has no relative tolerance that
 /// closes. Deliberately not built out of `simplify`, which would let a
-/// consistently-wrong special-value table rubber-stamp its own output.
-fn certified_verdicts(input: &Expr, simplified: &Expr) -> Vec<Option<bool>> {
+/// consistently-wrong special-value table rubber-stamp its own output:
+/// `eval_exact::is_zero` runs `expand` → `canonicalize` → structural /
+/// rational-normal-form / exact-constant stages and never invokes
+/// `fold_special_values`, so the *pass* under test is not part of its own
+/// oracle. The honest limit of that independence: `fold_special_values` reads
+/// `eval_exact`'s trig/constant tables, so a wrong entry in **those** would
+/// still be self-confirming. Independence is at the pass level, not the table
+/// level — which is why the tables have their own direct tests
+/// (`tests/exact_is_zero.rs`, `tests/special_values.rs`).
+///
+/// Each entry is paired with a rendering of the assignment it used, so a
+/// failure can name the point rather than just asserting one exists.
+fn certified_verdicts(input: &Expr, simplified: &Expr) -> Vec<(String, Option<bool>)> {
     let diff = Expr::Add(vec![
         input.clone(),
         Expr::Neg(Box::new(simplified.clone())),
@@ -111,7 +124,16 @@ fn certified_verdicts(input: &Expr, simplified: &Expr) -> Vec<Option<bool>> {
                 .map(|(i, v)| (v.clone(), Expr::int(base + 2 * i as i64)))
                 .collect();
             let at = math_expressions::substitute(&diff, &subs);
-            eval_exact::is_zero(&at, &Assumptions::new())
+            let where_ = if free.is_empty() {
+                "no free symbols".to_string()
+            } else {
+                free.iter()
+                    .enumerate()
+                    .map(|(i, v)| format!("{v} = {}", base + 2 * i as i64))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            (where_, eval_exact::is_zero(&at, &Assumptions::new()))
         })
         .collect()
 }
@@ -183,12 +205,24 @@ fn collect_js_gaps(assert_invariants: bool) -> BTreeSet<String> {
                 let verdicts = catch(|| certified_verdicts(&parsed, &simplified)).unwrap_or_default();
                 // Proof direction: `input − simplified` is certified *nonzero*
                 // at a point, so the rewrite is wrong however JS spells it.
-                assert!(
-                    !verdicts.contains(&Some(false)),
-                    "simplify changed the value of {:?} at a certified point: got {:?}",
-                    c.input,
-                    simplified,
-                );
+                // This is the one check with no snapshot escape, so the message
+                // has to carry everything the person who trips it needs.
+                if let Some((at, _)) = verdicts.iter().find(|(_, v)| *v == Some(false)) {
+                    panic!(
+                        "simplify changed the VALUE of {:?}\n  \
+                         result:      {:?}\n  \
+                         refuted at:  {}\n\
+                         `input - simplified` evaluates to a certified NONZERO constant there \
+                         (eval_exact decided both sides exactly), so this is a proof the rewrite \
+                         is wrong -- not a sampling tolerance artifact, and not excused by \
+                         matching JS's tree.\n\
+                         There is deliberately no known-failures snapshot for this direction: \
+                         fix the rule. If the divergence really is a sanctioned real-domain \
+                         identity that the complex-domain exact tower is entitled to refute, \
+                         narrow the `judgeable` guard above explicitly and record why.",
+                        c.input, simplified, at,
+                    );
+                }
                 // Evidence direction: certified zero at every sample point.
                 // This is what accepts the sound special-value folds
                 // (`sin(π)·x → 0`) that the float-sampling `equals` cannot
@@ -196,13 +230,16 @@ fn collect_js_gaps(assert_invariants: bool) -> BTreeSet<String> {
                 // `0` the relative comparison never closes. JS never folded
                 // them either, so `agrees` is false too.
                 let certified =
-                    !verdicts.is_empty() && verdicts.iter().all(|v| *v == Some(true));
+                    !verdicts.is_empty() && verdicts.iter().all(|(_, v)| *v == Some(true));
                 let preserves = agrees
                     || catch(|| equals(&simplified, &parsed, &opts)).unwrap_or(false)
                     || certified;
                 assert!(
                     preserves,
-                    "simplify changed the meaning of {:?}: got {:?}",
+                    "simplify changed the meaning of {:?}: got {:?}\n  \
+                     JS agreement: {agrees}; certified verdicts: {verdicts:?}\n\
+                     (`None` = eval_exact could not decide the difference at that point, e.g. a \
+                     pole or an opaque function head; all-`Some(true)` would have accepted.)",
                     c.input, simplified,
                 );
             }
@@ -219,14 +256,12 @@ fn collect_js_gaps(assert_invariants: bool) -> BTreeSet<String> {
 /// fixpoint). No snapshot: these must always hold.
 #[test]
 fn simplify_is_meaning_preserving_and_reduced() {
-    std::panic::set_hook(Box::new(|_| {}));
     collect_js_gaps(true);
 }
 
 /// The advisory JS-agreement gaps, guarded against regression by a snapshot.
 #[test]
 fn simplify_no_js_agreement_regressions() {
-    std::panic::set_hook(Box::new(|_| {}));
     let gaps = collect_js_gaps(false);
 
     if std::env::var("UPDATE_KNOWN_FAILURES").is_ok() {
@@ -274,7 +309,6 @@ fn simplify_no_js_agreement_regressions() {
 /// Headline counts, always green.
 #[test]
 fn simplify_corpus_pass_rate() {
-    std::panic::set_hook(Box::new(|_| {}));
     let cases: Vec<Case> = serde_json::from_str(CORPUS).unwrap();
     let gaps = collect_js_gaps(false).len();
     let n = cases.len();

@@ -1,8 +1,18 @@
 //! Trig / exp / log special-value folding and parity.
 //!
 //! [`fold_special_values`] is an *unconditionally sound* rewrite pass, applied
-//! bottom-up to a fixpoint. It is independent of the oracle-compatible
-//! `simplify`; `eval_exact::is_zero` uses it as a pre-pass. Three families:
+//! bottom-up to a fixpoint. It is a pass in its own right, *not* one of the
+//! base rewrite clusters in [`simplify`](super::simplify): the base rounds
+//! never run it, and the public `simplify` reaches it only through the
+//! [`full_simplify`](crate::full_simplify) fixpoint driver.
+//!
+//! The dependency on [`crate::eval_exact`] runs one way — this pass *reads*
+//! that module's constant tower and trig tables, and nothing in `eval_exact`
+//! calls back here (`eval_exact::is_zero` goes `expand` → `canonicalize` →
+//! structural / rational-normal-form / exact-constant stages). That asymmetry
+//! is what lets `tests/simplify_corpus.rs` use `eval_exact::is_zero` as an
+//! oracle for the folds performed here without the check becoming circular at
+//! the pass level. Three families:
 //!
 //! * **Lattice values** — sin/cos/tan/cot/sec/csc at rational multiples of π on
 //!   the π/12 lattice, via the tested tables in [`crate::eval_exact`]

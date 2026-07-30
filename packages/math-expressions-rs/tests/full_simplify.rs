@@ -138,6 +138,50 @@ fn simplify_with_no_assumptions_equals_simplify() {
     }
 }
 
+/// The confluence question the assumptions/aggressive merge raises: the
+/// assumption-aware rules (`sqrt(x²) → x`, `|u| → −u`) and the special-value /
+/// rational passes now run in the *same* fixpoint loop, so a pair that fought —
+/// one producing a shape the other rewrote back — would oscillate, and the
+/// round cap would hide it as a silent early exit on whatever the last round
+/// happened to produce.
+///
+/// Idempotence is the observable consequence: had the loop exited on the cap
+/// mid-oscillation, feeding the output back in would move it again. Swept over
+/// the whole simplify corpus × every assumption context in the assumptions
+/// corpus (6534 pairs) with no counterexample, and separately confirmed that
+/// raising `max_simplify_rounds` to 200 changes no result; the cases pinned
+/// here are the shapes where the two rule families actually overlap.
+#[test]
+fn assumption_rules_and_aggressive_passes_reach_a_joint_fixpoint() {
+    for astr in ["x > 0", "x < 0", "x >= 0", "x <= 0", "x elementof R"] {
+        let mut a = Assumptions::new();
+        a.add(&p(astr));
+        for s in [
+            "sqrt(x^2)",
+            "abs(x)",
+            "abs(sqrt(x^2))",
+            "sqrt(x^4)",
+            "sqrt(abs(x)^2)",
+            "sqrt((x^2)^2)",
+            "abs(x)/x",
+            "sqrt(x^6)/x^3",
+            "exp(ln(sqrt(x^2)))",
+            "ln(exp(abs(x)))",
+            "sqrt(sin(x)^2)",
+            "abs(sin(pi))",
+            "sqrt(cos(pi/3)^2)",
+            "(sqrt(x^2))/(abs(x))",
+        ] {
+            let once = simplify_with(&p(s), &a);
+            let twice = simplify_with(&once, &a);
+            assert_eq!(
+                once, twice,
+                "simplify_with not idempotent on {s:?} under {astr:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn simplify_with_assumptions_keeps_the_aggressive_folds() {
     // The assumption-aware rules layer *on top of* the aggressive passes rather

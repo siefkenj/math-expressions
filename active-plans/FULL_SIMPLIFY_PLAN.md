@@ -6,7 +6,8 @@
 >
 > **S1 — exact eval + `is_zero`** (`src/eval_exact/`, `tests/exact_is_zero.rs`):
 > exact-constant evaluator over ℚ(π, e, surds) + certified
-> `is_zero(e, &Assumptions) -> Tri`. `max_exact_eval_ops` (10 000) added to
+> `is_zero(e, &Assumptions) -> MaybeBool` (the alias this document's body still
+> calls `Tri`). `max_exact_eval_ops` (10 000) added to
 > `ResourceLimits`. Consequence wired: the `integrate` I2 gate accepts iff
 > sampled `equals` OR the certified exact stages confirm `F'−f ≡ 0`
 > (`eval_exact::certified_zero`, the accept-only pipeline without the sampling

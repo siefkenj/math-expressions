@@ -51,7 +51,7 @@ contract; keep worst-case cost bounded by the existing resource limits.
 ### Lever 1 — symbolic-antiderivative fast path (biggest win, cheapest) — PHASE 1
 
 Before quadrature, try the crate's own symbolic `integrate(f, var)`
-(INTEGRATION_PLAN I1–I2, already shipped). If it yields an elementary
+(`INTEGRATION_PLAN` I1–I2, already shipped). If it yields an elementary
 antiderivative `F`, the definite integral is `F(b) − F(a)`, evaluated with the
 **existing arbitrary-precision** `eval_tape` / `evaluate_to_precision` (Tier-2
 `MpFix`, Ziv-escalated). That is _exact to any requested digits_ — it bypasses

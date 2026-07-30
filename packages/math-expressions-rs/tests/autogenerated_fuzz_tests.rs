@@ -17,6 +17,8 @@
 //! These agree fully today (zero divergences), so any failure is a real
 //! regression to investigate, not an expected-divergence snapshot to bump.
 
+mod common;
+
 use math_expressions::{equals, expr, EqOptions, Expr, TextToAst, TextToAstOptions};
 use serde_json::Value;
 use std::time::{Duration, Instant};
@@ -26,7 +28,7 @@ fn parse(s: &str) -> Option<Expr> {
 }
 
 fn catch<T>(f: impl FnOnce() -> T) -> Option<T> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok()
+    common::caught(f)
 }
 
 #[derive(serde::Deserialize)]
@@ -64,7 +66,6 @@ fn corpus() -> Corpus {
 
 #[test]
 fn parse_matches_js() {
-    std::panic::set_hook(Box::new(|_| {}));
     let mut diffs = Vec::new();
     for c in &corpus().parse {
         let got = catch(|| parse(&c.input).map(|e| expr::serde::to_js(&e))).flatten();
@@ -82,7 +83,6 @@ fn parse_matches_js() {
 
 #[test]
 fn equals_matches_js() {
-    std::panic::set_hook(Box::new(|_| {}));
     let opts = EqOptions::default();
     let mut diffs = Vec::new();
     for c in &corpus().equals {

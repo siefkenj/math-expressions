@@ -5,6 +5,8 @@
 //!   node scripts/generate-evaluate-corpus.mjs
 //!   UPDATE_KNOWN_FAILURES=1 cargo test --test evaluate_corpus
 
+mod common;
+
 use math_expressions::{evaluate, evaluate_to_constant, Expr, TextToAst, TextToAstOptions};
 use num_complex::Complex64;
 use std::collections::{BTreeSet, HashMap};
@@ -14,7 +16,7 @@ fn parse(s: &str) -> Option<Expr> {
 }
 
 fn catch<T>(f: impl FnOnce() -> T) -> Option<T> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok()
+    common::caught(f)
 }
 
 #[derive(serde::Deserialize)]
@@ -67,7 +69,6 @@ fn collect_failures() -> BTreeSet<String> {
 
 #[test]
 fn evaluate_corpus_no_regressions() {
-    std::panic::set_hook(Box::new(|_| {}));
     let failures = collect_failures();
     if std::env::var("UPDATE_KNOWN_FAILURES").is_ok() {
         let list: Vec<&String> = failures.iter().collect();
@@ -94,7 +95,6 @@ fn evaluate_corpus_no_regressions() {
 
 #[test]
 fn evaluate_corpus_pass_rate() {
-    std::panic::set_hook(Box::new(|_| {}));
     let total = serde_json::from_str::<Vec<Case>>(CORPUS).unwrap().len() * 2;
     let failures = collect_failures().len();
     eprintln!(

@@ -8,6 +8,8 @@
 //! against regression and shrink over time. Regenerate the snapshot:
 //!   UPDATE_KNOWN_FAILURES=1 cargo test --test derivative_corpus
 
+mod common;
+
 use math_expressions::{derivative, equals, expr, EqOptions, Expr, TextToAst, TextToAstOptions};
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -17,7 +19,7 @@ fn parse(s: &str) -> Option<Expr> {
 }
 
 fn catch<T>(f: impl FnOnce() -> T) -> Option<T> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok()
+    common::caught(f)
 }
 
 #[derive(serde::Deserialize)]
@@ -51,7 +53,6 @@ fn collect_failures() -> BTreeSet<String> {
 
 #[test]
 fn derivative_corpus_no_regressions() {
-    std::panic::set_hook(Box::new(|_| {}));
     let failures = collect_failures();
 
     if std::env::var("UPDATE_KNOWN_FAILURES").is_ok() {
@@ -91,7 +92,6 @@ fn derivative_corpus_no_regressions() {
 
 #[test]
 fn derivative_corpus_pass_rate() {
-    std::panic::set_hook(Box::new(|_| {}));
     let total = serde_json::from_str::<Vec<Case>>(CORPUS).unwrap().len();
     let failures = collect_failures().len();
     eprintln!(
