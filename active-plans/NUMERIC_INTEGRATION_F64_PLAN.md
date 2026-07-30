@@ -126,8 +126,8 @@ f⁗ remainder. Any replacement must carry an equally rigorous certified bound.
   (Lever 2).
 - `src/eval_numeric/certified_digits/pipeline.rs` — reuse `eval_tape` at a fixed working precision for
   nodes (Lever 2).
-- `src/integrate/…` + `src/diff` — reused read-only by Lever 1 (symbolic
-  antiderivative), not modified.
+- `src/calculus/integrate/…` + `src/calculus/diff.rs` — reused read-only by
+  Lever 1 (symbolic antiderivative), not modified.
 - `packages/math-expressions-rs-wasm/src-rust/calculus.rs` — once Phase 1/2
   land, `integrate_numerically` can request full f64 (drop the 10-digit hedge);
   optionally expose the raised `integrate_to_precision` cap.

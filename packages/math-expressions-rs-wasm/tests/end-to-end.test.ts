@@ -49,6 +49,33 @@ describe("algebra", () => {
   test("evaluate_numbers", () => {
     expect(P("4+x-2").evaluate_numbers().equals(P("x+2"))).toBe(true);
   });
+  // `simplify()` is the aggressive simplifier (FULL_SIMPLIFY_PLAN), not the
+  // JS-tree-compatible base pass. Asserting on `tree_json` rather than
+  // `equals()`: `equals` is true for the unsimplified input too, so it cannot
+  // tell whether the reduction actually happened across the boundary.
+  test("simplify is the aggressive simplifier", () => {
+    expect(P("exp(log(x))").simplify().tree_json()).toBe('"x"');
+    expect(P("cos(pi/3)").simplify().tree_json()).toBe("0.5");
+    expect(P("(x^2-1)/(x-1)").simplify().tree_json()).toBe('["+","x",1]');
+    // The `simplify-known-failures.json` row: correct, but `equals` samples
+    // sin(pi) as ~1e-16 and so cannot confirm it.
+    expect(P("sin(pi)x").simplify().tree_json()).toBe("0");
+  });
+  // There is deliberately no `full_simplify` binding — it would be a synonym
+  // for `simplify`. Guard against one being re-added by accident.
+  test("no separate full_simplify binding", () => {
+    expect(
+      (P("x") as unknown as Record<string, unknown>).full_simplify,
+    ).toBeUndefined();
+  });
+  // Empty assumptions must route through the same aggressive pipeline as
+  // `simplify()` — adding an assumption must not make the simplifier weaker.
+  test("simplify_with_assumptions([]) == simplify()", () => {
+    for (const s of ["exp(log(x))", "cos(pi/3)", "(x^2-1)/(x-1)", "sin(pi)x"])
+      expect(P(s).simplify_with_assumptions([]).tree_json()).toBe(
+        P(s).simplify().tree_json(),
+      );
+  });
 });
 
 describe("calculus", () => {
@@ -71,6 +98,24 @@ describe("calculus", () => {
     const s = P("4/(1+x^2)").integrate_to_precision("x", P("0"), P("1"), 10);
     expect(typeof s).toBe("string");
     expect((s as string).replace(/[^0-9]/g, "")).toMatch(/^31415926/);
+  });
+  // `integrate_numerically` returns Rust's `Option<f64>`; the point of testing
+  // it here rather than only in the crate's unit tests is that only the wasm
+  // boundary shows whether `None` really arrives as `undefined` (and not as 0,
+  // NaN or a thrown error) — which is what the js-compat `integrateNumerically`
+  // shim maps to `NaN`.
+  test("integrate_numerically returns a certified f64", () => {
+    expect(P("x^3").integrate_numerically("x", 0, 1)).toBeCloseTo(0.25, 12);
+    expect(P("sin(x)").integrate_numerically("x", 0, Math.PI)).toBeCloseTo(2, 9);
+    // Reversed limits negate; a degenerate interval is 0.
+    expect(P("x^3").integrate_numerically("x", 1, 0)).toBeCloseTo(-0.25, 12);
+    expect(P("sin(x)").integrate_numerically("x", 1, 1)).toBe(0);
+  });
+  test("integrate_numerically is undefined, not wrong, when uncertifiable", () => {
+    // Non-integrable singularity inside the interval.
+    expect(P("1/x").integrate_numerically("x", -1, 1)).toBeUndefined();
+    // Not a function of the integration variable alone.
+    expect(P("x*y").integrate_numerically("x", 0, 1)).toBeUndefined();
   });
 });
 

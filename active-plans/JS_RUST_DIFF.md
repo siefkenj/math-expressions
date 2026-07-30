@@ -264,7 +264,12 @@ an internal tree-vs-Expression split Rust doesn't need.)
 - **`EqOptions`** has the same nine JS options with identical defaults, **plus
   two Rust-only fields**: `num_samples` (JS hardcodes internally) and `real_only`
   (JS exposes this as the separate `equalsViaReal`, not an option). WASM option
-  keys are camelCase.
+  keys are camelCase. Note that JS `equalsViaReal` is **present on the prototype
+  but non-functional** in the published `math-expressions@2.0.0-alpha94` build:
+  calling it throws `ReferenceError: seedrandom is not defined` (the bundler
+  renamed the module binding but not the call site). Rust `equals_via_real` is
+  therefore the only working implementation of that comparison; the playground
+  surfaces both and shows the JS side's exception verbatim.
 - **Assumptions are an explicit parameter in Rust** (`simplify_with` /
   `simplify_with_assumptions`), whereas JS reads them from the expression's
   `context`. Notably, **Rust `equals` has no assumptions parameter** while JS

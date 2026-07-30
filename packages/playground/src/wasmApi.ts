@@ -263,9 +263,9 @@ function opFromMethod(
 
   // The wasm method is always called under its own (snake_case) name. The JS
   // side may expose the same operation under a differently-cased spelling
-  // (`integrate_numerically` → `integrateNumerically`); when it does, we surface
-  // the op under the JS-provided name — that is the one users of the JS library
-  // know — and dispatch each engine to its own spelling.
+  // (`equals_via_real` → `equalsViaReal`); when it does, we surface the op under
+  // the JS-provided name — that is the one users of the JS library know — and
+  // dispatch each engine to its own spelling.
   const jsName = jsNameFor(m.name);
   const id = jsName ?? m.name;
   const argSig = args.map((s) => s.name).join(", ");
@@ -315,9 +315,14 @@ export interface DynamicOpsReport {
  * method the running wasm lacks can never produce a dead palette button.
  * `jsNameFor` maps a wasm (snake_case) method to the canonical JS `Expression`
  * method that is the same operation — an exact match, or one differing only by
- * case/separator folding (`integrate_numerically` → `integrateNumerically`).
- * When it resolves, the op is surfaced under the JS-provided name and both
- * engines light up; when it returns null, the op is rust-only.
+ * case/separator folding (`equals_via_real` → `equalsViaReal`). When it
+ * resolves, the op is surfaced under the JS-provided name and both engines light
+ * up; when it returns null, the op is rust-only.
+ *
+ * Note that a wasm method the *curated* registry already dispatches (listed in
+ * `CURATED_RUST_METHODS`) never reaches the folding — `integrate_numerically`,
+ * `is_analytic` and `to_latex` are all curated, so as of today `equals_via_real`
+ * is the only method the fold actually resolves.
  */
 export function buildDynamicOpsReport(
   dts: string,
@@ -340,7 +345,8 @@ export function buildDynamicOpsReport(
       skipped.push({ name: m.name, reason: `signature "(${m.params.map((p) => p.type).join(", ")}) => ${m.ret}" is not chainable in the playground` });
       continue;
     }
-    // A curated op may already own the JS-provided name (e.g. `integrateNumerically`).
+    // Second dedup pass: line above rejected the *wasm* name, but folding may
+    // have re-keyed the op onto a JS name a curated entry already owns.
     if (REGISTRY_BY_ID.has(op.id)) continue;
     ops.push(op);
   }
@@ -376,7 +382,7 @@ export function collectMethodNames(handle: object): Set<string> {
 }
 
 /** Fold an identifier to case/separator-insensitive form for matching
- * `integrate_numerically` ↔ `integrateNumerically`. */
+ * `equals_via_real` ↔ `equalsViaReal`. */
 function normalizeId(s: string): string {
   return s.replace(/_/g, "").toLowerCase();
 }
