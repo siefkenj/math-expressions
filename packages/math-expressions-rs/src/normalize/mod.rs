@@ -43,7 +43,7 @@ pub use special_values::fold_special_values;
 pub use syntactic::normalize_syntactic;
 
 pub use canonicalize::canonicalize;
-pub use full::full_simplify;
+pub(crate) use full::full_simplify;
 pub use units::desugar_units;
 pub(crate) use constructors::{add, mul, pow, split_coeff};
 pub(crate) use units::unit_body;

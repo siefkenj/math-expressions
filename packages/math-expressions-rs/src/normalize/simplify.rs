@@ -33,7 +33,7 @@ use super::{add, canonicalize, mul, split_coeff};
 /// exponents, explicit `Neg`.
 ///
 /// This is the **aggressive** simplifier — it is exactly
-/// [`full_simplify`](crate::normalize::full_simplify) with no assumptions: the base
+/// `full_simplify` with no assumptions: the base
 /// canonical simplify plus the sound special-value (`exp(ln x) → x`, trig at
 /// the π/12 lattice, `ln 1`, …) and rational-cancellation passes, iterated to a
 /// fixpoint. (Previously `simplify` was the base only, kept byte-compatible
@@ -48,7 +48,7 @@ pub fn simplify(e: &Expr) -> Expr {
 /// The base canonical simplify in display form — `simplify`'s
 /// pre-`full_simplify` behavior (JS-corpus compatible: no `exp(ln x) → x` etc.)
 /// under the given assumptions. Used by
-/// [`full_simplify`](crate::normalize::full_simplify) as its per-round base, so the
+/// `full_simplify` as its per-round base, so the
 /// fixpoint driver does not recurse into the now-aggressive public
 /// [`simplify`] / [`simplify_with`].
 pub(crate) fn simplify_base_with(e: &Expr, assumptions: &Assumptions) -> Expr {
@@ -107,7 +107,7 @@ fn push_not(e: &Expr) -> Expr {
 /// This is [`simplify_base_with`] minus `present`, *not* the public (now
 /// aggressive) [`simplify`] minus `present` — the special-value and
 /// rational-cancellation passes are not run. Callers that want those want
-/// [`full_simplify`](crate::normalize::full_simplify).
+/// `full_simplify`.
 pub(crate) fn simplify_core(e: &Expr) -> Expr {
     simplify_core_with(e, &Assumptions::new())
 }

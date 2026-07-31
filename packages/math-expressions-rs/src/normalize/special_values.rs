@@ -4,7 +4,7 @@
 //! bottom-up to a fixpoint. It is a pass in its own right, *not* one of the
 //! base rewrite clusters in [`simplify`](super::simplify): the base rounds
 //! never run it, and the public `simplify` reaches it only through the
-//! [`full_simplify`](crate::normalize::full_simplify) fixpoint driver.
+//! `full_simplify` fixpoint driver.
 //!
 //! The dependency on [`crate::eval_exact`] runs one way — this pass *reads*
 //! that module's constant tower and trig tables, and nothing in `eval_exact`
