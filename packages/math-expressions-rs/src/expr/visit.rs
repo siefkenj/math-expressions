@@ -17,6 +17,7 @@ impl Expr {
             Expr::Num(_)
             | Expr::Sym(_)
             | Expr::Const(_)
+            | Expr::Bool(_)
             | Expr::RootOf { .. }
             | Expr::Blank
             | Expr::Ldots => vec![],
@@ -135,6 +136,7 @@ pub fn flatten(expr: Expr) -> Expr {
         leaf @ (Expr::Num(_)
         | Expr::Sym(_)
         | Expr::Const(_)
+        | Expr::Bool(_)
         | Expr::RootOf { .. }
         | Expr::Blank
         | Expr::Ldots) => leaf,
@@ -151,6 +153,7 @@ pub(crate) fn map_children<F: FnMut(&Expr) -> Expr>(e: &Expr, mut f: F) -> Expr 
         Expr::Num(_)
         | Expr::Sym(_)
         | Expr::Const(_)
+        | Expr::Bool(_)
         | Expr::RootOf { .. }
         | Expr::Blank
         | Expr::Ldots => e.clone(),

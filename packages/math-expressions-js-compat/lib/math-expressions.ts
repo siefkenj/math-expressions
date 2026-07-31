@@ -8,7 +8,9 @@ import wasm from "./_wasm";
 import math from "./mathjs";
 import { match, flatten, unflattenLeft, unflattenRight } from "./trees/flatten";
 import * as converters from "./converters/index";
+import { compileRustExpr } from "math-expressions-rs-wasm";
 import type { WasmExpression } from "math-expressions-rs-wasm";
+import type { MathJsInstance } from "mathjs";
 
 /** The JS AST tree encoding (`["+", 1, "x", 3]`). */
 export type Tree = number | string | boolean | Tree[];
@@ -58,6 +60,16 @@ function toExpr(x: ExpressionLike, context?: Ctx): Expression {
   }
   if (typeof x === "string") return ctx.fromText(x);
   return ctx.fromAst(x as Tree); // number or AST array
+}
+
+/**
+ * A component index is either a bare index or a path of them — `get_component(2)`
+ * and `get_component([2, 1, 2])` are both legal, the first being the one-element
+ * path. Indices count operands of the tree spelling, 0-based.
+ */
+function componentPath(component: number | number[]): Uint32Array {
+  const path = Array.isArray(component) ? component : [component];
+  return Uint32Array.from(path, (i) => Number(i));
 }
 
 /** A variable argument may be a string name or an Expression of a symbol. */
@@ -230,6 +242,31 @@ class Expression {
     return wrap(this._w.copy(), this.context);
   }
 
+  // ---- component access ----
+  // `component` is an operand index into the tree spelling, or a path of them
+  // for nested components. A matrix is `["matrix", ["tuple", rows, cols],
+  // ["tuple", <row-tuples>]]`, so an entry of one is `[1, row, col]`.
+  get_component(component) {
+    return wrap(this._w.get_component(componentPath(component)), this.context);
+  }
+  substitute_component(component, value) {
+    return wrap(
+      this._w.substitute_component(componentPath(component), toExpr(value, this.context)._w),
+      this.context,
+    );
+  }
+
+  // ---- numeric evaluator ----
+  // The plotting / root-finding entry point: compile once through math.js, then
+  // evaluate per sample. `compileRustExpr` normalizes function names Rust-side
+  // and frees its own temporary handle; `this._w` is untouched.
+  f() {
+    // `./mathjs` re-exports either a created instance or the namespace itself,
+    // so its static type is a union; the runtime value is always an instance.
+    const compiled = compileRustExpr(math as MathJsInstance, this._w);
+    return (bindings = {}) => compiled.evaluate(bindings);
+  }
+
   // ---- units ----
   remove_units(scaleBasedOnUnit) {
     return wrap(this._w.remove_units(!!scaleBasedOnUnit), this.context);
@@ -359,10 +396,7 @@ for (const name of [
   "toXML",
   "toGLSL",
   "toMathjs",
-  "f",
   "solve_linear",
-  "substitute_component",
-  "get_component",
   "create_discrete_infinite_set",
   "expression_to_polynomial",
   "finite_field_evaluate",
@@ -475,6 +509,25 @@ const Context = {
     return this._assumptionsHandle;
   },
 };
+
+// The legacy library exposed every `Expression` method a second time as a free
+// function on the context, expression-first: `me.simplify(expr)` alongside
+// `expr.simplify()`. Mirror the prototype onto `Context` once both exist.
+//
+// Anything already reachable on `Context` wins, so the factories (`from`,
+// `fromAst`, `match`, …) are never shadowed — and neither are the inherited
+// `Object.prototype` members, which is why `toString`/`valueOf` stay put rather
+// than becoming expression-first functions that would break `String(me)`.
+//
+// Coercion goes through `toExpr`, not `Context.from`: the argument is usually
+// an `Expression` already, and `from` would try to read that as an AST.
+for (const name of Object.getOwnPropertyNames(Expression.prototype)) {
+  if (name === "constructor" || name in Context) continue;
+  const desc = Object.getOwnPropertyDescriptor(Expression.prototype, name);
+  if (typeof desc?.value !== "function") continue; // skip accessors such as `tree`
+  (Context as Record<string, unknown>)[name] = (expr: ExpressionLike, ...args: unknown[]) =>
+    (toExpr(expr) as unknown as Record<string, (...a: unknown[]) => unknown>)[name](...args);
+}
 
 export { Expression };
 export default Context;

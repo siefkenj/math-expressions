@@ -22,6 +22,24 @@ pub enum Expr {
     Num(Number),
     Sym(Sym),
     Const(MathConst),
+    /// A boolean literal — `["and", true, false]` in the JS AST.
+    ///
+    /// Deliberately *not* a [`MathConst`]: every other `MathConst` serializes
+    /// to a JSON string (`"pi"`) or a tagged object, whereas a boolean must
+    /// serialize to a JSON boolean or it comes back as the symbol `"true"`.
+    /// It is also not a mathematical constant.
+    ///
+    /// No parser produces this — there is no text or LaTeX spelling for a
+    /// boolean literal — so it only ever enters a tree through
+    /// [`serde::try_from_js`](super::serde::try_from_js) or by hand. The
+    /// printers spell it `true`/`false`, which reads back as a symbol; that
+    /// asymmetry is accepted, since the AST round-trip is the one DoenetML
+    /// relies on.
+    ///
+    /// Interval closures and chained-inequality strictness are *not* booleans
+    /// here — they are metadata on [`Expr::Interval`] / [`Expr::Relation`],
+    /// which is what keeps their invariants structural. See `ops::components`.
+    Bool(bool),
     /// The `index`-th root of the univariate polynomial with the given dense
     /// coefficients (low → high). A *leaf*: the
     /// coefficients are `Number`s, not subexpressions, so traversal and

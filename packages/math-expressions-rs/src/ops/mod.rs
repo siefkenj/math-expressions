@@ -1,8 +1,9 @@
 //! Expression utilities: small, self-contained ports of the corresponding
 //! `me.*` methods, grouped by concern.
 //!
+//! - [`components`] — component paths into the JS tree operand lists
 //! - [`numbers`] — numeric folding and display rounding
-//! - [`query`] — inspection (functions / operators / variables) and component access
+//! - [`query`] — inspection (functions / operators / variables)
 //! - [`transforms`] — structural rewrites (substitute, subscripts, intervals, …)
 //! - [`units`] — unit annotation stripping / adding
 //! - [`analytic`] — the `isAnalytic` predicate
@@ -10,6 +11,7 @@
 //! - [`pm`] — the plus-minus (`±`) operator helpers
 
 mod analytic;
+mod components;
 mod evaluate;
 mod numbers;
 pub mod pm;
@@ -18,12 +20,13 @@ mod transforms;
 mod units;
 
 pub use analytic::{is_analytic, AnalyticOpts};
+pub use components::{get_component, substitute_component};
 pub use evaluate::{evaluate, evaluate_to_constant};
 pub use numbers::{
     constants_to_floats, evaluate_numbers, reduce_rational, round_numbers_to_decimals,
     round_numbers_to_precision, round_numbers_to_precision_plus_decimals, set_small_zero,
 };
-pub use query::{functions, get_component, operators, substitute_component, variables};
+pub use query::{functions, operators, variables};
 pub use transforms::{
     altvectors_to_vectors, normalize_function_names, strings_to_subscripts, subscripts_to_strings,
     substitute, to_intervals, tuples_to_vectors,

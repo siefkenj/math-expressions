@@ -78,6 +78,10 @@ export interface WasmExpression {
   evaluate(vars: string[], values: Float64Array): number | undefined;
   substitute_var(variable: string, value: WasmExpression): WasmExpression;
 
+  /** Operand path into the tree spelling, 0-based; `undefined` if out of range. */
+  get_component(path: Uint32Array): WasmExpression | undefined;
+  substitute_component(path: Uint32Array, value: WasmExpression): WasmExpression | undefined;
+
   add(other: WasmExpression): WasmExpression;
   subtract(other: WasmExpression): WasmExpression;
   multiply(other: WasmExpression): WasmExpression;

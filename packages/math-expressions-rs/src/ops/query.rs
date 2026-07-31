@@ -1,5 +1,6 @@
 //! Read-only inspection of an expression: the applied function names, operator
-//! heads, and free variables it contains, plus sequence-component access.
+//! heads, and free variables it contains. Component access lives next door in
+//! [`components`](super::components).
 
 use crate::expr::Expr;
 use std::collections::HashSet;
@@ -69,28 +70,6 @@ pub fn operators(e: &Expr) -> Vec<String> {
     out
 }
 
-/// The `i`-th (0-based) component of a tuple/vector/list, port of
-/// `me.get_component`. `None` for non-sequences or out-of-range.
-pub fn get_component(e: &Expr, i: usize) -> Option<Expr> {
-    match e {
-        Expr::Seq(_, xs) => xs.get(i).cloned(),
-        _ => None,
-    }
-}
-
-/// Replace the `i`-th component of a sequence, port of
-/// `me.substitute_component`. `None` for non-sequences or out-of-range.
-pub fn substitute_component(e: &Expr, i: usize, value: &Expr) -> Option<Expr> {
-    match e {
-        Expr::Seq(k, xs) if i < xs.len() => {
-            let mut xs = xs.clone();
-            xs[i] = value.clone();
-            Some(Expr::Seq(*k, xs))
-        }
-        _ => None,
-    }
-}
-
 /// The free variable names of `e`, in first-appearance order, de-duplicated.
 /// Matches `me.variables`: the constant symbols `pi`/`e`/`i` ARE included (they
 /// are ordinary symbols here), but a function-application head (`sin` in
@@ -110,7 +89,12 @@ fn collect(e: &Expr, out: &mut Vec<String>, seen: &mut HashSet<String>) {
                 out.push(name);
             }
         }
-        Expr::Num(_) | Expr::Const(_) | Expr::RootOf { .. } | Expr::Blank | Expr::Ldots => {}
+        Expr::Num(_)
+        | Expr::Const(_)
+        | Expr::Bool(_)
+        | Expr::RootOf { .. }
+        | Expr::Blank
+        | Expr::Ldots => {}
 
         // An application head is never a variable source — JS drops the head
         // wholesale (`tree.slice(2)` in lib/expression/variables.js), even a

@@ -70,6 +70,9 @@ impl Writer<'_> {
                 self.render_const(*c),
                 if *c == MathConst::NegInf { NEG } else { ATOM },
             ),
+            // Display only — see the text printer; no LaTeX spelling parses
+            // back to a boolean.
+            Expr::Bool(b) => (format!("\\operatorname{{{b}}}"), ATOM),
             Expr::Blank => ("\u{ff3f}".to_string(), ATOM),
             Expr::Ldots => ("\\ldots".to_string(), ATOM),
 

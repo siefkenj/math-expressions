@@ -172,7 +172,12 @@ pub fn free_symbols(e: &Expr, out: &mut std::collections::BTreeSet<String>) {
                 out.insert(name);
             }
         }
-        Expr::Num(_) | Expr::Const(_) | Expr::RootOf { .. } | Expr::Blank | Expr::Ldots => {}
+        Expr::Num(_)
+        | Expr::Const(_)
+        | Expr::Bool(_)
+        | Expr::RootOf { .. }
+        | Expr::Blank
+        | Expr::Ldots => {}
         Expr::Neg(x) | Expr::Not(x) => free_symbols(x, out),
         Expr::Pow(a, b) | Expr::Div(a, b) => {
             free_symbols(a, out);

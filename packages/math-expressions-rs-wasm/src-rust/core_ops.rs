@@ -11,6 +11,12 @@ use math_expressions::{
 };
 use wasm_bindgen::prelude::*;
 
+/// A component path from JS. Indices arrive as `u32` because that is what
+/// `wasm_bindgen` marshals a JS number array into; the core takes `usize`.
+fn to_path(path: Vec<u32>) -> Vec<usize> {
+    path.into_iter().map(|i| i as usize).collect()
+}
+
 #[wasm_bindgen]
 impl Expression {
     /// Render back to text syntax — in the notation this expression was
@@ -229,6 +235,25 @@ impl Expression {
     /// The applied function names, first-appearance order.
     pub fn functions(&self) -> Vec<String> {
         ops::functions(&self.0)
+    }
+
+    // ---- component access (JS `get_component` / `substitute_component`) ----
+
+    /// The component at a 0-based `path` into the operand lists of the JS tree
+    /// (`tree_json`) — component `i` of `["tuple", a, b, c]` is `tree[i + 1]`.
+    /// A path of more than one index walks into nested components, so a matrix
+    /// entry is `[1, row, col]` (its component 0 is the dimension pair).
+    /// `undefined` when a step is out of range, or lands on a leaf or on one of
+    /// the shapes whose JS spelling carries boolean flags (`interval`, mixed
+    /// relation chains), which have no component list.
+    pub fn get_component(&self, path: Vec<u32>) -> Option<Expression> {
+        ops::get_component(&self.0, &to_path(path)).map(|e| self.derive(e))
+    }
+
+    /// The expression with the component at `path` replaced by `value`.
+    /// `undefined` under the same conditions as `get_component`.
+    pub fn substitute_component(&self, path: Vec<u32>, value: &Expression) -> Option<Expression> {
+        ops::substitute_component(&self.0, &to_path(path), &value.0).map(|e| self.derive(e))
     }
 
     // ---- arithmetic builders (JS `add`/`subtract`/`multiply`/`divide`/`pow`) ----

@@ -33,6 +33,7 @@ pub fn try_from_js(value: &Value) -> Result<Expr, String> {
                 )))
             }
         }
+        Value::Bool(b) => Ok(Expr::Bool(*b)),
         Value::String(s) => Ok(Expr::sym(s)),
         Value::Object(_) => match value.get("$").and_then(Value::as_str) {
             Some("Inf") => Ok(Expr::Const(MathConst::Inf)),
@@ -231,6 +232,7 @@ fn to_js_rec(expr: &Expr) -> Value {
         // re-canonicalizes that back into the leaf.
         Expr::RootOf { poly, index } => to_js_rec(&crate::polynomials::rootof::as_apply(poly, *index)),
         Expr::Sym(s) => Value::String(s.name()),
+        Expr::Bool(b) => Value::Bool(*b),
         Expr::Blank => Value::String("\u{ff3f}".to_string()),
         Expr::Ldots => json!(["ldots"]),
         Expr::Const(c) => match c {
@@ -312,11 +314,47 @@ fn op(name: &str, args: &[Expr]) -> Value {
 fn number_to_js(n: &Number) -> Value {
     match n {
         Number::Int(i) => json!(i),
-        // Exact rationals (§3a) and Big numbers project to the nearest f64 —
-        // what the JS trees actually hold — so the tree fixtures and the
-        // differential harness stay meaningful.
-        Number::Float(_) | Number::Rat(..) | Number::Big(_) => f64_to_js(n.to_f64()),
+        Number::Float(_) => f64_to_js(n.to_f64()),
+        // Exact rationals split on whether their decimal expansion terminates.
+        //
+        // A *terminating* one (denominator 2^a·5^b) keeps its positional
+        // spelling, because it is indistinguishable from a decimal literal:
+        // user-typed decimals parse to exact rationals, so `0.5` and `1/2` are
+        // the same `Number::Rat(1, 2)`. Emitting `["/", …]` here would turn
+        // `19.9` into `["/", 199, 10]` — the fraction/decimal distinction is
+        // already gone by this point and cannot be recovered at the boundary.
+        //
+        // A *non*-terminating one (`1/3`, `5/6`) has no such ambiguity: it can
+        // never have come from a decimal literal, and the f64 projection loses
+        // it irreversibly (`0.3333333333333333` does not come back). The JS
+        // trees spell these `["/", 1, 3]`, so this is also the faithful shape.
+        Number::Rat(..) | Number::Big(_) => match exact_ratio(n) {
+            Some((num, den)) => json!(["/", num, den]),
+            None => f64_to_js(n.to_f64()),
+        },
     }
+}
+
+/// The largest integer a JS number holds exactly (2^53 − 1). Past it a
+/// `["/", num, den]` pair is no more recoverable on the JS side than the f64
+/// projection is, so there is nothing to gain by emitting it.
+const JS_MAX_SAFE_INT: u64 = 9_007_199_254_740_991;
+
+/// Numerator/denominator for a rational that must *not* be decimalized.
+/// `None` when the value terminates as a decimal (it keeps the positional
+/// spelling) or when the parts exceed JS's exact-integer range.
+///
+/// The `Rat` normal form puts the sign on the numerator with `den > 0`, so
+/// negatives come out as `["/", -2, 3]` — the spelling the JS fixtures use.
+fn exact_ratio(n: &Number) -> Option<(i64, i64)> {
+    if n.terminating_decimal().is_some() {
+        return None;
+    }
+    let (num, den) = n.rational_parts()?;
+    let num: i64 = num.parse().ok()?;
+    let den: i64 = den.parse().ok()?;
+    (num.unsigned_abs() <= JS_MAX_SAFE_INT && den.unsigned_abs() <= JS_MAX_SAFE_INT)
+        .then_some((num, den))
 }
 
 /// Serialise an f64 the way a JS `Tree` holds a number: integral values as
@@ -388,5 +426,103 @@ mod tests {
             // to_js is the inverse for this shape.
             assert_eq!(to_js_rec(&expr), tree);
         }
+    }
+
+    /// A rational whose decimal expansion does not terminate crosses to JS as
+    /// `["/", num, den]`, not as a truncated f64. `1/3` used to go out as
+    /// `0.3333333333333333`, which nothing on the JS side can turn back into a
+    /// third — an irreversible loss on every state save/load, not merely a
+    /// display defect.
+    #[test]
+    fn non_terminating_rationals_cross_as_exact_fractions() {
+        for (num, den) in [(1, 3), (5, 6), (-2, 3), (-1, 7), (22, 7)] {
+            let n = Number::rat(num, den);
+            assert_eq!(
+                number_to_js(&n),
+                json!(["/", num, den]),
+                "{num}/{den} must not decimalize"
+            );
+        }
+    }
+
+    /// The other half of the same rule, and the reason the naive "emit every
+    /// `Rat` as a fraction" version is wrong: user-typed decimals parse to
+    /// exact rationals, so `19.9` *is* `Rat(199, 10)`. Terminating rationals
+    /// keep the positional spelling the JS trees use, or `19.9` would go out as
+    /// `["/", 199, 10]`.
+    #[test]
+    fn terminating_rationals_keep_their_decimal_spelling() {
+        for (num, den, expected) in [(1, 2, 0.5), (199, 10, 19.9), (-3, 4, -0.75)] {
+            assert_eq!(
+                number_to_js(&Number::rat(num, den)),
+                json!(expected),
+                "{num}/{den} must stay positional"
+            );
+        }
+    }
+
+    /// Past JS's exact-integer range a fraction is no more recoverable than the
+    /// f64 projection, so there is nothing to gain by emitting one — and the
+    /// pair must not be silently truncated into a *wrong* fraction.
+    #[test]
+    fn out_of_range_rationals_fall_back_to_the_float_projection() {
+        use num_bigint::BigInt;
+        use num_rational::BigRational;
+        let huge = BigRational::new(BigInt::from(1), BigInt::from(3u8).pow(60));
+        let n = Number::from_bigrational(huge);
+        assert!(
+            number_to_js(&n).is_f64(),
+            "an out-of-range denominator should project to a float"
+        );
+    }
+
+    /// `Tree = number | string | boolean | Tree[]`, so a boolean leaf is a
+    /// legal tree. It used to fall through to `Err("unexpected value …")`,
+    /// making `["and", true, false]` unconstructible — the whole boolean
+    /// algebra existed (`And`/`Or`/`Not`) with no values to put in it.
+    #[test]
+    fn boolean_leaves_round_trip_through_the_js_tree() {
+        for tree in [
+            json!(true),
+            json!(false),
+            json!(["and", true, false]),
+            json!(["not", true]),
+            json!(["or", ["and", true, "x"], false]),
+        ] {
+            let expr = try_from_js(&tree).expect("a boolean leaf is a legal tree");
+            assert_eq!(to_js_rec(&expr), tree, "round trip of {tree}");
+        }
+    }
+
+    /// The distinction the whole variant exists for: a boolean must come back
+    /// as a JSON boolean, not as the *string* `"true"`. Mapping booleans onto
+    /// symbols (or onto `MathConst`, whose members all serialize to strings)
+    /// would type-check and still lose the type on every round trip.
+    #[test]
+    fn a_boolean_is_not_the_symbol_of_the_same_name() {
+        assert_eq!(try_from_js(&json!(true)).unwrap(), Expr::Bool(true));
+        assert_ne!(try_from_js(&json!(true)).unwrap(), Expr::sym("true"));
+        assert_eq!(to_js_rec(&Expr::Bool(true)), json!(true));
+        assert_eq!(to_js_rec(&Expr::sym("true")), json!("true"));
+    }
+
+    /// Interval closures and chained-inequality strictness are metadata on
+    /// `Expr::Interval`/`Expr::Relation`, not `Expr::Bool` children. Adding the
+    /// boolean leaf must not divert those flag tuples into it — the flags carry
+    /// more than a bool (`("lts", false)` is `Le`, `("gts", false)` is `Ge`),
+    /// and the metadata is what makes `operands.len() == ops.len() + 1`
+    /// structural rather than a runtime check.
+    #[test]
+    fn flag_tuples_stay_metadata_and_do_not_become_boolean_children() {
+        let interval = try_from_js(&json!(["interval", ["tuple", 0, 1], ["tuple", true, false]]))
+            .expect("interval should parse");
+        assert!(
+            matches!(&interval, Expr::Interval { closed, .. } if *closed == (true, false)),
+            "closure belongs in the `closed` field, got {interval:?}"
+        );
+        assert!(
+            !interval.any_subexpr(&|e| matches!(e, Expr::Bool(_))),
+            "no boolean child should appear anywhere in {interval:?}"
+        );
     }
 }

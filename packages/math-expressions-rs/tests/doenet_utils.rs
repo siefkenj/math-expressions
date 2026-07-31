@@ -46,11 +46,14 @@ fn simplify_under_assumptions() {
 #[test]
 fn components() {
     let t = parse("(a, b, c)");
-    assert_eq!(txt(&get_component(&t, 0).unwrap()), "a");
-    assert_eq!(txt(&get_component(&t, 1).unwrap()), "b");
-    assert!(get_component(&t, 3).is_none());
-    assert!(get_component(&parse("x+1"), 0).is_none());
-    let replaced = substitute_component(&t, 1, &parse("z")).unwrap();
+    assert_eq!(txt(&get_component(&t, &[0]).unwrap()), "a");
+    assert_eq!(txt(&get_component(&t, &[1]).unwrap()), "b");
+    assert!(get_component(&t, &[3]).is_none());
+    // Not sequence-only: components are the operands of the JS tree spelling,
+    // so `["+", "x", 1]` has components `x` and `1` — matching `me`, which
+    // indexes any operator node.
+    assert_eq!(txt(&get_component(&parse("x+1"), &[0]).unwrap()), "x");
+    let replaced = substitute_component(&t, &[1], &parse("z")).unwrap();
     assert!(equals_syntactic(&replaced, &parse("(a, z, c)"), &EqOptions::default()));
 }
 

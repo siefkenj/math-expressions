@@ -76,6 +76,11 @@ impl Writer<'_> {
                 self.render_const(*c),
                 if *c == MathConst::NegInf { NEG } else { ATOM },
             ),
+            // Display only. The parsers cannot produce `Expr::Bool` at all, and
+            // `true` is not even a symbol to them — implicit multiplication
+            // lexes it as `t*r*u*e`. So this does not round-trip through text
+            // in any form; the AST round-trip is the faithful one.
+            Expr::Bool(b) => (b.to_string(), ATOM),
             Expr::Blank => ("\u{ff3f}".to_string(), ATOM),
             Expr::Ldots => ("...".to_string(), ATOM),
 
