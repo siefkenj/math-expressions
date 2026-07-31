@@ -23,7 +23,7 @@ duality (§1)** and **the text/latex twin-file duplication in the parsers (§2)*
 ## 1. ✅ DONE — [NEW · HIGH] `MathConst::Pi/E/I` vs `Sym("pi"/"e"/"i")` — two spellings of one constant
 
 > **✅ Fixed at the root:** `canonicalize` rewrites `Const(Pi/E/I)` → `Sym`,
-> both internal producers (`exact::to_expr`, deg-units desugar) now mint `Sym`,
+> both internal producers (`eval_exact::to_expr`, deg-units desugar) now mint `Sym`,
 > and `fuzzy.rs::replace_numbers` parameterizes both spellings. The `==`
 > contract holds again; regression `equals("90 deg", "pi/2")` in
 > `tests/architecture_fixes.rs`. The Sym-only holes (`constants_to_floats`,
@@ -33,24 +33,24 @@ duality (§1)** and **the text/latex twin-file duplication in the parsers (§2)*
 
 The parsers only ever produce `Sym("pi")` etc. (`Const` is minted for Inf/NegInf/NaN
 only), but two internal producers mint `Const(Pi/E)` **into the canonical layer**:
-`exact::Exact::to_expr` (exact.rs:173,179 — i.e. inside simplify/equals folding) and
-`desugar_units` deg-handling (norm/units.rs:64 — inside `equals`). `canonicalize`
-does **not** unify the spellings, and they rank differently in `order::cmp`
-(order.rs:19-21). Consequences:
+`eval_exact::Exact::to_expr` (eval_exact/value.rs — i.e. inside simplify/equals folding) and
+`desugar_units` deg-handling (normalize/units.rs:64 — inside `equals`). `canonicalize`
+does **not** unify the spellings, and they rank differently in `normalize::order::cmp`
+(normalize/order.rs). Consequences:
 
 - **Breaks the crate's core contract** ("after canonicalize, `==` is semantic
-  equality", norm/mod.rs:5-6) — `Sym("pi") != Const(Pi)` yet both are π. Every
+  equality", normalize/mod.rs:5-6) — `Sym("pi") != Const(Pi)` yet both are π. Every
   `==` fast path, fixpoint loop, and `HashMap<Expr,_>` key inherits this.
 - **Behavioral hole:** `equality/fuzzy.rs:147-148` `replace_numbers` parameterizes
   only the `Sym` spelling in the error-tolerance path; a `Const(Pi)` arriving via
   `90 deg` desugaring is not parameterized → tolerance semantics differ between
   `90 deg` and `pi/2`. (Verified against source.)
-- Other single-spelling holes: `ops.rs:424-431` `constants_to_floats` (Sym-only),
-  `norm/syntactic.rs:71` `e^x→exp(x)` (Sym-only), `ops.rs:558-563` `variables()`
+- Other single-spelling holes: `ops/numbers.rs` `constants_to_floats` (Sym-only),
+  `normalize/syntactic.rs:71` `e^x→exp(x)` (Sym-only), `ops/query.rs` `variables()`
   (Sym counted, Const not).
 - **Duplication tax:** ≥10 sites carry hand-rolled both-spelling checks
-  (`is_pi`/`is_e` triplicated in exact.rs, norm/special_values.rs, diff.rs;
-  plus diverge.rs, eval, tape, finite_field, assumptions…).
+  (`is_pi`/`is_e` triplicated in eval_exact/, normalize/special_values.rs, calculus/diff.rs;
+  plus eval_numeric/certified_digits/diverge.rs, eval_numeric/complex.rs, eval_numeric/certified_digits/tape.rs, equality/finite_field.rs, assumptions…).
 
 **Fix direction (pick one):**
 (a) canonicalize one spelling into the other (safest: `canonicalize` rewrites
@@ -103,19 +103,19 @@ sum/product/leibniz skeletons or the i18n helpers. Extend Phase 2's scope note.
 - **✅ DONE — [MED] `precise` number strings:** documented as **display-only**
   (not re-parseable, not notation-aware) on both `MpFix::to_decimal_string` and
   `Precise::to_decimal_string`; anything user-round-trippable must go through
-  `output::to_text`/`to_latex` instead.
+  `print::to_text`/`to_latex` instead.
 - **⬜ OPEN — [LOW] `subscripts_to_strings`** bakes `.`-decimal digits into Sym
   names — a later notation-aware print can't retarget them. Not started (LOW).
 - **⬜ OPEN** [TRACKED: IMPROVEMENT Phase 3] `opaque_key` via `Debug`
-  (eval/mod.rs).
+  (eval_numeric/complex.rs).
 
 ## 5. Certified-zero / numeric-gate sprawl — [was TRACKED: FULL_SIMPLIFY §8]
 
-- **✅ DONE** `diverge.rs` private `PiLin`/`exact_eval`/`rational_sqrt_exact`
+- **✅ DONE** `eval_numeric/certified_digits/diverge.rs` private `PiLin`/`exact_eval`/`rational_sqrt_exact`
   (~160 lines) deleted; `exactly_zero_at`/`certified_nonzero_at` now call
-  `exact::exact_eval`.
-- **✅ DONE** `matrix/kernels::is_zero` now escalates non-literals to
-  `exact::certified_zero` (a symbolic-but-zero entry can no longer be a pivot),
+  `eval_exact::exact_eval`.
+- **✅ DONE** `matrix/elimination::is_zero` now escalates non-literals to
+  `eval_exact::certified_zero` (a symbolic-but-zero entry can no longer be a pivot),
   plus `entry_nonzero` adds the certified-*nonzero* direction for variable-free
   entries. Regression in `tests/architecture_fixes.rs`.
 - **✅ DONE** the ±1-ulp contract is one function: `MpFix::excludes_zero()`
@@ -126,11 +126,11 @@ sum/product/leibniz skeletons or the i18n helpers. Extend Phase 2's scope note.
 - **🔵 ASSESSED — deferred:** eigen root ladder → `factor()` — today's `factor`
   is strictly weaker (no quadratic closed forms / ordered RootOf tail); deferred
   to FULL_SIMPLIFY S4, doc comment at the eigen site.
-- **🔵 ASSESSED — not merged:** `integrate::expr_to_ratfun` vs `ratform` share
+- **🔵 ASSESSED — not merged:** `calculus::integrate::expr_to_ratfun` vs `polynomials::ratform` share
   no representation (univariate `UPoly` pairs vs multivariate kernelized `Rep`);
   cross-reference notes added at both sites.
 - **⬜ OPEN** 4 independent sampling mechanisms (equality/numeric.rs,
-  finite_field.rs, exact.rs `SAMPLE_POINTS`, diverge.rs `GRID`) — a shared
+  equality/finite_field.rs, eval_exact/ `SAMPLE_POINTS`, eval_numeric/certified_digits/diverge.rs `GRID`) — a shared
   sample-point policy module is deferred.
 - **✅ DONE (2026-07-22)** `equals` false-negatives on exact constant
   identities. `equals(1/2, cos(π/3))` returned **false** — two pre-existing
@@ -143,7 +143,7 @@ sum/product/leibniz skeletons or the i18n helpers. Extend Phase 2's scope note.
   recognized. Sound (accept-only → no false positives; `pi ≠ 3.14` etc. still
   reject). **Perf: verified negligible** — 16.5 ms → 16.3 ms per full
   824-pair corpus pass (using the lean `exact_eval` path, not the
-  `expand`/`ratform`-heavy `certified_zero`, which had cost +21%); the
+  `expand`/`polynomials::ratform`-heavy `certified_zero`, which had cost +21%); the
   integrate gate is unaffected (its `equals(F′,f)` calls involve variables, so
   the stage is gated off). Regression in `tests/architecture_fixes.rs`.
 
@@ -155,7 +155,7 @@ sum/product/leibniz skeletons or the i18n helpers. Extend Phase 2's scope note.
   compound variant is a compile error, not silent corruption.
 - **✅ DONE — cheap wins:** `desugar_units` and `coerce_seqs` reduced to
   `map_children` + one specific arm.
-- **✅ DONE — Doc contradiction:** expr.rs header now says `OtherOp` lives in
+- **✅ DONE — Doc contradiction:** expr/tree.rs header now says `OtherOp` lives in
   both layers (canonicalize preserves it; pm/diff/matrix ops mint it).
 - **⬜ OPEN — RootOf round-trip asymmetry (doc-only):** the invariant "RootOf
   leaf exists only post-canonicalize" is not yet noted at the variant
@@ -191,9 +191,9 @@ whole "re-supply at every call" class.
 Workspace sets `panic = "abort"`: every panic is a full wasm-worker crash.
 - **✅ DONE — HIGH:** `OdeSolution::at(NaN)` now propagates NaN (guard added);
   regression in `tests/architecture_fixes.rs`.
-- **✅ DONE** `exact.rs`: `Exact::surd` no longer re-factors or `expect`s; the
+- **✅ DONE** `eval_exact/value.rs`: `Exact::surd` no longer re-factors or `expect`s; the
   trial-division cap moved into `ResourceLimits::max_squarefree_trial_divisor`.
-- **✅ DONE** `js_tree::from_js` (panicking) removed; the few test callers use
+- **✅ DONE** `expr::serde::from_js` (panicking) removed; the few test callers use
   `try_from_js(...).expect(...)`.
 - **✅ DONE** `equals_with_options` now errors on malformed JSON (returns
   `Result<bool, JsError>`) instead of silently grading with defaults. *(Breaking
@@ -220,35 +220,35 @@ Workspace sets `panic = "abort"`: every panic is a full wasm-worker crash.
 1. **✅ DONE 2026-07-22 — point fixes** (regressions in
    `tests/architecture_fixes.rs` + extended `tests/notation.rs`; 488 lib tests
    green, clippy clean): ode NaN guard; `flatten` exhaustive leaf arms;
-   fuzzy.rs Const(Pi/E) parameterization; expr.rs OtherOp doc fix;
+   fuzzy.rs Const(Pi/E) parameterization; expr/tree.rs OtherOp doc fix;
    `number_to_rational` → `Number::to_bigrational`; `equals_with_options` now
    errors on bad JSON (signature: `Result<bool, JsError>`); `read_notation`
    validates internally (returns `Result`); validate() rejects operator-glyph
    separator collisions (incl. decimal `'-'`, argument `'.'`/`':'`/`'|'`);
-   assumptions matches `log|ln`; exact.rs `surd` no longer re-factors or
+   assumptions matches `log|ln`; eval_exact/value.rs `surd` no longer re-factors or
    `expect`s and the squarefree trial-division cap moved into
    `ResourceLimits::max_squarefree_trial_divisor`; stale STACK_SAFETY /
    WHATS_LEFT item-22 notes corrected.
 2. **✅ DONE 2026-07-22 — Const/Sym unification (§1), root-cause form:** both
-   producers (`exact::to_expr`, deg-units desugar) now mint `Sym`, and
+   producers (`eval_exact::to_expr`, deg-units desugar) now mint `Sym`, and
    `canonicalize` unifies `Const(Pi/E/I)` → `Sym` for any remaining producer.
    The ~10 local both-spelling helpers are now defensive-only and can be
    deleted opportunistically (not urgent — they're correct, just redundant).
 3. **✅ DONE 2026-07-22 — §8 refactors (the feasible ones):**
-   - `matrix/kernels::is_zero` → syntactic fast path + `exact::certified_zero`
+   - `matrix/elimination::is_zero` → syntactic fast path + `eval_exact::certified_zero`
      (a symbolic-zero entry can no longer be chosen as a pivot; regression in
      `tests/architecture_fixes.rs`), plus `entry_nonzero`: variable-free
      entries get the exact service's certified-*nonzero* direction, so
      `rank([[√8−√2]]) = 1` now decides instead of refusing.
-   - diverge.rs `PiLin`/private `exact_eval`/`rational_sqrt_exact` (~160
+   - eval_numeric/certified_digits/diverge.rs `PiLin`/private `exact_eval`/`rational_sqrt_exact` (~160
      lines) deleted; `exactly_zero_at`/`certified_nonzero_at` call
-     `exact::exact_eval`. The ±1-ulp contract is one function:
+     `eval_exact::exact_eval`. The ±1-ulp contract is one function:
      `MpFix::excludes_zero()`.
    - **eigen ladder → factor: assessed, deliberately NOT done** — today's
      `factor()` is strictly weaker than the ladder (no quadratic closed
      forms, no ordered RootOf tail); doc comment at `matrix/eigen.rs::
      eigen_items` defers it to FULL_SIMPLIFY S4.
-   - **expr_to_ratfun → ratform: assessed, deliberately NOT merged** — they
+   - **expr_to_ratfun → polynomials::ratform: assessed, deliberately NOT merged** — they
      share no representation (univariate `UPoly` pairs vs multivariate
      kernelized `Rep`); cross-reference layering notes added at both sites.
 4. **✅ DONE 2026-07-22 — parser grammar-core extraction (§2):** the 20
@@ -270,7 +270,7 @@ Workspace sets `panic = "abort"`: every panic is a full wasm-worker crash.
    items also landed 2026-07-22: LaTeX RootOf round-trip
    (`\operatorname{rootof}` registered + emitted), `deriv_var` Debug fallback
    → text render, builders emit canonical `log`, rootof caches capped
-   (1024, clear-on-overflow), `js_tree::from_js` removed, `precise`
+   (1024, clear-on-overflow), `expr::serde::from_js` removed, `precise`
    stringifiers documented display-only, wasm consumes root re-exports
    (+`together`/`cancel` re-exported), facade tiers documented in lib.rs.
    **Still open (documented, deliberately deferred):** module demotion to

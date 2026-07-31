@@ -64,7 +64,7 @@ pub enum LimitDir { TwoSided, FromAbove, FromBelow }
   must exclude it — see §5), impossible to malform.
 - Cons: a new variant touches the ~10 blessed match sites (`children`,
   `map_children`, `canonicalize`, `order::cmp`, structural-eq, both printers,
-  `js_tree` to/from, `diff`, `eval` opaque handling). The compiler enforces
+  `expr::serde` to/from, `diff`, `eval_numeric::complex` opaque handling). The compiler enforces
   each, so this is mechanical, not risky — and is exactly the "one variant,
   many arms" cost the improvement plan already accounts for.
 
@@ -126,13 +126,13 @@ limit(body, x, a)        limit(body, x, a, "+")   (function-call spelling)
 
 ### 3.3 Registry / notation touchpoints
 `lim` is notation, not an applied math function, so it does **not** get a
-`FnDef` in `crate::functions`. It is handled in the parser grammar directly
+`FnDef` in `crate::special_functions`. It is handled in the parser grammar directly
 (like `\frac`, `derivative_leibniz`). Keep this boundary explicit in the
-`functions/mod.rs` "what stays outside the registry" note.
+`special_functions/mod.rs` "what stays outside the registry" note.
 
 ---
 
-## 4. Canonicalization (`src/norm/mod.rs`)
+## 4. Canonicalization (`src/normalize/mod.rs`)
 
 `canonicalize` gets a `Expr::Limit` arm:
 - Canonicalize `point` and `body`.
@@ -155,13 +155,13 @@ separate from `canonicalize`.
 ## 5. Binding semantics (the cross-cutting change)
 
 `Limit.var` is bound. Audit every pass that enumerates symbols:
-- `ops::variables` / `free_symbols` (in `eval`): must **remove** `var` from
+- `ops::variables` / `free_symbols` (in `eval_numeric::complex`): must **remove** `var` from
   the free set of the `body` (add it back only if it also appears free in
   `point`, which would be unusual/ill-formed).
 - `ops::substitute`: must not substitute `var` inside the body (shadowing).
 - `diff::derivative`: `d/dy lim_{x→a} f(x,y)` differentiates the body w.r.t.
   `y ≠ x`; `d/dx` of a limit binding `x` treats it as constant → 0.
-- `eval` (`eval_complex`): a `Limit` with unresolved value is an **opaque
+- `eval_numeric::complex` (`eval_complex`): a `Limit` with unresolved value is an **opaque
   atom** (like an unknown function) — it samples by structure so `equals`
   still works syntactically. Once the engine can resolve it, callers simplify
   first, then evaluate.
@@ -173,14 +173,14 @@ enumerates the passes.
 
 ## 6. The evaluation engine (`src/limit/`)
 
-Module layout (mirrors `integrate/`):
+Module layout (mirrors `calculus/integrate/`):
 ```
 src/limit/
   mod.rs        // public `limit()`, the staged pipeline, the verify gate
   algebraic.rs  // factor/cancel, rationalize, common-denominator
   lhopital.rs   // indeterminate-form detection + L'Hôpital recursion
   known.rs      // table of standard limits & asymptotic rules
-  numeric.rs    // certified one-sided numeric probe (wraps precise::)
+  numeric.rs    // certified one-sided numeric probe (wraps eval_numeric::certified_digits::)
 ```
 
 Public entry (mirrors `integrate`'s signature and honesty contract):
@@ -207,7 +207,7 @@ Order matters — cheap/exact before expensive/heuristic, like integration §2:
    of a domain-restricted function per the `FnDef` domain guard), return it.
    This resolves the large majority of classroom limits.
 2. **Algebraic (`algebraic.rs`).** For `0/0` rational forms: factor numerator
-   and denominator, cancel the common `(x − a)` factor (reuse `upoly`/`poly`
+   and denominator, cancel the common `(x − a)` factor (reuse `polynomials::univariate`/`polynomials::multivariate`
    GCD and the rational engine), re-substitute. For roots: rationalize
    (multiply by conjugate). Handles `(x²−1)/(x−1) → 2`.
 3. **Known-limits table (`known.rs`).** Standard results the other stages
@@ -233,7 +233,7 @@ Order matters — cheap/exact before expensive/heuristic, like integration §2:
 5. **Series (future / stretch, §9 P4).** A symbolic Taylor/Laurent expansion
    around `a` would subsume most of stages 2–4 and handle `∞−∞`
    cancellations cleanly — **but no symbolic series machinery exists today**
-   (only numeric series kernels inside `precise/`). This is the largest piece
+   (only numeric series kernels inside `eval_numeric/certified_digits/`). This is the largest piece
    of new math and is deferred; the pipeline is designed so it slots in as a
    stage without disturbing the others.
 6. **One-sided reconciliation.** For a two-sided limit, compute both
@@ -246,7 +246,7 @@ Order matters — cheap/exact before expensive/heuristic, like integration §2:
 ### 6.2 The verification gate (mandatory, mirrors integration)
 Before returning `Value(v)` or `Infinite(s)`, **numerically confirm** it
 (`numeric.rs`): sample the body at a geometric sequence of points approaching
-`a` from the required side(s) using `precise::eval_batch` at increasing
+`a` from the required side(s) using `eval_numeric::certified_digits::eval_batch` at increasing
 precision, and check the samples converge toward `v` (or diverge with the
 claimed sign). A symbolic verdict that fails numeric confirmation is
 downgraded to `Unknown` — never returned wrong. This is the exact discipline
@@ -254,7 +254,7 @@ downgraded to `Unknown` — never returned wrong. This is the exact discipline
 
 The numeric probe is *also* a standalone fallback: when every symbolic stage
 declines but the samples converge convincingly (Richardson-extrapolated,
-with a certified error bound from `precise`), return `Value` with the
+with a certified error bound from `eval_numeric::certified_digits`), return `Value` with the
 recognized closed form if `evaluate_to_precision`'s digits match a small
 constant, else `Unknown`. Be conservative — numeric-only evidence must be
 strong (bounded error, monotone convergence) to avoid asserting a limit that
@@ -275,7 +275,7 @@ is out of scope initially; return `Unknown` rather than guessing a branch.
 
 ---
 
-## 7. Output (`src/output/text.rs`, `src/output/latex.rs`)
+## 7. Output (`src/print/text.rs`, `src/print/latex.rs`)
 
 - Text: `lim_{x->a} ( body )`, `lim_{x->a^+} ( body )`, `lim_{x->infinity}`.
 - LaTeX: `\lim_{x \to a} body`, `\lim_{x \to a^{+}} body`,
@@ -288,7 +288,7 @@ is out of scope initially; return `Unknown` rather than guessing a branch.
 - Round-trip test: `parse(to_text(e)) == e` and the LaTeX analogue, on a
   corpus of limit expressions (§9 P1).
 
-`js_tree.rs` gets `to_js`/`try_from_js` arms so the JS `tree` interop still
+`expr/serde.rs` gets `to_js`/`try_from_js` arms so the JS `tree` interop still
 serializes (as `["lim", var, point, dirflag, body]` or similar) — chosen to
 be self-consistent, since there is no upstream shape to match.
 
@@ -318,7 +318,7 @@ work was staged.
 
 - **P0 — Representation + notation.** `Expr::Limit` variant + `LimitDir`; all
   ~10 match arms; parser (text `limit(...)` call form first, then `lim_{}`
-  notation); printers; `js_tree`; round-trip corpus. **No evaluation yet** —
+  notation); printers; `expr::serde`; round-trip corpus. **No evaluation yet** —
   `limit()` returns `Unknown`. Ships parse/print/serialize with zero math.
 - **P1 — Binder audit + direct substitution.** The §5 checklist (variables /
   substitute / diff / eval-opaque); Stage 0–1 of the engine (preprocess +
@@ -344,7 +344,7 @@ Since upstream has no limits, build fidelity three ways:
 1. **Hand-authored corpus** of `(expression, variable, point, dir) → expected`
    covering each stage and each verdict kind, incl. DNE and Unknown.
 2. **Symbolic-vs-numeric cross-check** in-crate: for every corpus entry whose
-   answer is finite, the numeric gate (`precise::eval_batch`) must agree — this
+   answer is finite, the numeric gate (`eval_numeric::certified_digits::eval_batch`) must agree — this
    is a property test, not a fixed oracle, and doubles as the gate's own test.
 3. **Offline differential** against an external CAS (SymPy/Maxima) run *by the
    author*, snapshotted into fixtures like the other corpora — not a runtime
@@ -368,6 +368,6 @@ Since upstream has no limits, build fidelity three ways:
   enumerates every symbol-visiting pass; the compiler flags the match arms.
 - **Series scope creep** → P4 is explicitly optional and isolated behind a
   pipeline stage; P0–P3 deliver a genuinely useful engine without it.
-- **Bundle size** → the engine reuses `diff`, `precise`, `norm`, `factor`; new
+- **Bundle size** → the engine reuses `diff`, `eval_numeric::certified_digits`, `normalize`, `factor`; new
   code is algorithmic, not table-heavy. If it grows, gate `limit` behind a
   cargo feature (the improvement plan's Phase 5 convention).

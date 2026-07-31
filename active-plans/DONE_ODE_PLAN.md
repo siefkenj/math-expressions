@@ -15,7 +15,7 @@ evaluation tape is the natural integrand/vector-field evaluator),
 Kept separate per the maintainer's instruction: ODE solving is a numerics
 capability with its own error-control design, not a CAS feature.
 
-**Status: ✓ fully implemented 2026-07-19** (`src/ode.rs`; `tests/ode.rs`,
+**Status: ✓ fully implemented 2026-07-19** (`src/mathjs_compat/ode.rs`; `tests/ode.rs`,
 11 tests; `tests/ode_corpus.rs` differential vs the vendored JS
 `numeric.dopri` on 10 systems incl. pendulum, van der Pol, Lotka–Volterra —
 agreement ≤ 1e-4·scale at 18 abscissae each; wasm smoke 55/55). All three
@@ -42,7 +42,7 @@ phases landed together:
 
 Original status note (kept for history): planned, deliberately not yet
 implemented. The f64 numeric
-module (`src/numeric.rs`, 2026-07-19) covers the rest of Doenet's `me.math`
+module (`src/mathjs_compat/`, 2026-07-19) covers the rest of Doenet's `me.math`
 usage (`mod`/stats/`lusolve`/`eigs`) but intentionally excludes ODE code.
 
 ## 1. What Doenet actually needs (the `dopri` contract)
@@ -61,7 +61,7 @@ extracted from the component:
 
 ## 2. Design
 
-New module `src/ode.rs` (f64-only, like `src/numeric.rs`), wasm-exposed.
+New module `src/mathjs_compat/ode.rs` (f64-only, like `src/mathjs_compat/`), wasm-exposed.
 
 - **Method**: Dormand–Prince RK45 (the same tableau as `numeric.dopri` and
   scipy's `RK45`) with the standard PI step-size controller and the free

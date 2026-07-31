@@ -2,7 +2,7 @@
 
 Design for distinguishing **divergent** integrals from convergent-improper
 and merely-expensive ones in the certified quadrature
-(`precise/quad.rs::integrate_to_precision`). Companion to
+(`eval_numeric/certified_digits/quad.rs::integrate_to_precision`). Companion to
 `active-plans/DONE_ARBITRARY_PERCISION_PLAN.md` (the interval tape evaluator and the
 certified f64 node evaluator are the workhorses) and
 `active-plans/INTEGRATION_PLAN.md` (the rational machinery of I1 — `expr_to_ratfun`,
@@ -19,7 +19,7 @@ Unknown**.
 
 ---
 
-> **Status: ✓ fully implemented 2026-07-20** (`src/precise/diverge.rs`;
+> **Status: ✓ fully implemented 2026-07-20** (`src/eval_numeric/certified_digits/diverge.rs`;
 > `tests/divergence.rs`, 17 tests across all six §7 suites; full suite
 > 360/360 over 44 binaries; wasm smoke 59/59; clippy clean). All four
 > phases landed:

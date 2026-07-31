@@ -4,7 +4,7 @@ Status: **DRAFT — awaiting decisions (see §1). Nothing implemented.**
 Created: 2026-07-20.
 
 Goal: replace the hand-serialized **JSON-string** values that cross the
-wasm boundary in [`src/wasm.rs`](../math-expressions-rs/src/wasm.rs) with
+wasm boundary in [`src-rust/`](../math-expressions-rs-wasm/src-rust/) with
 strongly-typed structs, so the generated `pkg/math_expressions.d.ts` describes
 the real shapes instead of `string`. Backed by [`tsify`](https://github.com/madonoharu/tsify)
 (or the maintained fork `tsify-next`), which derives a TypeScript type from a
@@ -45,10 +45,10 @@ the core `Expr` enum (see the Level-2 decision in §1).
   boundary to save ~100–200 KB — so the serialization-backend choice (§1.C)
   interacts with a separate, already-planned goal.
 - `--target nodejs`.
-- The core `Expr` enum ([`src/expr.rs`](../math-expressions-rs/src/expr.rs)) has
+- The core `Expr` enum ([`src/expr/tree.rs`](../math-expressions-rs/src/expr/tree.rs)) has
   **no serde derives**, and the JS `Tree` shape (`number | string | boolean |
   [string, ...Tree[]]` with `{"$":"Inf"}` specials) is a custom encoding in
-  [`src/js_tree.rs`](../math-expressions-rs/src/js_tree.rs) that does **not**
+  [`src/expr/serde.rs`](../math-expressions-rs/src/expr/serde.rs) that does **not**
   match a serde-default derive of `Expr`.
 
 ---
@@ -60,13 +60,13 @@ These change what gets built. My recommendation is first in each list.
 **A. Scope — how far into the boundary do we go?**
 - **A1 (recommended): Level 1 only.** Type the option and result *leaf*
   structs. Leave `Expression` opaque and leave the `Tree` encoding in
-  `js_tree.rs` untouched. Removes every dishonest `string` except the raw
+  `expr/serde.rs` untouched. Removes every dishonest `string` except the raw
   `Tree` payloads, which stay `string` or get a hand-written `Tree` TS type
-  (see D). Low risk, local to `wasm.rs`.
+  (see D). Low risk, local to `packages/math-expressions-rs-wasm/src-rust/`.
 - **A2: Level 1 + typed `Tree`.** Additionally give the tree-carrying sites
   (`tree_json`, `from_ast`, `to_serialized`, `match_template`, `flatten_ast`,
   …) a real `Tree` TS type via a `#[tsify(type = "Tree")]` newtype over
-  `serde_json::Value`. More sites, still keeps `js_tree.rs`.
+  `serde_json::Value`. More sites, still keeps `expr/serde.rs`.
 - **A3: rejected here — type `Expr` itself.** Deriving `Tsify` on `Expr` would
   emit a *tagged discriminated union* that is **incompatible** with the JS
   array-`Tree` the rest of the ecosystem uses, so it would fork the tree
@@ -94,7 +94,7 @@ These change what gets built. My recommendation is first in each list.
 - **D2: hand-typed `Tree`.** Introduce a `JsTree(serde_json::Value)` newtype
   with `#[tsify(type = "Tree")]` and a passthrough `Serialize`/`Deserialize`,
   reusing the existing `Tree` TS definition from
-  [`index.d.ts`](../index.d.ts). Honest `Tree` types, `js_tree.rs` unchanged.
+  [`index.d.ts`](../index.d.ts). Honest `Tree` types, `expr/serde.rs` unchanged.
 
 **E. Hand-maintained `index.d.ts` coordination.** The repo ships a curated
 [`index.d.ts`](../index.d.ts) separate from the generated `pkg/*.d.ts`. Decide
@@ -157,7 +157,7 @@ Replaces `read_opt_bool` / `read_opt_f64` / `read_opt_strings` plumbing.
 - **If D1:** leave `tree_json`, `to_serialized`, `from_ast`, `from_serialized`,
       `match_template`, `flatten_ast`, `unflatten_left/right` as `string`.
       Document them as `Tree`-JSON in doc comments. *(No code change.)*
-- **If D2/A2:** introduce `JsTree`, retype those sites, keep `js_tree.rs` as
+- **If D2/A2:** introduce `JsTree`, retype those sites, keep `expr/serde.rs` as
       the conversion core.
 
 ### Phase 5 — JS-side + public types
@@ -182,6 +182,6 @@ Replaces `read_opt_bool` / `read_opt_f64` / `read_opt_strings` plumbing.
 - **Bundle size** vs IMPROVEMENT item 34 — measured in Gate 0; decision C is
   the lever.
 - **`Number` fidelity** — any serde form must keep the deliberate
-  `Rat`/`Big` → f64 projection that `js_tree.rs` already does
-  ([`number_to_js`](../math-expressions-rs/src/js_tree.rs)); do not silently
+  `Rat`/`Big` → f64 projection that `expr/serde.rs` already does
+  ([`number_to_js`](../math-expressions-rs/src/expr/serde.rs)); do not silently
   change numeric precision at the boundary.

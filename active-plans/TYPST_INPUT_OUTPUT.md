@@ -29,20 +29,20 @@ Non-goals: the typst-plugin WASM ABI/packaging (separate repo); rendering to
 The library already has a per-syntax parse + output design over one central AST,
 so typst is additive — **no changes to `Expr` or the math engine**.
 
-- Central AST: `src/expr.rs` (`Expr`). Faithful-layer variants we reuse:
+- Central AST: `src/expr/tree.rs` (`Expr`). Faithful-layer variants we reuse:
   `Div`, `Neg`, `Pow`, `Index`, `Matrix`, `Seq(Vector/Set/List/Tuple)`,
   `Apply`, `Relation`, `OtherOp` (escape hatch for `binom`, `vec`, `pm`, …).
 - Parsers: `src/parse/{latex,text}.rs`, sharing `common.rs`, `lexer.rs`
   (`Flavor { Text, Latex }`), `error.rs`.
-- Formatters: `src/output/{latex,text}.rs`, sharing the precedence ladder and
-  greek/unicode table in `src/output/mod.rs`.
-- JS surface: `src/wasm.rs` (`parse_text`/`parse_latex`, `.to_text()`/`.to_latex()`).
+- Formatters: `src/print/{latex,text}.rs`, sharing the precedence ladder and
+  greek/unicode table in `src/print/mod.rs`.
+- JS surface: `packages/math-expressions-rs-wasm/src-rust/` (`parse_text`/`parse_latex`, `.to_text()`/`.to_latex()`).
 - Correctness oracle: `tests/roundtrip.rs` — parse → format → re-parse must be
   structurally equal; no hand-authored expected output.
 
 New files (see manifest at the end): `src/parse/typst/{mod,repr,markup,lower}.rs`,
-`src/output/typst.rs`, plus wiring in `parse/mod.rs`, `output/mod.rs`, `lib.rs`,
-`wasm.rs`, and fixtures/tests.
+`src/print/typst.rs`, plus wiring in `parse/mod.rs`, `print/mod.rs`, `lib.rs`,
+`packages/math-expressions-rs-wasm/src-rust/`, and fixtures/tests.
 
 ## The `repr()` format
 
@@ -88,7 +88,7 @@ Facts that drive the design:
    align-point`.
 3. **Operators are Unicode content atoms**: `−` (U+2212, *not* ASCII `-`), `≠`,
    `≥`, `≤`, `±`, `⋅`, `→`, `∞`, `∑`, `⌊⌋`. A normalization table is required
-   (partly already present in `output/mod.rs::greek_unicode` and the lexer).
+   (partly already present in `print/mod.rs::greek_unicode` and the lexer).
 4. **`sequence` is flat juxtaposition**: recovering `x - y`, or implicit-multiply
    `2 x` from `sequence([2],[ ],[x])`, needs a **precedence parse over the atom
    stream**. This is the hard part — and it is identical whether the tree came
@@ -105,7 +105,7 @@ tree**. Model that tree once and lower it once.
 parse/typst/repr.rs     repr string        → ContentTree   (value-syntax parser)
 parse/typst/markup.rs   raw "mat(1,2;3,4)" → ContentTree   (math-markup parser)
 parse/typst/lower.rs    ContentTree        → Expr          (SHARED — the core)
-output/typst.rs         Expr               → raw typst markup
+print/typst.rs         Expr               → raw typst markup
 ```
 
 - **`ContentTree`** mirrors typst's element model:
@@ -136,11 +136,11 @@ output/typst.rs         Expr               → raw typst markup
      `Cases`→`OtherOp`/`Relation` set, `Lr`→grouping vs `abs`/`floor`/`ceil`
      (decided by the group's first/last delimiter atom).
   4. **Function application**: a name/`Op` immediately followed by an `Lr` paren
-     group → `Apply` (reuse the `functions.rs` applied-name registry, as the
+     group → `Apply` (reuse the `special_functions/` applied-name registry, as the
      latex parser does).
-- **`output/typst.rs`** is the easiest piece — a precedence pretty-printer
-  modeled on `output/text.rs` (~500 lines), reusing the ladder in
-  `output/mod.rs`. Emits `frac(a, b)`, `x^(…)`, `x_(…)`, `mat(…;…)`, `sqrt(…)`,
+- **`print/typst.rs`** is the easiest piece — a precedence pretty-printer
+  modeled on `print/text.rs` (~500 lines), reusing the ladder in
+  `print/mod.rs`. Emits `frac(a, b)`, `x^(…)`, `x_(…)`, `mat(…;…)`, `sqrt(…)`,
   `sin(…)`, greek names (`alpha`, `pi`), relations (`<=`, `!=`), `dot`.
 
 Why share the lowering: the precedence parse in step 2 is the only real
@@ -183,11 +183,11 @@ in how they interpret `2x`, `x - y`, or `f(x)`.
 Each phase is independently landable and testable.
 
 **Phase 0 — scaffolding.** Add `src/parse/typst/mod.rs` and the `Content` enum
-in `lower.rs`. Wire empty modules into `parse/mod.rs`, `output/mod.rs`, `lib.rs`.
+in `lower.rs`. Wire empty modules into `parse/mod.rs`, `print/mod.rs`, `lib.rs`.
 
-**Phase 1 — `output/typst.rs` first.** Self-contained; produces the roundtrip
-harness the parsers will be developed against. Model on `output/text.rs`. Add
-`to_typst` / `TypstOpts` re-exports and a `.to_typst()` method in `wasm.rs`.
+**Phase 1 — `print/typst.rs` first.** Self-contained; produces the roundtrip
+harness the parsers will be developed against. Model on `print/text.rs`. Add
+`to_typst` / `TypstOpts` re-exports and a `.to_typst()` method in `packages/math-expressions-rs-wasm/src-rust/`.
 
 **Phase 2 — `lower.rs` (shared core).** Unicode-op table, `Seq` precedence parse,
 structural-node mapping, function-application detection. Unit-tested by
@@ -284,11 +284,11 @@ src/parse/typst/mod.rs      pub use; TypstToAst{,Repr} entry points + options
 src/parse/typst/lower.rs    Content enum + Content → Expr (shared core)
 src/parse/typst/repr.rs     repr string → Content
 src/parse/typst/markup.rs   raw typst math → Content
-src/output/typst.rs         Expr → typst markup (+ TypstOpts)
+src/print/typst.rs         Expr → typst markup (+ TypstOpts)
 src/parse/mod.rs            + pub mod typst;
-src/output/mod.rs           + pub mod typst;  + to_typst / TypstOpts re-export
+src/print/mod.rs           + pub mod typst;  + to_typst / TypstOpts re-export
 src/lib.rs                  + re-exports (to_typst, TypstToAst, …)
-src/wasm.rs                 + parse_typst, parse_typst_repr, .to_typst()
+packages/math-expressions-rs-wasm/src-rust/                 + parse_typst, parse_typst_repr, .to_typst()
 tests/roundtrip.rs          + typst roundtrip
 tests/typst_parse.rs        repr + markup parse fixtures
 tests/fixtures/typst-*.json fixtures (differential-generated)
@@ -299,7 +299,7 @@ scripts/gen-typst-fixtures  drives the pinned typst CLI to build fixtures
 
 | Piece                                   | Effort     |
 |-----------------------------------------|------------|
-| `output/typst.rs` (Phase 1)             | 1–2 days   |
+| `print/typst.rs` (Phase 1)             | 1–2 days   |
 | `ContentTree` + `lower.rs` (Phase 2)    | 3–5 days   |
 | `repr.rs` (Phase 3)                     | 2–3 days   |
 | `markup.rs` (Phase 4)                   | 3–5 days   |

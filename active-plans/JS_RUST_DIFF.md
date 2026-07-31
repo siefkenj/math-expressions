@@ -22,7 +22,7 @@ document is the API-level diff; that one is the measured output diff.
 > `Expression.prototype` (`:218-224`) from the module arrays in
 > `lib/expression/index.js` and `lib/functions/index.js`. The Rust surface is the
 > crate re-exports in `src/lib.rs:43-81` and the `#[wasm_bindgen]` items in
-> `src/wasm.rs`.
+> `packages/math-expressions-rs-wasm/src-rust/`.
 
 ---
 
@@ -31,8 +31,8 @@ document is the API-level diff; that one is the measured output diff.
 **JS has, Rust does not (real capability gaps):**
 - Converters: **ast↔mathjs, mml→\*, ast→guppy, ast→GLSL, ast→finite-field**, and
   all the mathjs/guppy/mml cross-converters (§2).
-- ~~The entire **± ("pm") subsystem**~~ — ported: `src/pm.rs` primitives,
-  `eq::pm_equals`, and the pm-aware `simplify`/`expand` rules in `norm` (§3).
+- ~~The entire **± ("pm") subsystem**~~ — ported: `src/ops/pm.rs` primitives,
+  `equality::plus_minus::pm_equals`, and the pm-aware `simplify`/`expand` rules in `normalize` (§3).
 - **Symbolic polynomial algebra + Groebner bases** (`lib/polynomial/`, 1847 lines)
   — no public Rust polynomial API at all (§4).
 - **Derivative "story"** step-by-step narration (§4).
@@ -54,8 +54,8 @@ document is the API-level diff; that one is the measured output diff.
 
 **Naming rule:** JS mixes camelCase + snake_case with many aliases; the WASM
 layer normalizes to a single **snake_case** name each. Only two names are
-preserved via `js_name`: `mod` (`wasm.rs:205`) and the `Assumptions` class
-(`wasm.rs:454`).
+preserved via `js_name`: `mod` (`packages/math-expressions-rs-wasm/src-rust/core_ops.rs`) and the `Assumptions` class
+(`packages/math-expressions-rs-wasm/src-rust/assumptions.rs`).
 
 ---
 
@@ -145,7 +145,7 @@ preserved via `js_name`: `mod` (`wasm.rs:205`) and the `Assumptions` class
 | derivative | `derivative(x)` (symbol/expr) | `derivative(var: &str)` | WASM takes a **string var name**, not an expression |
 | evaluate | `evaluate(bindingsObj)` | `evaluate(vars[], values[])` → `Option<f64>` | object → **two parallel arrays**; real-f64 only (+ separate `evaluate_to_complex`) |
 | substitute | `substitute(bindingsObj)` | `substitute_var(var, value)` | multi-var object → single var/value pair (crate `substitute` is general) |
-| finite_field_evaluate | method `(bindings, modulus)` | **free function** (`wasm.rs:433`) | method → free function, different arg shape |
+| finite_field_evaluate | method `(bindings, modulus)` | **free function** (`packages/math-expressions-rs-wasm/src-rust/assumptions.rs`) | method → free function, different arg shape |
 | variables | `variables(include_subscripts=false)` | `variables()` | WASM drops the `include_subscripts` flag |
 | isAnalytic | `isAnalytic({allow_abs,allow_arg,allow_relation})` | `is_analytic(bool, bool, bool)` | opts object → three explicit bools |
 | set_small_zero | `set_small_zero(paramsObj)` | `set_small_zero(tolerance: f64)` | explicit single f64 |
@@ -171,8 +171,8 @@ core four**.
 |---|---|---|
 | text → ast | ✅ | ✅ (`parse::text`, wasm `parse_text`) |
 | latex → ast | ✅ | ✅ (`parse::latex`, wasm `parse_latex`) |
-| ast → text | ✅ | ✅ (`output::to_text`, wasm `to_text`) |
-| ast → latex | ✅ | ✅ (`output::to_latex`, wasm `to_latex`) |
+| ast → text | ✅ | ✅ (`print::to_text`, wasm `to_text`) |
+| ast → latex | ✅ | ✅ (`print::to_latex`, wasm `to_latex`) |
 | ast → mathjs | ✅ | ❌ |
 | mathjs → ast | ✅ | ❌ |
 | mml → ast / latex / text / mathjs / guppy | ✅ | ❌ (no MathML anywhere) |
@@ -228,14 +228,14 @@ malformed AST, non-integer matrix dims) and asserts it — no Rust analog.
 ### 3.1 Missing in Rust (genuine capability gaps)
 
 - **pm/± subsystem — ported.** `contains_pm`, `count_pm`, `expand_pm_signs`
-  (`lib/expression/pm.js`) → `src/pm.rs` (crate + wasm, with the same
+  (`lib/expression/pm.js`) → `src/ops/pm.rs` (crate + wasm, with the same
   `MAX_PM_COUNT = 10` cap, returned as an error rather than thrown);
-  `pm_equals_numerical` (`equality/pm-numerical.js`) → `eq::pm_equals`, wired into
+  `pm_equals_numerical` (`equality/pm-numerical.js`) → `equality::plus_minus::pm_equals`, wired into
   `equals` (equations compared proportionally via branch-products, inequalities/
   expressions via value-multiset bipartite matching with per-variant tolerance);
   the pm-aware `simplify` canonicalization rules (reorder, scaling `2·±x → ±(2x)`,
   `−(±x) → ±x`, and the guard against combining independent ± like-terms) and the
-  `expand` guard against duplicating a ± are in `norm`.
+  `expand` guard against duplicating a ± are in `normalize`.
 - `expand_relations` — no named Rust op.
 - `equalsViaFiniteField` as a standalone **boolean** equality (Rust only has the
   internal `definitely_unequal` + the `finite_field_evaluate` value helper).
@@ -275,7 +275,7 @@ an internal tree-vs-Expression split Rust doesn't need.)
   `context`. Notably, **Rust `equals` has no assumptions parameter** while JS
   `.equals` can see context assumptions (tested via "integer assumption").
 - pm equality's per-variant tolerance and order-independent (bipartite) variant
-  matching are ported in `eq::pm_equals`.
+  matching are ported in `equality::plus_minus::pm_equals`.
 
 ---
 
@@ -283,19 +283,19 @@ an internal tree-vs-Expression split Rust doesn't need.)
 
 ### 4.1 Rust-only (no JS equivalent)
 
-- **Symbolic integration** — `integrate`, rational integration (`src/integrate/`,
+- **Symbolic integration** — `integrate`, rational integration (`src/calculus/integrate/`,
   wasm `integrate`). JS has only the crude 100-interval midpoint
   `integrateNumerically`.
 - **Precise / verified** integrate & evaluate — `integrate_to_precision`,
   `integrate_analyzed`, `evaluate_to_precision`, `Precise`, `IntegralVerdict`,
   `SingularPoint`.
-- **ODE** solving — `src/ode.rs`, `solve_ode*`, `OdeSolution`.
+- **ODE** solving — `src/mathjs_compat/ode.rs`, `solve_ode*`, `OdeSolution`.
 - **Full matrix algebra** — det, inverse, rref, rank, nullspace, matmul,
-  transpose, trace, char_poly, **eigenvalues/eigenvectors** (`src/matrix.rs`).
+  transpose, trace, char_poly, **eigenvalues/eigenvectors** (`src/matrix/`).
   JS `matrix.js` has only a constructor + vector ops.
-- **Factoring** — `factor`, `factor_terms` (`src/factor.rs`). JS has no `factor`.
-- **Rational canonical form** (`ratform`), **rootof / algebraic numbers**
-  (`rootof`), **exact rational arithmetic** (`exact.rs`, `Number`).
+- **Factoring** — `factor`, `factor_terms` (`src/polynomials/factor.rs`). JS has no `factor`.
+- **Rational canonical form** (`polynomials/ratform.rs`), **rootof / algebraic numbers**
+  (`polynomials/rootof.rs`), **exact rational arithmetic** (`eval_exact/`, `Number`).
 - Numeric stats exposed from wasm — `gcd`, `lcm`, `mean`, `median`, `variance`,
   `std`, `quantile_seq`, `lusolve`, `eigs`, `math_mod` (JS uses mathjs directly).
 
@@ -306,7 +306,7 @@ an internal tree-vs-Expression split Rust doesn't need.)
   `polynomial_add/neg/sub/mul/pow`, `poly_div`, `poly_gcd`, `poly_lcm`, `reduce`,
   `reduced_grobner`, monomial ops, plus a parallel `pt_`-prefixed term API; and
   `single-var-poly.js` (`sv_*`). Rust has **no Groebner and no public polynomial
-  API** — `src/poly/` is internal-only, backing factor/ratform/reduce_rational.
+  API** — `src/polynomials/` is internal-only, backing factor/ratform/reduce_rational.
 - **Derivative "story"** — `derivative_story` / `derivativeStory` /
   `derivative_with_story` (step-by-step LaTeX narration). Rust `derivative`
   returns only the result.
@@ -357,7 +357,7 @@ an internal tree-vs-Expression split Rust doesn't need.)
 | `quick_ast-to-latex` / `quick_ast-to-text` direct-output asserts | 265 / 247 | golden ast→latex/text outputs | **fixtures generated but not wired to any test** — see 5.3 |
 | `quick_latex-to-ast-to-latex` / `quick_text-to-ast-to-text` `showBlanks`-off variants | — | round-trip without blanks | none (`LatexOpts` empty) |
 | per-pass normalization asserts (`quick_normalization`) | 62 | individual passes (`default_order`, subscripts, negative-number, applied-fn) | Rust tests `canonicalize` holistically (`tests/norm.rs`, 12), not per-pass |
-| `quick_trees.spec.js` | 39 | flatten/unflatten/match tree utils | utils exist (`src/js_match.rs`) but **no dedicated test file** |
+| `quick_trees.spec.js` | 39 | flatten/unflatten/match tree utils | utils exist (`packages/math-expressions-rs-wasm/src-rust/js_match.rs`) but **no dedicated test file** |
 
 ### 5.2 Rust tests with NO JS equivalent
 

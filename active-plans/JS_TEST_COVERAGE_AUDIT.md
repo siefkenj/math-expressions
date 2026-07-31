@@ -35,11 +35,11 @@ Rust tests live in `packages/math-expressions-rs/tests/` (+ inline `src/`).
 | `quick_ast-to-text` | ~244 | `fixtures/ast-to-text.json` (247) — was probe-only | ⚠️ → **`output_golden.rs`** |
 | `quick_arithmetic` | 6 | `ops_corpus.rs`, `norm.rs`, `number_ops.rs` | ✅ |
 | `quick_normalization` | 62 | `norm.rs` (holistic `canonicalize`), `special_values.rs`, `display.rs`, `functions_registry.rs` | ✅ (per-pass asserts folded into `canonicalize` — intentional) |
-| `quick_pm` | 58 | `pm.rs` (15) + inline `src/pm.rs` (3) | ✅ |
+| `quick_pm` | 58 | `pm.rs` (15) + inline `src/ops/pm.rs` (3) | ✅ |
 | `quick_rounding` | 13 | `number_ops.rs` (single-number round; §4 of divergences = 0 diff) | ⚠️ (don't-round edge guards) → **`number_ops.rs` additions** |
 | `quick_sets` | 7 | `sets.rs` (8) | ✅ |
 | `quick_solve` | 3 | `grade.rs` (`solve_linear`) | ✅ |
-| `quick_trees` | 39 | utils in `src/js_match.rs`; no dedicated test file | ⚠️ → **`tree_utils.rs`** |
+| `quick_trees` | 39 | utils in `packages/math-expressions-rs-wasm/src-rust/js_match.rs`; no dedicated test file | ⚠️ → **`tree_utils.rs`** |
 | `quick_transformation` | 8 | `expand` → `expand.rs` / `expand_corpus.rs`; `expand_relations` op ⛔ | ✅ (expand) / ⛔ (`expand_relations`) |
 | `quick_ast-to-mathjs` | 139 | `astToMathjs` shim in `packages/math-expressions-rs-wasm/src-js/tree-to-mathjs.ts` (TS, not the Rust crate) | ⛔ Rust / 🔜 drop-in |
 | `quick_mathjs-to-ast` | ~28 | none | ⛔ |
@@ -49,7 +49,7 @@ Rust tests live in `packages/math-expressions-rs/tests/` (+ inline `src/`).
 | `slow_simplify` | 74 (474 expects) | `simplify_corpus.rs` (342) + `norm.rs` / `display.rs` / `expand.rs` / `matrix.rs` | ✅ |
 | `slow_assumptions` | 44 (420 expects) | `assumptions_corpus.rs` (546) + `assumptions.rs` + `doenet_utils.rs` | ✅ |
 | `slow_matrix` | 12 (~30) | `matrix.rs` (31) | ✅ |
-| `slow_polynomial` | 23 | no public Rust polynomial/Groebner API (`src/poly` internal only) | ⛔ |
+| `slow_polynomial` | 23 | no public Rust polynomial/Groebner API (`src/polynomials` internal only) | ⛔ |
 | `slow_rational` | 2 | `reduce_rational.rs` (5) | ✅ |
 | `slow_check-equality-numerical-errors` | 26 objs | `equality.rs` + **`tolerance.rs`** (fixture-driven, `equals`) | ✅ (16 sampling divergences snapshotted) |
 | `slow_check-symbolic-equality-numerical-errors` | 26 objs | Rust `equals_syntactic` is exact — ignores `allowed_error_in_numbers` | ⛔ behavioral divergence / 🔜 drop-in |
@@ -66,10 +66,10 @@ Rust tests live in `packages/math-expressions-rs/tests/` (+ inline `src/`).
   guard: any *new* or *changed* divergence, and any *stale* entry, fails the
   build. Re-bless with `BLESS=1 cargo test --test output_golden`.
 - `tests/tree_utils.rs` — the `quick_trees` tree-utility surface via
-  `src/js_match.rs` + `js_tree::to_js` + crate `substitute` (equal / flatten /
+  `packages/math-expressions-rs-wasm/src-rust/js_match.rs` + `expr::serde::to_js` + crate `substitute` (equal / flatten /
   unflatten / substitute / default-mode template match). Opt-in match modes
   (`variables`, regex/function conditions, permutations) are intentionally
-  unported and out of scope (see `src/js_match.rs` docs).
+  unported and out of scope (see `packages/math-expressions-rs-wasm/src-rust/js_match.rs` docs).
 - `tests/number_ops.rs` additions — the "don't round fractions / π / e" guards
   from `quick_rounding.spec.js`.
 - `tests/tolerance.rs` — the **numeric** `allow_error_in_numbers` matrix (26
@@ -92,7 +92,7 @@ not forgotten. Cross-referenced to [WHATS_LEFT.md](WHATS_LEFT.md) §A.
 | mathjs→ast | `quick_mathjs-to-ast` (28) | Not needed for Doenet — unused internally (WHATS_LEFT A.1 #5). |
 | ast→guppy | `quick_ast-to-guppy` (4) | Not needed for Doenet — legacy Guppy-editor XML (WHATS_LEFT A.1 #4). |
 | MathML (mml→latex) | `quick_mml-to-latex` (1) | No MathML parser/emitter in Rust (WHATS_LEFT A.1 #1–2). |
-| polynomial / Groebner | `slow_polynomial` (23) | No public Rust polynomial API; `src/poly` is internal (JS_RUST_DIFF §4.2). |
+| polynomial / Groebner | `slow_polynomial` (23) | No public Rust polynomial API; `src/polynomials` is internal (JS_RUST_DIFF §4.2). |
 | `expand_relations` | `quick_transformation` (few) | Op absent in Rust (JS_RUST_DIFF §3.1). |
 | emitter options | `quick_ast-to-latex` standalone (8) | `LatexOpts`/`TextOpts` fixed-behavior: matrix env, pad-to-digits/decimals, avoid-scientific-notation, `showBlanks` (JS_RUST_DIFF §2.2). |
 | syntactic tolerance | `slow_check-symbolic-equality-numerical-errors` (26) | Rust `equals_syntactic` does exact structural comparison (`na == nb`) and does **not** apply `allowed_error_in_numbers`; JS `equalsViaSyntax` does. Number-tolerance lives only on the numeric `equals` path in Rust. |

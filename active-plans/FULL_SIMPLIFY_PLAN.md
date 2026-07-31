@@ -117,9 +117,9 @@ canonicalize-composable and individually sound; the driver only ever
 
 ## 1. Chunk S1 — exact constant evaluation + zero-equivalence service
 
-**What.** New module `src/exact.rs`:
+**What.** New module `src/eval_exact/`:
 - Promote and extend the `PiLin` evaluator currently private to
-  `precise/diverge.rs` (`exact_eval`, ℚ + ℚ·π with trig at the kπ/2
+  `eval_numeric/certified_digits/diverge.rs` (`exact_eval`, ℚ + ℚ·π with trig at the kπ/2
   lattice, exact sqrt of rational squares, exp(0)/ln(1)) into a general
   exact-constant evaluator over the tower ℚ → ℚ(π) → ℚ(e) → quadratic
   radicals → `RootOf` algebraics (via `rootof::upoly_in_root` /
@@ -138,11 +138,11 @@ adversarial almost-zeros (exp(π√163) style) → Unknown not No.
 **Consequences.**
 - `diverge.rs` sheds ~150 lines: `exact_eval`/`PiLin`,
   `exactly_zero_at`, `certified_nonzero_at` become calls into
-  `exact::is_zero` (behavior-preserving refactor, divergence suite is
+  `eval_exact::is_zero` (behavior-preserving refactor, divergence suite is
   the guard).
 - `matrix.rs` eigen self-verification drops the expand-fixpoint helper
   and the `p(λ)+1 = 1` radical zero-compare trick.
-- `integrate/mod.rs` I2 gate upgrades from sampled
+- `calculus/integrate/mod.rs` I2 gate upgrades from sampled
   `equals(derivative(F), f)` to certified-when-possible `is_zero`
   (falls back to sampling on Unknown — strictly stronger).
 - Risk: none to existing behavior (pure refactors gated by suites).
@@ -150,10 +150,10 @@ adversarial almost-zeros (exp(π√163) style) → Unknown not No.
 ## 2. Chunk S2 — rational normalization (`together`/`cancel`/`ratsimp`)
 
 **What.** Promote `integrate::expr_to_ratfun` (already builds ℚ(x)
-rational functions) into `src/ratform.rs`, add multivariate support by
+rational functions) into `src/polynomials/ratform.rs`, add multivariate support by
 recursive univariate treatment (main variable by canonical order,
 coefficients as expressions), gcd-cancel numerator/denominator
-(`upoly::gcd` at the univariate base). Transformations exposed:
+(`polynomials::univariate::gcd` at the univariate base). Transformations exposed:
 `together(e)`, `cancel(e)`. Non-rational subtrees (sin(x), √x, …) are
 treated as opaque kernels (substituted by fresh symbols, restored
 after) — the SymPy trick that makes ratsimp apply everywhere.
@@ -190,7 +190,7 @@ that prompted this); `sin(101π/6)` periodicity; parity idempotence
 
 **Consequences.**
 - Answers the standing user-visible gap (`sin(2pi)` ↛ 0 today).
-- `exact::is_zero` stage (b) gets these for free once folding runs
+- `eval_exact::is_zero` stage (b) gets these for free once folding runs
   before evaluation.
 - Divergence classifier's `closed_form_candidates` π-lattice probing
   gets cheaper (folded divisors expose zeros structurally).
@@ -199,7 +199,7 @@ that prompted this); `sin(101π/6)` periodicity; parity idempotence
 ## 4. Chunk S4 — factorization over ℚ
 
 **What.** `factor(e)` transformation: squarefree (Yun — exists in
-`upoly`), rational-root extraction, quadratics exactly, and
+`polynomials::univariate`), rational-root extraction, quadratics exactly, and
 degree-bounded Zassenhaus (small cases only; §7f `max_factor_degree`,
 default 12) at the univariate base; multivariate by the S2 recursive
 representation + content/primitive splitting. Also `factor_terms`
@@ -258,7 +258,7 @@ extend to the general integer-radicand case).
 **Consequences.**
 - Eigen output beautification: M3's quadratic closed forms and M4
   eigenvector components currently ship unrationalized.
-- `exact.rs` gains stronger normal forms → more Yes answers from
+- `eval_exact/` gains stronger normal forms → more Yes answers from
   `is_zero`.
 - Risk: low; rules are equational identities checked by `is_zero` in
   debug builds (self-verifying rule harness — cheap and catches rule
@@ -270,7 +270,7 @@ extend to the general integer-radicand case).
 needs most: `trig_expand` (angle addition/multiple angles outward) and
 `trig_contract` (product-to-sum, power reduction — the direction
 Pythagorean alone can't reach). Complexity measure in
-`src/norm/cost.rs` (leaf count, weight 2 per Apply, digit-length of
+`src/normalize/` (leaf count, weight 2 per Apply, digit-length of
 integers, +penalty for Float). `full_simplify` = beam search over
 {expand, together, cancel, factor, factor_terms, trig_expand,
 trig_contract, radsimp, special-value folds} with §7f budget
@@ -296,11 +296,11 @@ full_simplify(e)` fuzzed over the existing corpus inputs.
 
 | Existing code | Today | After |
 |---|---|---|
-| `diverge.rs` PiLin + `exactly_zero_at`/`certified_nonzero_at` (~150 lines) | private ℚ+ℚπ evaluator | `exact::is_zero` calls (S1) |
-| `matrix.rs` eigen residual check (expand-fixpoint + `p(λ)+1=1` trick) | bespoke | `exact::is_zero` (S1) |
+| `diverge.rs` PiLin + `exactly_zero_at`/`certified_nonzero_at` (~150 lines) | private ℚ+ℚπ evaluator | `eval_exact::is_zero` calls (S1) |
+| `matrix.rs` eigen residual check (expand-fixpoint + `p(λ)+1=1` trick) | bespoke | `eval_exact::is_zero` (S1) |
 | `matrix.rs` eigenvalue root ladder | bespoke squarefree/rational/quadratic | `factor` (S4) |
 | `matrix.rs` `qinv` quotient-ring inverse | private | shared with radsimp rationalization (S6) |
-| `integrate/mod.rs` `expr_to_ratfun` | private, I1-only | `ratform` module, shared (S2) |
+| `calculus/integrate/mod.rs` `expr_to_ratfun` | private, I1-only | `ratform` module, shared (S2) |
 | `integrate` I2 gate `equals(F′, f)` | numeric sampling | certified `is_zero` first (S1) |
 | SINGULARITY_TRANSFORM T1b `pull_nonneg_var` | planned bespoke rewriter | S5 assumption-gated radical rule |
 | `eq/mod.rs` stage ladder | syntactic → finite-field → sampling | + cheap normalize-and-compare pre-stage (S2), optional certified mode (S7) |

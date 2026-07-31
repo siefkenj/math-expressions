@@ -50,7 +50,7 @@ so this is a **lexer + formatter change, not a parser rewrite**:
   (`TextToAst::new(opts)`); nothing thread-local. Notation is one more field.
 - **A6 (canonical, notation-independent AST).** User input is stored as an
   **exact rational, not a string or float**: a NUMBER token flows through
-  `Number::from_decimal_str` (`src/num.rs:388`) at `src/parse/text.rs:741`. So
+  `Number::from_decimal_str` (`src/num/decimal.rs:26`) at `src/parse/text.rs:741`. So
   `1,2` and `1.2` both become `6/5` — identical ASTs, canonical storage, and
   drift-free round-trips come almost for free.
 - **Grammar core is untouched.** Every separator use funnels through
@@ -142,7 +142,7 @@ Each step keeps `cargo test` + clippy green.
       `parse_js_float` — keeps those helpers notation-agnostic.
 
 ### 4.4 Printing
-- [x] `render_number` in `src/output/text.rs` **and** `src/output/latex.rs`:
+- [x] `render_number` in `src/print/text.rs` **and** `src/print/latex.rs`:
       `.` → `decimal_separator` (also the positional-float path).
 - [x] **A5**: LaTeX emits a decimal comma as `{,}`; the LaTeX number scanner was
       taught to read `{,}` back, so the round-trip law holds.
@@ -179,7 +179,7 @@ that both JS and Rust pass.
       `(notation, input)` that must error.
 - [x] Location: `tests/fixtures/notation/phase1.json`.
 - [x] `tests/notation.rs`: each row parses under `notation`, compares AST (via
-      `js_tree`), prints text/latex under `notation` and compares; `failing`
+      `expr::serde`), prints text/latex under `notation` and compares; `failing`
       rows asserted to error.
 - [x] Round-trip law (A6): `parse(print(ast, N), N) == ast` (text + latex);
       notation independence: `parse(t, comma_N) == parse(equiv_t, period_N)`.

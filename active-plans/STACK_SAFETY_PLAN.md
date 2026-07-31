@@ -10,7 +10,7 @@
 
 Status: **draft for decision — nothing implemented.** Companion to
 PORTING_PLAN.md §7f (resource limits). Scope: everything already implemented
-(parsers, normalization, ordering, evaluation, equality, formatters, js_tree).
+(parsers, normalization, ordering, evaluation, equality, formatters, expr::serde).
 
 ## 1. Problem
 
@@ -32,17 +32,17 @@ these emit):
   recursive functions; **multiple frames per nesting level** (statement →
   … → base_factor → bracketed → statement_list → statement). Deepest frames
   in the codebase.
-- `js_tree::from_js` — the WASM `from_json` boundary.
+- `expr::serde::from_js` — the WASM `from_json` boundary.
 - `parse/*::convert_units_in_term` — post-parse pass, recursive.
 
 **Transforms / folds** (one frame per tree level):
 - `expr::flatten`
-- `norm::canonicalize` (+ smart constructors calling each other)
-- `norm::order::cmp` (paired traversal)
-- `eval::eval_complex`, `eval::free_symbols`
-- `eq::contains_blank`, `eq::coerce_seqs`
-- `output/text.rs`, `output/latex.rs` (`emit`/`render` mutual recursion)
-- `js_tree::to_js`
+- `normalize::canonicalize` (+ smart constructors calling each other)
+- `normalize::order::cmp` (paired traversal)
+- `eval_numeric::complex::eval_complex`, `eval_numeric::complex::free_symbols`
+- `equality::contains_blank`, `equality::api::coerce_seqs`
+- `print/text.rs`, `print/latex.rs` (`emit`/`render` mutual recursion)
+- `expr::serde::to_js`
 
 **Compiler-generated (easy to forget, equally fatal):**
 - `#[derive(Clone, PartialEq, Eq, Hash, Debug)]` on `Expr` — all recursive.

@@ -47,7 +47,7 @@ strip = "debuginfo"
 ```
 
 Notes:
-- `src/js_tree.rs:31` already *assumes* wasm builds abort on panic; the
+- `src/expr/serde.rs:31` already *assumes* wasm builds abort on panic; the
   profile just wasn't set, so the unwinding + panic-formatting machinery
   ships today for no reason.
 - Add an optional `wasm-opt -Oz` step to `build-wasm.sh` (skip gracefully if
@@ -66,15 +66,15 @@ A single function — `sinh` — is currently known in **9 files / 12 sites**:
 |---|-------|----------|
 | 1 | text-parser default `applied_function_symbols` | `parse/text.rs:59` |
 | 2 | latex-parser default `applied_function_symbols` | `parse/latex.rs:50` |
-| 3 | latex printer allowed/backslash-symbol list | `output/latex.rs:496` |
-| 4 | evaluator sampling/closedness filter | `eval/mod.rs:109` |
-| 5 | evaluator complex dispatch | `eval/mod.rs:188` |
-| 6 | precise-eval kernel registry (`f`, `df`, `cf`, `cdfm`, domain) | `precise/kernels.rs:152` |
-| 7 | syntactic-simplify class list A | `norm/syntactic.rs:50` |
-| 8 | syntactic-simplify class list B | `norm/syntactic.rs:57` |
-| 9 | derivative template table | `diff.rs:168` |
-| 10 | inverse-function pairing | `norm/mod.rs:805` |
-| 11 | antiderivative table | `integrate/mod.rs:256` |
+| 3 | latex printer allowed/backslash-symbol list | `print/latex.rs:496` |
+| 4 | evaluator sampling/closedness filter | `eval_numeric/complex.rs:109` |
+| 5 | evaluator complex dispatch | `eval_numeric/complex.rs:188` |
+| 6 | precise-eval kernel registry (`f`, `df`, `cf`, `cdfm`, domain) | `eval_numeric/certified_digits/kernels.rs:152` |
+| 7 | syntactic-simplify class list A | `normalize/syntactic.rs:50` |
+| 8 | syntactic-simplify class list B | `normalize/syntactic.rs:57` |
+| 9 | derivative template table | `calculus/diff.rs:168` |
+| 10 | inverse-function pairing | `normalize/mod.rs:805` |
+| 11 | antiderivative table | `calculus/integrate/mod.rs:256` |
 | 12 | (spelling normalization `arc…` → `a…`, latex `\operatorname` choice) | scattered |
 
 Adding `asinh`-style functions today means editing ~5–9 files and hoping no
@@ -86,7 +86,7 @@ One struct holds every facet of one function. One `const` list registers
 them all. Everything else *derives* from the registry.
 
 ```rust
-// src/functions/mod.rs
+// src/special_functions/mod.rs
 pub struct FnDef {
     /// Canonical spelling ("asin"). Normalization target for aliases.
     pub name: &'static str,
@@ -105,11 +105,11 @@ pub struct FnDef {
     /// Canonical name of the inverse function, if notated ("sinh" → "asinh").
     pub inverse: Option<&'static str>,
     /// f64/Complex64 evaluation + precise-eval kernel bundle. Reuses the
-    /// existing `FnKernel` shape from precise/kernels.rs (f, df, domain,
+    /// existing `FnKernel` shape from eval_numeric/certified_digits/kernels.rs (f, df, domain,
     /// cf, cdfm) — that struct moves here or is referenced here.
     pub kernel: Option<&'static FnKernel>,
     /// Class for syntactic-simplify membership tests (Trig, InverseTrig,
-    /// Hyperbolic, …). Replaces the ad-hoc lists in norm/syntactic.rs.
+    /// Hyperbolic, …). Replaces the ad-hoc lists in normalize/syntactic.rs.
     pub class: FnClass,
 }
 
@@ -136,12 +136,12 @@ the HashMap probe matters — don't pre-optimize this).
 Start with **family files**; graduate any function to **its own file** when
 its definition (FnDef + its precise MpFix kernel + colocated unit tests)
 exceeds ~150 lines. The per-function MpFix series kernels currently in
-`precise/kernels.rs` (858 lines) are what make single-function files real —
+`eval_numeric/certified_digits/kernels.rs` (858 lines) are what make single-function files real —
 `exp`, `ln`, `sin`/`cos`, `atan` each carry a substantial series
 implementation and would each justify a file.
 
 ```
-src/functions/
+src/special_functions/
   mod.rs                 // FnDef, FnClass, registry, lookup, derived lists
   trig.rs                // sin cos tan sec csc cot  (~40–60 lines each)
   trig_inverse.rs        // asin acos atan asec acsc acot (+ arc… aliases)
@@ -157,12 +157,12 @@ src/functions/
 What stays where it is:
 - Shared precise-eval machinery (MpFix/CFix types, `Budget`, argument
   reduction, constant caches, the tape compiler/interpreter) stays in
-  `precise/`. Function files own only *their* kernel entry points.
+  `eval_numeric/certified_digits/`. Function files own only *their* kernel entry points.
 - Generic `Apply` handling (sin²-notation, prime, single-arg tuple encoding)
   stays in the parsers/printers — it is per-*notation*, not per-function.
 - The `OtherOp` escape hatch and non-function operators are Phase 2.
 
-> **STATUS (2026-07-20): steps 1–7 DONE — Phase 1 complete.** `src/functions/`
+> **STATUS (2026-07-20): steps 1–7 DONE — Phase 1 complete.** `src/special_functions/`
 > (mod.rs + trig / trig_inverse / hyperbolic / hyperbolic_inverse / exp_log /
 > powers / misc) now carries ALL per-function facets: spellings, parser
 > defaults, aliases, inverses, move-exponent spellings, derivative
@@ -170,9 +170,9 @@ What stays where it is:
 > factorial's Γ), LaTeX control words + apply-head overrides, and the
 > precise-eval `FnKernel` rows. `"sinh"` appears in exactly ONE source file
 > (was 9). Old tables deleted from parse/text.rs, parse/latex.rs,
-> norm/syntactic.rs, norm/mod.rs, diff.rs, integrate/mod.rs, eval/mod.rs,
-> output/latex.rs, precise/kernels.rs; `precise::kernels::registry()`/
-> `lookup()` derive the `Op::Call` id space from `functions::ALL` (ids are
+> normalize/syntactic.rs, normalize/mod.rs, calculus/diff.rs, calculus/integrate/mod.rs, eval_numeric/complex.rs,
+> print/latex.rs, eval_numeric/certified_digits/kernels.rs; `eval_numeric::certified_digits::kernels::registry()`/
+> `lookup()` derive the `Op::Call` id space from `special_functions::ALL` (ids are
 > per-run, so order changes are safe). tests/functions_registry.rs pins
 > every derived view to the historical tables. Full suite: 343 tests green;
 > wasm smoke 55/55; wasm 1.16 MB (registry indirection cost ~10 KB vs the
@@ -185,7 +185,7 @@ What stays where it is:
 > historical lists; (c) `ALL` is a `static` (single identity — kernel ids
 > are positions in it); (d) step-6 verdict: NO per-function file splits —
 > no definition exceeds ~150 lines, and the MpFix series core in
-> precise/kernels.rs is a tightly-coupled unit (const_pi feeds sin/cos,
+> eval_numeric/certified_digits/kernels.rs is a tightly-coupled unit (const_pi feeds sin/cos,
 > const_ln2 feeds exp and ln, tan composes sin/cos) referenced via
 > `FnDef::kernel` rather than scattered.
 
@@ -194,15 +194,15 @@ What stays where it is:
 Each step ports one facet: the old table becomes a thin delegate to the
 registry, tests run, then the old table is deleted. No big-bang.
 
-1. **Scaffold**: `functions/mod.rs` with `FnDef { name, aliases, class,
+1. **Scaffold**: `special_functions/mod.rs` with `FnDef { name, aliases, class,
    parse }` only. Port the four pure string lists — both parser defaults,
-   the latex allowed-symbols list, both `norm/syntactic.rs` class lists —
+   the latex allowed-symbols list, both `normalize/syntactic.rs` class lists —
    plus `inverse` and the `arc…`→`a…` normalization. Add a snapshot test
    asserting the derived default lists are *identical* to today's lists
    (this is the output-compatibility guarantee).
-2. **Derivative + antiderivative**: fold `diff.rs::template_for` and the
-   `integrate/mod.rs` table into `FnDef.derivative` / `.antiderivative`.
-3. **Evaluation**: fold the `eval/mod.rs` complex dispatch and the sampling
+2. **Derivative + antiderivative**: fold `calculus/diff.rs::template_for` and the
+   `calculus/integrate/mod.rs` table into `FnDef.derivative` / `.antiderivative`.
+3. **Evaluation**: fold the `eval_numeric/complex.rs` complex dispatch and the sampling
    filter (domain moves into the kernel/def).
 4. **Rendering**: fold the latex `\operatorname`-vs-backslash choice and
    `convert_latex_symbol` (asin→arcsin) into `FnDef.latex` + `aliases`.
@@ -212,7 +212,7 @@ registry, tests run, then the old table is deleted. No big-bang.
 6. **Split files**: move families into their files; graduate >150-line
    functions (exp, ln, sin/cos series, atan) to single files, bringing
    their MpFix kernels along.
-7. **Document**: a short "Adding a function" section in `functions/mod.rs` —
+7. **Document**: a short "Adding a function" section in `special_functions/mod.rs` —
    the checklist should be: *write one FnDef in the right family file, add
    it to `ALL`, add corpus/round-trip tests.* If the checklist has a third
    code location, the migration isn't done.
@@ -234,11 +234,11 @@ notation tables:
 
 - **Greek letters / symbol spellings** exist twice: lexer replacement rules
   (`parse/lexer.rs:518–560`, ~80 rules) and the 146-entry match in
-  `output/mod.rs:92–150`. One `const GREEK: &[(&str, &str, …)]` consumed by
+  `print/mod.rs:92–150`. One `const GREEK: &[(&str, &str, …)]` consumed by
   both. (~2–3 KB of duplicated strings, and one place to add a symbol.)
 - **RelOp / SeqKind** already centralize their JS names on the enum — good;
   extend the same enums with their text/latex render forms so
-  `output/text.rs` and `output/latex.rs` stop re-matching them.
+  `print/text.rs` and `print/latex.rs` stop re-matching them.
 - The `OtherOp` tail (binom, vec, unit, pm, …) gets a small
   `OpMeta { name, arity, text_form, latex_form }` table shared by the latex
   parser's `operator_symbol()`/`unit_of()` and both printers' match arms.
@@ -247,17 +247,17 @@ notation tables:
 
 ## Phase 3 — Memory quick wins (small, independent, high steady-state value)
 
-1. **`opaque_key` → hash** (`eval/mod.rs:153`): currently
+1. **`opaque_key` → hash** (`eval_numeric/complex.rs:153`): currently
    `format!("{e:?}")` — allocates a full Debug rendering of the subtree per
    opaque-env lookup *and* keeps the recursive `Debug` impls for the whole
    `Expr` family alive in the wasm binary. `Expr` derives `Hash`; return a
    `u64` from `std::hash` instead. (Collision risk is theoretical for an
    env-lookup key; if that bothers, use a 128-bit hash.)
-2. **`Sym::name()` → `&'static str`** (`sym.rs`): interned names already
+2. **`Sym::name()` → `&'static str`** (`expr/sym.rs`): interned names already
    live forever in the thread-local interner, so `Box::leak` each name once
    and return `&'static str`. Kills a `String` allocation at ~98 call sites
    (printers pay it per symbol node).
-3. **`Expr::for_each_child`** (`expr.rs:189`): `children()` returns
+3. **`Expr::for_each_child`** (`expr/visit.rs:189`): `children()` returns
    `Vec<&Expr>`, allocating at every node of every predicate walk. Add
    `for_each_child(&self, f: &mut dyn FnMut(&Expr))` as the primitive and
    implement `children()` on top. `&dyn` (not generic) so the traversal is
@@ -276,11 +276,11 @@ notation tables:
 
 Today every pass rebuilds the entire tree:
 
-- `map_children` (`norm/syntactic.rs:273`) reallocates every node even when
+- `map_children` (`normalize/syntactic.rs:273`) reallocates every node even when
   the callback returns its input unchanged.
-- `simplify_rounds` (`norm/simplify.rs:66–83`) re-canonicalizes after every
+- `simplify_rounds` (`normalize/simplify.rs:66–83`) re-canonicalizes after every
   rewrite round, so one `equals()` reconstructs the full tree several times.
-- `coerce_seqs` (`eq/mod.rs:180`) is another full rebuild before
+- `coerce_seqs` (`equality/api.rs:180`) is another full rebuild before
   canonicalize.
 
 Fix in two escalating steps, keeping the deep-owned `Expr` (no Rc/arena —
@@ -291,15 +291,15 @@ see below):
 2. **Unchanged propagation**: give `map_children` a sibling that returns
    `Option<Expr>` (`None` = untouched), so fixpoint loops skip
    re-canonicalization when nothing fired, and untouched subtrees are never
-   reallocated. `try_distribute` in `norm/expand.rs:103` (cartesian product
+   reallocated. `try_distribute` in `normalize/expand.rs:103` (cartesian product
    clones both sides of every term pair) is the single worst spike site and
    should be first to adopt it.
 
-Also consolidate on exactly **two blessed traversals** in `expr.rs` —
+Also consolidate on exactly **two blessed traversals** in `expr/visit.rs` —
 borrowed `for_each_child` + owned `map_children` — and build every generic
 pass on them. Today a new `Expr` variant touches ~8–10 match sites
 (children, map_children, canonicalize, ordering, structural-eq in
-`eq/mod.rs:302` vs `norm/order.rs:80`, both printers, js_tree). Target:
+`equality_structural/compare.rs:302` vs `normalize/order.rs:80`, both printers, `expr/serde.rs`). Target:
 enum + the two traversals + only the passes with variant-specific logic.
 
 Deliberately **not** planned: hash-consing / `Rc<Expr>` / arenas. It's the
@@ -315,28 +315,28 @@ unchanged-propagation design does not foreclose it.
    `numeric-compat`), default **on**. A grading-only consumer
    (parse/simplify/equals) currently pays for exact eigenvectors, the
    rational-integration engine, the arbitrary-precision evaluator, and the
-   f64 QR `eigs` in `numeric.rs` (which duplicates `matrix.rs`
+   f64 QR `eigs` in `mathjs_compat/dense_f64.rs` (which duplicates `matrix/`
    eigen-machinery for mathjs compat). Establishing the convention now is
    cheap; retrofitting later is not. Estimated slim build: ~1.2–1.3 MB
    pre-Phase-0-stacking (unverified — run twiggy for real numbers).
-2. **`precise/` interpreter dedup**: three near-identical tape walks
-   (real forward `precise/mod.rs:368`, complex planning ~651, complex
+2. **`eval_numeric/certified_digits/` interpreter dedup**: three near-identical tape walks
+   (real forward `eval_numeric/certified_digits/mod.rs:368`, complex planning ~651, complex
    forward ~708) and two structurally identical backward planners differing
    only in magnitude source. Factor the planner over a `mag: impl Fn(usize)
    -> f64` and the `Call` dispatch into a kernel table. Falls out naturally
    during Phase 1 step 5.
 3. **Matrix clone reduction**: `det_bareiss`/`rref_core`/Gauss–Jordan in
-   `matrix.rs` clone `Expr`/`BigRational` entries in O(n³) inner loops
+   `matrix/` clone `Expr`/`BigRational` entries in O(n³) inner loops
    (71 `clone()` calls in the file); Faddeev–LeVerrier allocates a fresh
    n² matrix per step. Reuse buffers, take entries by reference, split
-   `mem::take` where entries are consumed. Bounded by `limits.rs`, but each
+   `mem::take` where entries are consumed. Bounded by `resource_limits.rs`, but each
    spike is permanent wasm memory.
-4. **`precise/kernels.rs` series loops** clone `BigInt` accumulators per
+4. **`eval_numeric/certified_digits/kernels.rs` series loops** clone `BigInt` accumulators per
    iteration; convert to in-place mutation. Batch the per-operand
    `at_scale().mant` rescales in Add/Mul.
 5. **Polynomial docs**: three representations exist for good reasons
-   (`Expr`-as-polynomial; `upoly.rs` dense univariate ℚ[t] for
-   RootOf/Sturm/charpoly; `poly/` multivariate for `reduce_rational` GCD)
+   (`Expr`-as-polynomial; `polynomials/univariate.rs` dense univariate ℚ[t] for
+   RootOf/Sturm/charpoly; `polynomials/multivariate.rs` multivariate for `reduce_rational` GCD)
    — write the module-level doc explaining the split. Their ~150
    overlapping lines of dense add/mul/divrem are *not* worth unifying
    behind a trait; clarity beats deduplication here.

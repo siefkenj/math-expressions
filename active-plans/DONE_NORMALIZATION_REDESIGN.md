@@ -2,11 +2,11 @@
 
 Status: **implemented in full — historical record** (updated 2026-07-19; was
 "draft for decision"). Every §3 design point shipped as proposed: §3.4 went
-with option B (`norm/order.rs`); §5's decisions resolved as recommended
+with option B (`normalize/order.rs`); §5's decisions resolved as recommended
 (exact-first, JS-as-baseline — which produced REPORT_BUGS.md); §6's "later"
 items are also done (finite field, simplify + assumptions, and
 discrete-infinite-sets, which did NOT stay stubbed). One extension beyond
-this note: the presentation layer (`norm/present.rs`, PORTING_PLAN §7e) that
+this note: the presentation layer (`normalize/present.rs`, PORTING_PLAN §7e) that
 converts canonical → display-faithful form for user-facing operation
 results. Current state lives in PORTING_PLAN.md §7; this note remains as
 the rationale record. Companion to PORTING_PLAN.md §7. Written under the

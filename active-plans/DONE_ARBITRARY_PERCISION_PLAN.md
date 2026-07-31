@@ -146,7 +146,7 @@ a tolerance, possibly many times." That inversion drives the core decision:
 
 ## 3. Compilation: `Expr` → `CompiledExpr`
 
-New module `src/precise/tape.rs`.
+New module `src/eval_numeric/certified_digits/tape.rs`.
 
 ```rust
 pub struct CompiledExpr {
@@ -188,7 +188,7 @@ enum Op {
 
 ## 4. Tier 0 — f64 with certified error bounds (the fast path)
 
-New module `src/precise/tier0.rs`. The tape runs over
+New module `src/eval_numeric/certified_digits/` (Tier 0). The tape runs over
 
 ```rust
 struct Approx64 { val: f64, err: f64 }   // |true − val| ≤ err (absolute)
@@ -218,7 +218,7 @@ Propagation rules (standard forward error analysis; ε = 2⁻⁵³, u = ε/2):
 
 ## 5. Tier 2 — `MpFix` fixed-point + Ziv escalation
 
-New modules `src/precise/fix.rs`, `src/precise/ziv.rs`.
+New modules `src/eval_numeric/certified_digits/fix.rs`, `src/eval_numeric/certified_digits/` (Ziv loop).
 
 ```rust
 /// value ≈ mant · 2^scale, |error| ≤ 1 at the last bit (the realistic/
@@ -264,7 +264,7 @@ struct MpFix { mant: BigInt, scale: i32 }
 
 ## 6. Function kernels & extensibility
 
-New module family `src/precise/kernels/`. One registry, three obligations per
+New module family `src/eval_numeric/certified_digits/` (kernels). One registry, three obligations per
 function:
 
 ```rust
@@ -386,7 +386,7 @@ The design choices above are what make this section short:
 
 ## 10. Phasing
 
-> **Status: P1 + P2 ✓ done 2026-07-20** (`src/precise/`, `tests/precise.rs`,
+> **Status: P1 + P2 ✓ done 2026-07-20** (`src/eval_numeric/certified_digits/`, `tests/precise.rs`,
 > 10 tests). Implemented as designed with three notes:
 > (a) **oracle substitution** — mpmath is unavailable in the container (no
 > pip), so the P2 exit criteria run against hardcoded 50+-digit reference
@@ -441,7 +441,7 @@ The design choices above are what make this section short:
 >   Tier 2 refines real roots by dyadic-rational Newton with an exact
 >   sign-change certificate and complex roots by CFix Newton on a doubling
 >   precision ladder under the same bound. `tests/precise_rootof.rs`.
-> - **Certified quadrature** (`precise/quad.rs`,
+> - **Certified quadrature** (`eval_numeric/certified_digits/quad.rs`,
 >   `integrate_to_precision(f, x, a, b, digits)`): adaptive composite
 >   Simpson whose *entire* error is rigorously bounded — Tier-0 certified
 >   node values + a conservative outward-widened interval extension of the

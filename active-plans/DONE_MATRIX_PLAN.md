@@ -14,7 +14,7 @@ decomposition added in §2c — whichever plan executes first owns those pieces.
 **This is new capability, not porting.** The JS library treats matrices
 exactly as we currently do: a passive container. Today `Expr::Matrix { rows,
 cols, entries }` parses (LaTeX environments, `parse/latex.rs:810-`), renders
-(`output/latex.rs:273`), canonicalizes entry-wise (`norm/mod.rs:80`),
+(`print/latex.rs:273`), canonicalizes entry-wise (`normalize/mod.rs:80`),
 participates in `substitute`/`variables`/`free_symbols`, and `equals`
 compares dimension-guarded componentwise (`eq/mod.rs:364`). There is no
 arithmetic: `A + B` and `A·B` do not combine.
@@ -51,12 +51,12 @@ arithmetic: `A + B` and `A·B` do not combine.
 
 > **Status: M1 ✓ done 2026-07-19** (test-first; `tests/matrix.rs`, 20 tests).
 > Implemented: segmented non-commutative `mul` with adjacent literal folding
-> and scalar distribution into entries (`norm/mod.rs::mul` + `matmul_literal`
+> and scalar distribution into entries (`normalize/mod.rs::mul` + `matmul_literal`
 > + `is_matrix_valued`), entrywise `add` with per-dimension accumulation,
 > `pow` matrix arms (k ≥ 2 binary powering under `max_expand_power`, `A⁰ → I`,
 > negative/symbolic/non-square stay unevaluated), the
 > `(a·b)^k`-distribution guard for matrix products, `transpose`/`trace`/
-> `matmul` in `src/matrix.rs` (opaque `OtherOp` fallbacks), and the
+> `matmul` in `src/matrix/` (opaque `OtherOp` fallbacks), and the
 > presentation guard keeping matrix bases off fraction bars. Properties
 > verified: non-commutativity witness, `(A+B)C = AC+BC`, `(AB)C = A(BC)`,
 > `(AB)ᵀ = BᵀAᵀ`, dimension-mismatch opacity, simplify idempotence.
@@ -79,7 +79,7 @@ arithmetic: `A + B` and `A·B` do not combine.
 > - **§2a `Expr::RootOf`**: leaf variant exactly as specified (Box<[Number]>
 >   coeffs + index); canonical rank 3 (between `Sym` and `Pow`, later ranks
 >   shifted +1); invariant (primitive integer, positive lc, squarefree)
->   enforced by `rootof::make_rootof` and re-enforced in `canonicalize` for
+>   enforced by `polynomials::rootof::make_rootof` and re-enforced in `canonicalize` for
 >   deserialized trees. Text form `rootof(t^3 - t - 1, 2)` parses (new
 >   `rootof` row in the default function table) and round-trips; LaTeX
 >   renders `\operatorname{Root}_{k}(…)`; the JS-tree serializer emits the
@@ -87,7 +87,7 @@ arithmetic: `A + B` and `A·B` do not combine.
 > - **§2b `char_poly`**: Faddeev–LeVerrier over exact `BigRational` for
 >   rational entries at any n ≤ `max_matrix_dim`; cofactor expansion of
 >   `λI − A` for symbolic entries under `max_symbolic_det_dim`.
-> - **§2c pipeline**: new dense univariate module `src/upoly.rs` — Yun
+> - **§2c pipeline**: new dense univariate module `src/polynomials/univariate.rs` — Yun
 >   squarefree decomposition, capped rational-root extraction (divisor
 >   enumeration under `max_trial_divisor`; unfactorable ends leave roots in a
 >   correct-but-less-minimal `RootOf`, decision 6), quadratic closed forms
@@ -134,7 +134,7 @@ arithmetic: `A + B` and `A·B` do not combine.
 
 ### 1a. The non-commutative product segment (the one real invariant change)
 
-`norm::mul` (`norm/mod.rs:271`) flattens, combines like powers, and **sorts**
+`normalize::mul` (`normalize/mod.rs:271`) flattens, combines like powers, and **sorts**
 factors — sorting `A·B → B·A` is wrong for matrices. Canonical form for a
 product containing matrix factors:
 
@@ -146,7 +146,7 @@ Mul([ …scalar factors, canonical as today (sorted, coeff first)…,
 - Implementation: `mul()` partitions factors into scalar/matrix segments
   before its existing pipeline; the scalar segment goes through the current
   fold-sort-combine unchanged; the matrix segment keeps order. `cmp` already
-  ranks `Matrix` last (rank 21, `norm/order.rs:40`), so the segmented layout
+  ranks `Matrix` last (rank 21, `normalize/order.rs:40`), so the segmented layout
   is *almost* what sorting produces — the change is using a **stable
   partition instead of a full sort** so equal-rank matrix factors never
   reorder.
@@ -166,7 +166,7 @@ Mul([ …scalar factors, canonical as today (sorted, coeff first)…,
   when the det is provably nonzero, else unevaluated; non-integer →
   unevaluated.
 - `Neg`/scalar distribution into entries; `transpose`, `trace` as new ops in
-  a new `src/matrix.rs` (public functions, not new Expr variants — they
+  a new `src/matrix/` (public functions, not new Expr variants — they
   evaluate eagerly on literal matrices, return unevaluated `OtherOp` on
   non-matrices, mirroring `derivative`'s opaque fallback).
 
@@ -175,7 +175,7 @@ Mul([ …scalar factors, canonical as today (sorted, coeff first)…,
 | Entry type | Algorithm | Guard |
 |---|---|---|
 | All rational (`Num`) | Bareiss fraction-free elimination over `Number` | `limits.max_matrix_dim` (default 64) |
-| Polynomial in ≤ few vars (§8 `expr_to_poly` succeeds) | Bareiss over the poly layer (`exact_div` exists, `poly/mod.rs:176` — Bareiss's exact divisions are its native operation) | poly `MAX_DEGREE`/size caps already in place |
+| Polynomial in ≤ few vars (§8 `expr_to_poly` succeeds) | Bareiss over the poly layer (`exact_div` exists, `polynomials/multivariate.rs:176` — Bareiss's exact divisions are its native operation) | poly `MAX_DEGREE`/size caps already in place |
 | General symbolic entries | cofactor expansion + `simplify` per minor | n ≤ `limits.max_symbolic_det_dim` (default 6; n! terms) |
 
 - `inverse` = adjugate/det for symbolic (small n), Gauss–Jordan with
@@ -216,7 +216,7 @@ Expr::RootOf {
 
 ### 2b. Characteristic polynomial
 
-`char_poly(A, var) -> Option<Expr>` in `src/matrix.rs` via
+`char_poly(A, var) -> Option<Expr>` in `src/matrix/` via
 **Faddeev–LeVerrier**: `M₁ = A, c₁ = −tr A; Mₖ = A(Mₖ₋₁ + cₖ₋₁I), cₖ =
 −tr(A·Mₖ₋₁ + cₖ₋₁A)/k`. Only ring operations plus division by integers —
 works verbatim over exact rational entries, and over symbolic entries via
@@ -259,7 +259,7 @@ returns closed forms where honest, `RootOf` elsewhere.
 
 ### 2d. `RootOf` arithmetic, simplification, equality, evaluation
 
-- **Simplify rules** (new cluster in `norm/simplify.rs`): `p(RootOf(p,k)) →
+- **Simplify rules** (new cluster in `normalize/simplify.rs`): `p(RootOf(p,k)) →
   0`; power reduction — `RootOf(p,k)ⁿ` for `n ≥ deg p` rewrites by the
   precomputed remainder of `tⁿ mod p` (coefficients cached per poly). Sums
   and products of *the same* root reduce to a polynomial in that root of
@@ -306,7 +306,7 @@ For eigenvalue λ = `RootOf(f, k)` of A: eigenvectors = nullspace of
 
 ## 5. Integration & API surface
 
-- `src/matrix.rs`: `matmul`, `transpose`, `trace`, `determinant`,
+- `src/matrix/`: `matmul`, `transpose`, `trace`, `determinant`,
   `matrix_inverse`, `rref`, `rank`, `nullspace`, `char_poly`, `eigenvalues`,
   `eigenvectors` — all taking `&Assumptions` where pivoting/nonzero gates
   apply, re-exported from `lib.rs`.

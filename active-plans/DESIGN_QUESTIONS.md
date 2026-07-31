@@ -9,7 +9,7 @@ a reviewer can confirm or change it. Add new entries at the top.
 
 ## Q1. Sign symmetry of `±` under negation and rendering
 
-**Area:** `pm` (plus-minus) — `norm` (canonicalize/simplify) + `output` renderers.
+**Area:** `pm` (plus-minus) — `normalize` (canonicalize/simplify) + `print` renderers.
 
 ### Current behaviour
 
@@ -36,7 +36,7 @@ uses that symmetry:
 ### Why
 
 The simplifier's oracle is *meaning-preserving + reduced*, **not** tree-match to
-the JS reference (per `norm/simplify.rs` module docs). `−(±x) → ±x` and
+the JS reference (per `normalize/simplify.rs` module docs). `−(±x) → ±x` and
 `2·±x → ±(2x)` are both meaning-preserving and strictly more reduced, so they are
 applied at the canonical level — which also lets `equals` settle
 `equals(−(±x), ±x)` structurally at stage 1 instead of by numeric sampling.
@@ -66,6 +66,6 @@ canonical level in Rust differ from JS tree conventions:
 
 ### Status
 
-Implemented and tested (`tests/pm.rs`, `src/pm.rs`, `src/norm/{mod,expand}.rs`,
-`src/output/{latex,text}.rs`). The open questions above do not affect
+Implemented and tested (`tests/pm.rs`, `src/ops/pm.rs`, `src/normalize/{mod,expand}.rs`,
+`src/print/{latex,text}.rs`). The open questions above do not affect
 correctness (`equals` is unaffected); they are cosmetic/canonical-form choices.

@@ -361,7 +361,7 @@ suite and the §5 corpora at far larger scale. Listed for completeness:
 | `quick_normalization.spec.js` | 62 | `norm.rs` (12) | parse trees (0 divergence, §1) + per-pass normalizers folded into `canonicalize` |
 | `quick_transformation.spec.js` | 8 | `expand_corpus` (247) | `expand` covered; **`expand_relations` op absent in Rust** |
 | `slow_polynomial.spec.js` | ~23 | none | **entire Groebner/poly engine absent in Rust** — cannot run |
-| `quick_pm.spec.js` | 58 | `tests/pm.rs` (14), `pm::tests` (3) | ± primitives, `.equals`, `simplify` rules, and `expand` guards ported (`src/pm.rs`, `eq::pm_equals`, `norm`) |
+| `quick_pm.spec.js` | 58 | `tests/pm.rs` (14), `pm::tests` (3) | ± primitives, `.equals`, `simplify` rules, and `expand` guards ported (`src/ops/pm.rs`, `equality::plus_minus::pm_equals`, `normalize`) |
 
 `slow_polynomial` is not "output differs" — the operation does not exist in Rust
 at all (see [JS_RUST_DIFF.md](JS_RUST_DIFF.md) §4). `quick_pm` is fully covered:

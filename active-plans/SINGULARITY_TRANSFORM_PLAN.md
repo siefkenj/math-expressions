@@ -12,7 +12,7 @@ to t = 0, where the existing machinery already reaches full depth.
 
 ## 0. The problem being solved
 
-`improper_value` (src/precise/diverge.rs) excises a cell of width w around
+`improper_value` (src/eval_numeric/certified_digits/diverge.rs) excises a cell of width w around
 each certified-convergent singular point and bounds its tail ∝ w^(1−β).
 Reaching more digits requires shrinking w. Near a singular point at c ≠ 0
 (e.g. x = 1 for ∫₀¹ dx/√(1−x²)) the interval evaluator computes the divisor

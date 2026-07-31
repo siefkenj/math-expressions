@@ -4,7 +4,8 @@
 //! `simplify` (no assumptions) and `simplify_with` (with assumptions), so this
 //! file also pins that the three agree.
 
-use math_expressions::{full_simplify, simplify, simplify_with, Assumptions, Expr, TextToAst};
+use math_expressions::normalize::full_simplify;
+use math_expressions::{simplify, simplify_with, Assumptions, Expr, TextToAst};
 
 fn p(s: &str) -> Expr {
     TextToAst::new(Default::default())

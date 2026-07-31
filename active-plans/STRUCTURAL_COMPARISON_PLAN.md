@@ -8,7 +8,7 @@
 >   `convert` drops the whole-tree `flatten` (no `preserve_grouping` flag), so
 >   the raw associative grouping survives. `flatten` moved to the *leading step*
 >   of the four consumers that need a canonical shape: `normalize_syntactic`,
->   the output formatters (`to_text`/`to_latex`), `js_tree::to_js`, and
+>   the output formatters (`to_text`/`to_latex`), `expr::serde::to_js`, and
 >   `check_structural_comparison`. The value path (`equals`/`simplify`) already
 >   flattens via `canonicalize`. Net observable behavior unchanged; 463 tests +
 >   the JS differential corpora stay green.
@@ -33,7 +33,7 @@
 >   struct-variant surgery on `Num`/`Mul` (**331 construct/match sites** —
 >   measured) against a green suite; poor risk/reward for two niche checks. Left
 >   as a self-contained follow-up (§4 unchanged).
-> - **F3** (`src/wasm.rs`): `Expression.check_structural_comparison(json)`
+> - **F3** (`packages/math-expressions-rs-wasm/src-rust/grading.rs`): `Expression.check_structural_comparison(json)`
 >   (returns a JSON `StructuralComparisonResult`) and
 >   `Expression.structural_equality(key, json)` (form + value → bool).
 > - **F4:** deferred by design (no sourced directive needs source spans).
@@ -47,7 +47,7 @@
 
 ## 1. Problem
 
-`equals` / `equals_syntactic` (`src/eq/mod.rs`) answer *"is this the same
+`equals` / `equals_syntactic` (`src/equality/api.rs`) answer *"is this the same
 value/expression?"*. They cannot answer *"did the student write it in the
 required form?"* — because the required-form questions teachers ask
 (§ Appendix A) are about the **tree as typed**, and two of them
@@ -55,7 +55,7 @@ required form?"* — because the required-form questions teachers ask
 **discards before the AST exists**:
 
 - The lexer maps every decimal spelling to an exact rational
-  (`0.5`, `0.50`, `.5` → `Num(Rat(1,2))`; `from_decimal_str`, `src/num.rs`),
+  (`0.5`, `0.50`, `.5` → `Num(Rat(1,2))`; `from_decimal_str`, `src/num/decimal.rs`),
   so "as a decimal to 3 places" is unanswerable from the tree.
 - Implicit and explicit multiplication and every glyph (`*·×•⋅`, `\cdot`,
   `\times`) all collapse to one `Tok::Times` → `Expr::Mul` with no marker
@@ -103,9 +103,9 @@ integrand keeps its flatten for differential extraction — both are functional
 parse steps, not normalization). `flatten` becomes the **leading step of every
 consumer that needs the canonical n-ary shape**:
 
-- `norm::normalize_syntactic` (the `equalsViaSyntax`/`equals_syntactic` path),
-- the output formatters `to_text`/`to_latex` (`src/output/mod.rs`),
-- `js_tree::to_js` (keeps `tree_json` a flat JS AST for DoenetML),
+- `normalize::normalize_syntactic` (the `equalsViaSyntax`/`equals_syntactic` path),
+- the output formatters `to_text`/`to_latex` (`src/print/mod.rs`),
+- `expr::serde::to_js` (keeps `tree_json` a flat JS AST for DoenetML),
 - `check_structural_comparison` (flattens *faithfully* — merges grouping but
   keeps `Div`/`Neg`/order/spelling, never canonicalizes).
 
@@ -120,12 +120,12 @@ tree that is always available with no flag.
 
 Add owned, `Copy`-friendly provenance to the two variants that lose
 information, carried **invisibly to `Eq`/`Hash`/`Ord`** so the algebra engine
-is untouched (`equals` compares with `==` at `src/eq/mod.rs:88/101/178/200`;
-`factor.rs` uses `HashMap<Expr,_>`; `order::cmp` sorts operands — all must stay
+is untouched (`equals` compares with `==` at `src/equality/api.rs`;
+`polynomials/factor.rs` uses `HashMap<Expr,_>`; `order::cmp` sorts operands — all must stay
 pure tree operations):
 
 ```rust
-// src/expr.rs
+// src/expr/tree.rs
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MulStyle { Implicit, Star, Cdot, Times, Dot, Space }
 
@@ -212,12 +212,12 @@ criterion (also requiring value equality). `check_structural_comparison` is the
 just the `SameStructure` structural comparison — no separate concept.
 
 Analyzers are structural predicates over the faithful `Expr`. Reuse the
-existing pattern engine (`src/js_match.rs`) for the `MatchesTemplate` /
+existing pattern engine (`packages/math-expressions-rs-wasm/src-rust/js_match.rs`) for the `MatchesTemplate` /
 `CompletedSquare` template checks rather than hand-rolling. `FactoredCompletely`
-leans on `src/factor.rs` (irreducibility over ℚ) but tests the *student's*
+leans on `src/polynomials/factor.rs` (irreducibility over ℚ) but tests the *student's*
 shape — it does not replace the student tree with `factor()`'s output.
-`ReducedFraction` / `RadicalSimplified` reuse `src/ratform.rs` and
-`src/upoly.rs` squarefree machinery *as oracles*, applied to the written
+`ReducedFraction` / `RadicalSimplified` reuse `src/polynomials/ratform.rs` and
+`src/polynomials/univariate.rs` squarefree machinery *as oracles*, applied to the written
 denominator/radicand.
 
 ## 6. Directive → check mapping (grading target)
@@ -254,7 +254,7 @@ denominator/radicand.
   `MulStyleIs` deferred; `ExactValue`/`Decimal{places:None}` already shipped
   tag-free in F1.
 - **F3 (done)** — wasm surface: `Expression.check_structural_comparison(json)`
-  and `Expression.structural_equality(key, json)` (`src/wasm.rs`),
+  and `Expression.structural_equality(key, json)` (`packages/math-expressions-rs-wasm/src-rust/grading.rs`),
   JSON-serializable so DoenetML consumes verdicts + `why`.
 - **F4 (deferred, optional)** — byte-span source maps, *iff* a UI feature needs
   caret-on-error highlighting. Not required by any sourced directive.

@@ -89,7 +89,7 @@ pub use matrix::{
     nullspace, rank, rref, trace, transpose, vector_add, vector_sub, EigenPair,
 };
 pub use normalize::{
-    canonicalize, desugar_units, expand, full_simplify, simplify, simplify_logical, simplify_with,
+    canonicalize, desugar_units, expand, simplify, simplify_logical, simplify_with,
 };
 pub use notation::{Digits, Grouping, NumberNotation};
 pub use num::Number;
