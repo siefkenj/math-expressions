@@ -39,6 +39,7 @@ pub fn try_from_js(value: &Value) -> Result<Expr, String> {
             Some("Inf") => Ok(Expr::Const(MathConst::Inf)),
             Some("-Inf") => Ok(Expr::Const(MathConst::NegInf)),
             Some("NaN") => Ok(Expr::Const(MathConst::NaN)),
+            Some("None") => Ok(Expr::Const(MathConst::None)),
             other => Err(format!("unknown special {other:?}")),
         },
         Value::Array(arr) => from_js_array(arr),
@@ -239,6 +240,7 @@ fn to_js_rec(expr: &Expr) -> Value {
             crate::expr::MathConst::Inf => json!({"$": "Inf"}),
             crate::expr::MathConst::NegInf => json!({"$": "-Inf"}),
             crate::expr::MathConst::NaN => json!({"$": "NaN"}),
+            crate::expr::MathConst::None => json!({"$": "None"}),
             crate::expr::MathConst::Pi => Value::String("pi".to_string()),
             crate::expr::MathConst::E => Value::String("e".to_string()),
             crate::expr::MathConst::I => Value::String("i".to_string()),
@@ -492,6 +494,28 @@ mod tests {
             let expr = try_from_js(&tree).expect("a boolean leaf is a legal tree");
             assert_eq!(to_js_rec(&expr), tree, "round trip of {tree}");
         }
+    }
+
+    /// All four `{"$":…}` specials must round-trip. `None` was the odd one out:
+    /// `try_from_js` accepted `Inf`/`-Inf`/`NaN` and rejected `{"$":"None"}` with
+    /// `unknown special "None"`, so a DoenetML tree carrying a "no value here"
+    /// leaf — an undefined polygon vertex, an empty piecewise branch — could not
+    /// be revived at all, taking the whole expression down with it.
+    #[test]
+    fn the_none_special_round_trips_like_the_other_three() {
+        for tag in ["Inf", "-Inf", "NaN", "None"] {
+            let tree = json!({ "$": tag });
+            let expr = try_from_js(&tree).unwrap_or_else(|e| panic!("{tag}: {e}"));
+            assert_eq!(to_js_rec(&expr), tree, "round trip of {tag}");
+        }
+        assert_eq!(
+            try_from_js(&json!({"$": "None"})).unwrap(),
+            Expr::Const(MathConst::None)
+        );
+        // A `None` inside a container revives with the container intact, which is
+        // the shape DoenetML actually feeds in.
+        let nested = json!(["tuple", {"$": "None"}, 2]);
+        assert_eq!(to_js_rec(&try_from_js(&nested).unwrap()), nested);
     }
 
     /// The distinction the whole variant exists for: a boolean must come back

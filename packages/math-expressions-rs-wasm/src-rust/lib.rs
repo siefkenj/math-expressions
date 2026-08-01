@@ -86,6 +86,27 @@ impl Expression {
     }
 }
 
+/// Free the handle's tree iteratively (STACK_SAFETY_PLAN item 21). A handle can
+/// hold an adversarially deep tree — `((((…))))` from student input — whose
+/// ordinary recursive `Drop` would blow the ~1 MB wasm shadow stack and, under
+/// `panic = "abort"`, kill the worker. `tear_down` dismantles it with a heap
+/// worklist first, leaving `self.0` a shallow shell for the ordinary drop.
+impl Drop for Expression {
+    fn drop(&mut self) {
+        math_expressions::tear_down(&mut self.0);
+    }
+}
+
+/// The number of distinct symbol names interned this session — a memory gauge
+/// for the long-lived worker (item 8). The interner is append-only (a `Sym` is
+/// a raw index into it), so this only grows; it lets the host measure symbol
+/// growth before committing to the generational-`Sym` redesign true eviction
+/// would need.
+#[wasm_bindgen]
+pub fn interner_size() -> usize {
+    math_expressions::interner_len()
+}
+
 #[cfg(test)]
 mod notation_carry_tests {
     /// The notation an expression was parsed with must follow it through

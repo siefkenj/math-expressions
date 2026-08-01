@@ -32,7 +32,7 @@ pub fn eval_complex(e: &Expr, env: &Env) -> Option<Complex64> {
             MathConst::Pi => Complex64::new(std::f64::consts::PI, 0.0),
             MathConst::E => Complex64::new(std::f64::consts::E, 0.0),
             MathConst::I => Complex64::I,
-            MathConst::Inf | MathConst::NegInf | MathConst::NaN => return None,
+            MathConst::Inf | MathConst::NegInf | MathConst::NaN | MathConst::None => return None,
         },
         // `pi`, `e`, `i` are number-symbols (constants), not free variables —
         // the parser emits them as plain symbols (matching JS convention).

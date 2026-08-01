@@ -100,6 +100,7 @@ fn latex_out(nt: &NumberNotation, e: &Expr) -> String {
         e,
         &LatexOpts {
             notation: nt.clone(),
+            ..Default::default()
         },
     )
 }

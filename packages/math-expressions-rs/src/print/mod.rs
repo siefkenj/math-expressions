@@ -192,3 +192,156 @@ pub(crate) fn f64_positional_string(v: f64) -> String {
         format!("0.{}{}", "0".repeat((-n) as usize), s)
     }
 }
+
+/// Append trailing zeros to a rendered positional number so it shows at least
+/// `pad_to_digits` significant characters and/or `pad_to_decimals` fractional
+/// places — port of the legacy `padNumberStringToDigitsAndDecimals`
+/// (`converters/pad-numbers.js`). Pads only: never rounds, shortens, or moves
+/// the point. A `None` or `0` bound is inactive. `s` is a positional magnitude,
+/// possibly signed (`-1.5`), never exponential — matching the strings the
+/// number printers produce.
+///
+/// Both bounds are clamped to [`MAX_PAD`]: padding is pure `"0".repeat(n)`, so
+/// an unclamped bound turns a render option into an out-of-memory abort, which
+/// on wasm (`panic = "abort"`) takes the whole worker with it. Legacy raised a
+/// `RangeError` at the same wall; a clamp keeps the render alive instead.
+pub(crate) fn pad_number(
+    s: &str,
+    pad_to_digits: Option<u32>,
+    pad_to_decimals: Option<u32>,
+) -> String {
+    let bound = |d: Option<u32>| d.filter(|&d| d > 0).map(|d| (d as usize).min(MAX_PAD));
+    let (digits, decimals) = (bound(pad_to_digits), bound(pad_to_decimals));
+    match (digits, decimals) {
+        (None, None) => s.to_string(),
+        (None, Some(dec)) => pad_to_decimals_str(s, dec),
+        (Some(dig), None) => pad_to_digits_str(s, dig),
+        (Some(dig), Some(dec)) => pad_to_digits_and_decimals(s, dig, dec),
+    }
+}
+
+/// The largest padding [`pad_number`] will honor. Well past any real display
+/// use (a rendered number nobody reads is still a number nobody reads), and
+/// small enough that the worst case is a few KB rather than an allocation
+/// failure.
+const MAX_PAD: usize = 1024;
+
+/// Chars in the leading `0.0*` run (the JS `/^0\.0*/` match). Only called when
+/// `s` begins `0.`.
+fn leading_zero_run(s: &str) -> usize {
+    2 + s[2..].chars().take_while(|&c| c == '0').count()
+}
+
+/// Fractional-digit count — chars after the `.` (0 if none).
+fn decimal_count(s: &str) -> usize {
+    s.split_once('.').map_or(0, |(_, frac)| frac.len())
+}
+
+fn pad_to_digits_str(s: &str, n_digits: usize) -> String {
+    let mut s = s.to_string();
+    let mut n_chars = n_digits;
+    if s.contains('.') {
+        // A non-leading-zero head (including a `-` sign) costs one char for the
+        // point; a `0.00…` head costs the whole run — mirrors the JS branch.
+        n_chars += if s.starts_with('0') {
+            leading_zero_run(&s)
+        } else {
+            1
+        };
+        if s.len() < n_chars {
+            s.push_str(&"0".repeat(n_chars - s.len()));
+        }
+    } else if s.len() < n_chars {
+        let n_pad = n_chars - s.len();
+        s.push('.');
+        s.push_str(&"0".repeat(n_pad));
+    }
+    s
+}
+
+fn pad_to_decimals_str(s: &str, n_decimals: usize) -> String {
+    let mut s = s.to_string();
+    if s.contains('.') {
+        let current = decimal_count(&s);
+        if current < n_decimals {
+            s.push_str(&"0".repeat(n_decimals - current));
+        }
+    } else {
+        s.push('.');
+        s.push_str(&"0".repeat(n_decimals));
+    }
+    s
+}
+
+fn pad_to_digits_and_decimals(s: &str, n_digits: usize, n_decimals: usize) -> String {
+    let mut s = s.to_string();
+    if s.contains('.') {
+        let mut n_chars = n_digits;
+        n_chars += if s.starts_with('0') {
+            leading_zero_run(&s)
+        } else {
+            1
+        };
+        let mut n_pad = n_chars.saturating_sub(s.len());
+        let current = decimal_count(&s);
+        if current < n_decimals {
+            n_pad = n_pad.max(n_decimals - current);
+        }
+        if n_pad > 0 {
+            s.push_str(&"0".repeat(n_pad));
+        }
+    } else {
+        let n_pad = n_digits.saturating_sub(s.len()).max(n_decimals);
+        s.push('.');
+        s.push_str(&"0".repeat(n_pad));
+    }
+    s
+}
+
+#[cfg(test)]
+mod pad_tests {
+    use super::pad_number;
+    fn d(s: &str, dec: u32) -> String {
+        pad_number(s, None, Some(dec))
+    }
+    fn g(s: &str, dig: u32) -> String {
+        pad_number(s, Some(dig), None)
+    }
+
+    #[test]
+    fn pads_decimals() {
+        assert_eq!(d("1.5", 4), "1.5000");
+        assert_eq!(d("2", 3), "2.000");
+        assert_eq!(d("1.5", 1), "1.5"); // already enough
+        assert_eq!(d("-0.75", 4), "-0.7500");
+    }
+
+    #[test]
+    fn pads_digits() {
+        assert_eq!(g("5", 4), "5.000");
+        assert_eq!(g("1.5", 4), "1.500"); // 1,5,0,0 significant chars + point
+        assert_eq!(g("0.005", 2), "0.0050"); // leading-zero run counted
+    }
+
+    #[test]
+    fn pads_to_the_larger_of_both() {
+        assert_eq!(pad_number("1.5", Some(6), Some(2)), "1.50000"); // 6 sig chars win
+        assert_eq!(pad_number("1.5", Some(2), Some(4)), "1.5000"); // decimals win
+        assert_eq!(pad_number("3", Some(4), Some(2)), "3.000"); // digits win, integer
+    }
+
+    #[test]
+    fn zero_and_none_bounds_are_inactive() {
+        assert_eq!(pad_number("1.5", None, None), "1.5");
+        assert_eq!(pad_number("1.5", Some(0), Some(0)), "1.5");
+    }
+
+    /// An absurd bound clamps instead of trying to allocate 4 GB of zeros.
+    #[test]
+    fn an_absurd_bound_clamps_instead_of_exhausting_memory() {
+        // `1.` plus MAX_PAD fractional zeros.
+        assert_eq!(d("1.5", u32::MAX).len(), 2 + super::MAX_PAD);
+        // MAX_PAD significant characters plus the decimal point.
+        assert_eq!(g("5", u32::MAX).len(), super::MAX_PAD + 1);
+    }
+}

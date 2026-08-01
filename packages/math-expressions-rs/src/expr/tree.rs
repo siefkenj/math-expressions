@@ -131,6 +131,17 @@ pub enum MathConst {
     Inf,
     NegInf,
     NaN,
+    /// The `{"$":"None"}` special — DoenetML's "no value here". A sibling of the
+    /// other `{"$":…}` specials in *shape* (they are the four JSON values that
+    /// have no bare literal), which is why it lives here rather than as its own
+    /// leaf: it serializes to a tagged object, exactly like `Inf`/`NaN`, not to
+    /// a string or a JSON scalar. It is not a mathematical constant, but neither
+    /// is `NaN`; the grouping is by serde shape, not by meaning.
+    ///
+    /// No parser produces it and it is non-numeric, so — like [`Expr::Bool`] —
+    /// only the AST round-trip through [`serde`](super::serde) is faithful; the
+    /// printers spell it `None` for display and it does not read back.
+    None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -21,6 +21,18 @@ pub struct TextOpts {
     pub unicode: bool,
     /// Decimal / argument-separator notation.
     pub notation: crate::notation::NumberNotation,
+    /// Pad every rendered number to at least this many significant characters
+    /// (`padToDigits`). `None`/`0` = no padding.
+    pub pad_to_digits: Option<u32>,
+    /// Pad every rendered number to at least this many decimal places
+    /// (`padToDecimals`). `None`/`0` = no padding.
+    pub pad_to_decimals: Option<u32>,
+    /// Render blank leaves (`＿`) visibly (`showBlanks`); when false they emit
+    /// as the empty string.
+    pub show_blanks: bool,
+    /// Put an explicit `*` between every pair of factors instead of the usual
+    /// juxtaposition (`explicitMultiplicationSymbols`).
+    pub explicit_multiplication_symbols: bool,
 }
 
 impl Default for TextOpts {
@@ -28,6 +40,10 @@ impl Default for TextOpts {
         TextOpts {
             unicode: true,
             notation: crate::notation::NumberNotation::default(),
+            pad_to_digits: None,
+            pad_to_decimals: None,
+            show_blanks: true,
+            explicit_multiplication_symbols: false,
         }
     }
 }
@@ -81,7 +97,14 @@ impl Writer<'_> {
             // lexes it as `t*r*u*e`. So this does not round-trip through text
             // in any form; the AST round-trip is the faithful one.
             Expr::Bool(b) => (b.to_string(), ATOM),
-            Expr::Blank => ("\u{ff3f}".to_string(), ATOM),
+            Expr::Blank => (
+                if self.opts.show_blanks {
+                    "\u{ff3f}".to_string()
+                } else {
+                    String::new()
+                },
+                ATOM,
+            ),
             Expr::Ldots => ("...".to_string(), ATOM),
 
             Expr::Add(terms) => (self.render_add(terms), ADD),
@@ -216,10 +239,11 @@ impl Writer<'_> {
             } else {
                 prec::ATOM
             };
-            return (self.decimal(dec), p);
+            return (self.decimal(self.pad(dec)), p);
         }
         // A non-terminating fraction (only from later normalization) renders
-        // as `a/b`, binding like the division it re-parses to.
+        // as `a/b`, binding like the division it re-parses to. Padding is a
+        // decimal-display option and does not apply to the fraction spelling.
         if let Some((num, den)) = n.rational_parts() {
             let p = if num.starts_with('-') {
                 prec::NEG
@@ -235,7 +259,13 @@ impl Writer<'_> {
         } else {
             prec::ATOM
         };
-        (self.decimal(s), p)
+        (self.decimal(self.pad(s)), p)
+    }
+
+    /// Apply the `padToDigits`/`padToDecimals` render options to a positional
+    /// number string (before the decimal separator is localized).
+    fn pad(&self, s: String) -> String {
+        super::pad_number(&s, self.opts.pad_to_digits, self.opts.pad_to_decimals)
     }
 
     fn render_symbol(&self, name: &str) -> String {
@@ -260,6 +290,8 @@ impl Writer<'_> {
             }
             .to_string(),
             MathConst::NaN => "NaN".to_string(),
+            // Display only — no text spelling parses back (see `Expr::Bool`).
+            MathConst::None => "None".to_string(),
         }
     }
 
@@ -301,10 +333,15 @@ impl Writer<'_> {
         for (i, f) in factors.iter().enumerate() {
             let s = self.emit(f, if i == 0 { prec::MUL } else { prec::MUL + 1 });
             if i > 0 {
-                // A space disambiguates tokens; use ` * ` when the right factor
-                // begins with a digit (so two numbers don't merge) or the left
-                // factor is a shorthand `∠A` (which would otherwise absorb it).
-                if s.starts_with(|c: char| c.is_ascii_digit())
+                // `explicitMultiplicationSymbols`: a bare `*` between every pair
+                // (port of the legacy `termFactors.join("*")`).
+                if self.opts.explicit_multiplication_symbols {
+                    out.push('*');
+                }
+                // Otherwise a space disambiguates tokens; use ` * ` when the
+                // right factor begins with a digit (so two numbers don't merge)
+                // or the left factor is a shorthand `∠A` (which would absorb it).
+                else if s.starts_with(|c: char| c.is_ascii_digit())
                     || is_shorthand_angle(&factors[i - 1])
                 {
                     out.push_str(" * ");

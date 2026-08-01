@@ -17,6 +17,10 @@ export interface WasmExpression {
   tree_json(): string;
   to_text(): string;
   to_latex(): string;
+  /** Render to text under a JSON options object (unicode, notation, padToDigits, padToDecimals, showBlanks, explicitMultiplicationSymbols). */
+  to_text_with_options(options_json: string): string;
+  /** Render to LaTeX under a JSON options object (notation, padToDigits, padToDecimals, showBlanks, explicitMultiplicationSymbols). */
+  to_latex_with_options(options_json: string): string;
   to_serialized(): string;
   variables(): string[];
   functions(): string[];
@@ -60,6 +64,8 @@ export interface WasmExpression {
   tuples_to_vectors(): WasmExpression;
   altvectors_to_vectors(): WasmExpression;
   to_intervals(): WasmExpression;
+  /** Move `+`/scalar-`*` inside vector & matrix containers (the grading shape pass). */
+  perform_vector_matrix_additions_scalar_multiplications(): WasmExpression;
   subscripts_to_strings(): WasmExpression;
   strings_to_subscripts(): WasmExpression;
   copy(): WasmExpression;
@@ -138,6 +144,34 @@ export interface WasmModule {
   unflatten_left(treeJson: string): string | undefined;
   unflatten_right(treeJson: string): string | undefined;
   Assumptions: WasmAssumptionsConstructor;
+  /** Distinct symbol names interned this session — an append-only memory gauge. */
+  interner_size(): number;
+  /** Dormand-Prince ODE integrator with dense output — the `numeric.dopri` core. */
+  solve_ode(
+    f: (t: number, y: Float64Array) => number[],
+    t0: number,
+    t1: number,
+    y0: Float64Array,
+    tol: number,
+    maxSteps: number,
+  ): WasmOdeSolution;
+}
+
+/** A computed ODE trajectory with dense output (the `solve_ode` result). */
+export interface WasmOdeSolution {
+  /** Interpolated state at `t` (length = {@link dim}). */
+  at(t: number): Float64Array;
+  /** States at each `ts[i]`, flattened row-major. */
+  at_many(ts: Float64Array): Float64Array;
+  dim(): number;
+  last_t(): number;
+  last_y(): Float64Array;
+  /** True when integration stopped before `t1` (blow-up / step budget). */
+  terminated_early(): boolean;
+  /** Accepted step abscissas. */
+  times(): Float64Array;
+  /** Release the wasm handle. */
+  free(): void;
 }
 
 /**

@@ -4,7 +4,7 @@
 // Not every legacy method exists on the Rust side; those that don't are either
 // approximated, or throw a clear "not implemented in js-compat" so the calling
 // test fails cleanly (the suite still runs). See JS_TEST_COVERAGE_AUDIT.md.
-import wasm from "./_wasm";
+import wasm, { setWasmModule } from "./_wasm";
 import math from "./mathjs";
 import { match, flatten, unflattenLeft, unflattenRight } from "./trees/flatten";
 import * as converters from "./converters/index";
@@ -72,6 +72,38 @@ function componentPath(component: number | number[]): Uint32Array {
   return Uint32Array.from(path, (i) => Number(i));
 }
 
+/**
+ * `JSON.stringify` replacer that preserves the non-finite numbers JSON cannot
+ * hold. `JSON.stringify(NaN) === "null"` and likewise for `±Infinity`, so a
+ * `NaN` slope or an infinite bound would reach the Rust boundary as `null` and
+ * be rejected — the tree is serialized here on the way in, and this maps those
+ * three values to the `{"$":…}` specials the Rust `from_ast` already reads back.
+ * An already-special `{"$":"NaN"}` object passes through untouched.
+ *
+ * Note the boundary is deliberately *tagged in both directions*: `.tree` gives
+ * back `{"$":"NaN"}`, not a JS `NaN`. DoenetML already emits `{"$":"None"}`
+ * itself, so one tagged wire format — in and out, `fromAst(x).tree` a fixpoint —
+ * beats a half-symmetric one where `NaN`/`±Infinity` untag but `None` (which has
+ * no JS scalar) cannot. See DOENET_INTEGRATION.md §"Non-finite and absent values".
+ */
+function astReplacer(_key: string, value: unknown): unknown {
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    if (Number.isNaN(value)) return { $: "NaN" };
+    return { $: value > 0 ? "Inf" : "-Inf" };
+  }
+  return value;
+}
+
+/**
+ * Whether a render call carries options worth forwarding to the wasm
+ * `*_with_options` entry points (padToDigits, padToDecimals, showBlanks,
+ * explicitMultiplicationSymbols, notation, unicode). An empty/absent object
+ * takes the cheaper no-options render path.
+ */
+function hasRenderOpts(opts: unknown): opts is Record<string, unknown> {
+  return !!opts && typeof opts === "object" && Object.keys(opts).length > 0;
+}
+
 /** A variable argument may be a string name or an Expression of a symbol. */
 function varName(v: string | Expression): string {
   if (typeof v === "string") return v;
@@ -115,17 +147,22 @@ class Expression {
   get tree() {
     return JSON.parse(this._w.tree_json());
   }
-  toString() {
-    return this._w.to_text();
+  // Rendering honors the legacy render options (padToDigits, padToDecimals,
+  // showBlanks, explicitMultiplicationSymbols, notation/unicode) by forwarding
+  // a non-empty options object to the `*_with_options` wasm entry points. The
+  // no-arg path stays on the cheap no-options render — `toString()` is what JS
+  // coercion (`String(expr)`) calls.
+  toString(opts?) {
+    return hasRenderOpts(opts) ? this._w.to_text_with_options(JSON.stringify(opts)) : this._w.to_text();
   }
-  toText() {
-    return this._w.to_text();
+  toText(opts?) {
+    return hasRenderOpts(opts) ? this._w.to_text_with_options(JSON.stringify(opts)) : this._w.to_text();
   }
-  toLatex() {
-    return this._w.to_latex();
+  toLatex(opts?) {
+    return hasRenderOpts(opts) ? this._w.to_latex_with_options(JSON.stringify(opts)) : this._w.to_latex();
   }
-  tex() {
-    return this._w.to_latex();
+  tex(opts?) {
+    return hasRenderOpts(opts) ? this._w.to_latex_with_options(JSON.stringify(opts)) : this._w.to_latex();
   }
   toJSON() {
     return JSON.parse(this._w.to_serialized());
@@ -200,7 +237,18 @@ class Expression {
   factor() {
     return wrap(this._w.factor(), this.context);
   }
-  evaluate_numbers(_opts) {
+  evaluate_numbers(opts) {
+    // The no-argument form (fold, then order) is supported. `skip_ordering`
+    // (DoenetML's `simplify="numberspreserveorder"`) is not — the core pass has
+    // no order-preserving mode — so reject it loudly rather than silently
+    // reorder, which is the bug this replaces (`1+x+2` came back `x+3`).
+    // `skip_ordering: false` is the default and passes straight through.
+    if (opts && opts.skip_ordering) {
+      throw new Error(
+        "math-expressions-js-compat: evaluate_numbers({skip_ordering:true}) is not " +
+          "implemented — the core pass always orders; only the ordering form is available",
+      );
+    }
     return wrap(this._w.evaluate_numbers(), this.context);
   }
   collect_like_terms_factors() {
@@ -232,6 +280,16 @@ class Expression {
   to_intervals() {
     return wrap(this._w.to_intervals(), this.context);
   }
+  // Move `+`/scalar-`*` inside vector & matrix containers so grading can slice
+  // the result into components. Not arithmetic — it deliberately leaves `1+3`
+  // rather than folding to `4` (`checkEquality` compares components under
+  // tolerance). Mirrored onto `Context`, so `me.perform_…(expr)` works too.
+  perform_vector_matrix_additions_scalar_multiplications() {
+    return wrap(
+      this._w.perform_vector_matrix_additions_scalar_multiplications(),
+      this.context,
+    );
+  }
   subscripts_to_strings() {
     return wrap(this._w.subscripts_to_strings(), this.context);
   }
@@ -240,6 +298,26 @@ class Expression {
   }
   copy() {
     return wrap(this._w.copy(), this.context);
+  }
+
+  // ---- lifetime ----
+  // Every Expression owns a Rust/wasm handle that is otherwise only reclaimed by
+  // the JS GC's FinalizationRegistry — too late for DoenetML's long-lived worker,
+  // which mints a handle per state-variable eval and per state-JSON revive. `free`
+  // releases it eagerly. Idempotent: the handle is nulled, so freeing twice is a
+  // no-op rather than the wasm-memory corruption a double free would cause, and a
+  // later method call fails on the null handle (a TypeError naming the method)
+  // instead of reading through a dangling pointer.
+  free() {
+    const w = this._w as WasmExpression | undefined;
+    if (w) {
+      w.free();
+      this._w = undefined as unknown as WasmExpression;
+    }
+  }
+  // Aliases: `dispose()` and the `using`-statement protocol.
+  dispose() {
+    this.free();
   }
 
   // ---- component access ----
@@ -387,6 +465,19 @@ class Expression {
   }
 }
 
+// The `using` protocol, attached only where the runtime actually has the symbol
+// (Node ≥ 18.18, Chrome ≥ 125, Safari ≥ 18.4). Written as a class member,
+// `[Symbol.dispose]() {}` on an engine without it would define a method keyed by
+// the *string* "undefined" — silently useless rather than absent, and `free()`
+// would never run. Feature-detecting keeps `using expr = me.fromText(…)` working
+// where it is supported and simply unavailable where it is not.
+if (typeof Symbol.dispose === "symbol") {
+  (Expression.prototype as Record<symbol, unknown>)[Symbol.dispose] =
+    function (this: Expression) {
+      this.free();
+    };
+}
+
 // Legacy methods with no Rust backing — defined so calls fail loudly, not as
 // "undefined is not a function" surprises. Tests using them fail; suite runs.
 for (const name of [
@@ -404,10 +495,12 @@ for (const name of [
   (Expression.prototype as Record<string, unknown>)[name] = notImplemented(name);
 }
 
-// Normalization / transformation passes with no standalone Rust entry point
-// (folded into `canonicalize`). Compat no-ops that return the expression
-// unchanged, so method chains still resolve and specs collect + run. Cases that
-// depended on the pass mismatch and fail — as expected (JS_TEST_COVERAGE_AUDIT).
+// Normalization passes with no faithful Rust entry point (folded into
+// `canonicalize`; `default_order` would need the JS ordering key, not Rust's
+// canonical `cmp`). Kept as no-ops returning `this` rather than throwing: a
+// blanket throw here regressed ~170 idempotent-input specs that legitimately
+// pass on the unchanged tree, and aborted whole spec files at collection. The
+// real fix is implementing them; see DOENET_COMPAT_PLAN R7 and the follow-up note.
 for (const name of [
   "default_order",
   "normalize_negative_numbers",
@@ -442,7 +535,68 @@ function createFrom(expr) {
   return Context.fromAst(expr); // number or AST
 }
 
+/**
+ * `numeric.dopri` drop-in — the Dormand-Prince ODE integrator DoenetML reached
+ * through the old bundled math.js (`me.math.dopri`). Since DoenetML is dropping
+ * mathjs, this is exported as a peer compat function (`me.dopri` / a named
+ * export) rather than under `me.math`; the call contract is unchanged:
+ *
+ *   dopri(x0, x1, y0, f, tol?, maxit?)
+ *
+ * `f(x, y)` returns the derivative; `y0`, the states, and `f`'s return are
+ * arrays for a system or plain numbers for a scalar ODE. The result exposes
+ * `.at(x)` dense interpolation (a scalar/array x), and the `.x`/`.y` step
+ * arrays. Backed by the Rust `solve_ode` integrator (one boundary crossing per
+ * RK stage). numeric.js's `event` argument is not supported.
+ */
+function dopri(
+  x0: number,
+  x1: number,
+  y0: number | ArrayLike<number>,
+  f: (x: number, y: number | number[]) => number | number[],
+  tol = 1e-6,
+  maxit = 1000,
+) {
+  const scalar = typeof y0 === "number";
+  const y0arr = scalar ? [y0 as number] : Array.from(y0 as ArrayLike<number>);
+  const rhs = scalar
+    ? (x: number, y: Float64Array) => [Number(f(x, y[0]))]
+    : (x: number, y: Float64Array) => Array.from(f(x, Array.from(y)) as number[], Number);
+  const sol = wasm.solve_ode(rhs, x0, x1, Float64Array.from(y0arr), tol, maxit);
+  const n = sol.dim();
+  const state = (flat: Float64Array, i: number) => {
+    const s = Array.from(flat.subarray(i * n, (i + 1) * n));
+    return scalar ? s[0] : s;
+  };
+  return {
+    /** Dense output: interpolated state at `x` (or one per element of an `x` array). */
+    at(x: number | number[]): number | number[] | (number | number[])[] {
+      if (Array.isArray(x)) {
+        const flat = sol.at_many(Float64Array.from(x));
+        return x.map((_, i) => state(flat, i));
+      }
+      const s = Array.from(sol.at(x));
+      return scalar ? s[0] : s;
+    },
+    /** Accepted step abscissas. */
+    get x(): number[] {
+      return Array.from(sol.times());
+    },
+    /** States at each step abscissa. */
+    get y(): (number | number[])[] {
+      const ts = sol.times();
+      const flat = sol.at_many(ts);
+      return Array.from(ts, (_v, i) => state(flat, i));
+    },
+    /** True when integration stopped before `x1` (blow-up / step budget). */
+    get terminatedEarly(): boolean {
+      return sol.terminated_early();
+    },
+  };
+}
+
 const Context = {
+  dopri,
   from: createFrom,
   fromText: parseText,
   parse: parseText,
@@ -453,13 +607,21 @@ const Context = {
   parse_tex: parseLatex,
   fromMml: notImplemented("fromMml"),
   fromAst(ast) {
-    return new Expression(wasm.from_ast(JSON.stringify(ast)), Context);
+    return new Expression(wasm.from_ast(JSON.stringify(ast, astReplacer)), Context);
   },
   reviver(key, value) {
     if (value && value.objectType === "math-expression" && value.tree !== undefined) {
       return Context.fromAst(value.tree);
     }
     return value;
+  },
+  /**
+   * Distinct symbol names interned this session — a memory gauge for the
+   * long-lived worker. Append-only (see item 8); use it to measure symbol
+   * growth over a session.
+   */
+  interner_size(): number {
+    return wasm.interner_size();
   },
   isTree,
   math,
@@ -529,5 +691,5 @@ for (const name of Object.getOwnPropertyNames(Expression.prototype)) {
     (toExpr(expr) as unknown as Record<string, (...a: unknown[]) => unknown>)[name](...args);
 }
 
-export { Expression };
+export { Expression, dopri, setWasmModule };
 export default Context;

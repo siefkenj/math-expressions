@@ -89,4 +89,13 @@ impl Expression {
     pub fn to_intervals(&self) -> Expression {
         self.derive(math_expressions::to_intervals(&self.0))
     }
+
+    /// Move `+`/scalar-`*` inside vector and matrix containers — the shape pass
+    /// answer grading runs before slicing an expression into components (JS
+    /// `perform_vector_matrix_additions_scalar_multiplications`).
+    pub fn perform_vector_matrix_additions_scalar_multiplications(&self) -> Expression {
+        self.derive(
+            math_expressions::perform_vector_matrix_additions_scalar_multiplications(&self.0),
+        )
+    }
 }

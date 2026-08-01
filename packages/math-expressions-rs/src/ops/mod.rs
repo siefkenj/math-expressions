@@ -5,6 +5,7 @@
 //! - [`numbers`] — numeric folding and display rounding
 //! - [`query`] — inspection (functions / operators / variables)
 //! - [`transforms`] — structural rewrites (substitute, subscripts, intervals, …)
+//! - [`vector_matrix`] — move `+`/scalar-`*` inside vector & matrix containers
 //! - [`units`] — unit annotation stripping / adding
 //! - [`analytic`] — the `isAnalytic` predicate
 //! - [`evaluate`] — numeric evaluation at bindings
@@ -18,6 +19,7 @@ pub mod pm;
 mod query;
 mod transforms;
 mod units;
+mod vector_matrix;
 
 pub use analytic::{is_analytic, AnalyticOpts};
 pub use components::{get_component, substitute_component};
@@ -32,3 +34,4 @@ pub use transforms::{
     substitute, to_intervals, tuples_to_vectors,
 };
 pub use units::{add_unit, remove_scaling_units, remove_units};
+pub use vector_matrix::perform_vector_matrix_additions_scalar_multiplications;

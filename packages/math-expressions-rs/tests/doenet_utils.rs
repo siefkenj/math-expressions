@@ -2,9 +2,9 @@
 //! verified against the JS reference (probed).
 
 use math_expressions::{
-    equals_syntactic, get_component, simplify_with, strings_to_subscripts, subscripts_to_strings,
-    substitute_component, to_intervals, to_text, Assumptions, EqOptions, Expr, TextToAst,
-    TextToAstOptions,
+    equals_syntactic, get_component, perform_vector_matrix_additions_scalar_multiplications,
+    simplify_with, strings_to_subscripts, subscripts_to_strings, substitute_component, to_intervals,
+    to_text, Assumptions, EqOptions, Expr, TextToAst, TextToAstOptions,
 };
 
 fn parse(s: &str) -> Expr {
@@ -55,6 +55,18 @@ fn components() {
     assert_eq!(txt(&get_component(&parse("x+1"), &[0]).unwrap()), "x");
     let replaced = substitute_component(&t, &[1], &parse("z")).unwrap();
     assert!(equals_syntactic(&replaced, &parse("(a, z, c)"), &EqOptions::default()));
+}
+
+#[test]
+fn vector_matrix_shape_pass_for_grading() {
+    // The grading precondition: a sum of vectors comes back as a single vector
+    // whose components are unfolded sums, so `checkEquality` can slice it.
+    let f = |s: &str| perform_vector_matrix_additions_scalar_multiplications(&parse(s));
+    assert_eq!(txt(&f("(1,2)+(3,4)")), "(1 + 3, 2 + 4)");
+    assert_eq!(txt(&f("3(1,2)")), "(1 * 3, 2 * 3)");
+    // Non-vectors, and a vector with no same-length partner, are untouched.
+    assert_eq!(txt(&f("x+y")), "x + y");
+    assert!(matches!(f("(1,2)+3"), Expr::Add(_)));
 }
 
 #[test]

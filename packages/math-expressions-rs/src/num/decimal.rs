@@ -52,7 +52,17 @@ impl Number {
         let numer: BigInt = if digits.is_empty() {
             BigInt::zero()
         } else {
-            digits.parse().expect("NUMBER token is all digits")
+            match digits.parse() {
+                Ok(n) => n,
+                // The parsers only ever pass NUMBER tokens (all digits), so this
+                // is unreachable in normal flow — but the method is `pub` and a
+                // panic here would `abort` the whole wasm worker (item 9). Fall
+                // back to the JS `parseFloat` approximation instead of trapping.
+                Err(_) => {
+                    let approx = t.replace(['E'], "e").parse().unwrap_or(f64::NAN);
+                    return Number::Float(F64::new(approx));
+                }
+            }
         };
 
         let pow10 = exp.saturating_sub(frac_part.len() as i64);

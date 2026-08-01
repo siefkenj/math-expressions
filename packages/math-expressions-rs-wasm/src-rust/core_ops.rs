@@ -17,6 +17,22 @@ fn to_path(path: Vec<u32>) -> Vec<usize> {
     path.into_iter().map(|i| i as usize).collect()
 }
 
+/// Read the four shared number/blank/multiplication render options DoenetML
+/// passes to `toLatex`/`toString` (`padToDigits`, `padToDecimals`, `showBlanks`,
+/// `explicitMultiplicationSymbols`). Keys absent from `v` leave the defaults.
+fn read_render_opts(
+    v: &serde_json::Value,
+    pad_to_digits: &mut Option<u32>,
+    pad_to_decimals: &mut Option<u32>,
+    show_blanks: &mut bool,
+    explicit_multiplication_symbols: &mut bool,
+) {
+    super::parse::read_opt_u32(v, "padToDigits", pad_to_digits);
+    super::parse::read_opt_u32(v, "padToDecimals", pad_to_decimals);
+    super::parse::read_opt_bool(v, "showBlanks", show_blanks);
+    super::parse::read_opt_bool(v, "explicitMultiplicationSymbols", explicit_multiplication_symbols);
+}
+
 #[wasm_bindgen]
 impl Expression {
     /// Render back to text syntax — in the notation this expression was
@@ -37,6 +53,7 @@ impl Expression {
             &self.0,
             &LatexOpts {
                 notation: self.1.clone(),
+                ..Default::default()
             },
         )
     }
@@ -53,6 +70,7 @@ impl Expression {
         };
         super::parse::read_opt_bool(&v, "unicode", &mut o.unicode);
         super::parse::read_notation(&v, &mut o.notation).map_err(|e| JsError::new(&e))?;
+        read_render_opts(&v, &mut o.pad_to_digits, &mut o.pad_to_decimals, &mut o.show_blanks, &mut o.explicit_multiplication_symbols);
         Ok(to_text(&self.0, &o))
     }
 
@@ -64,8 +82,10 @@ impl Expression {
             serde_json::from_str(options_json).map_err(|e| JsError::new(&e.to_string()))?;
         let mut o = LatexOpts {
             notation: self.1.clone(),
+            ..Default::default()
         };
         super::parse::read_notation(&v, &mut o.notation).map_err(|e| JsError::new(&e))?;
+        read_render_opts(&v, &mut o.pad_to_digits, &mut o.pad_to_decimals, &mut o.show_blanks, &mut o.explicit_multiplication_symbols);
         Ok(to_latex(&self.0, &o))
     }
 

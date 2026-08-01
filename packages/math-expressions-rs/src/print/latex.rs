@@ -8,10 +8,35 @@ use super::{deriv_var, f64_positional_string, pow_suffix, prec, split_sign};
 use crate::expr::{Expr, MathConst, RelOp, SeqKind};
 use crate::num::Number;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct LatexOpts {
     /// Decimal / argument-separator notation.
     pub notation: crate::notation::NumberNotation,
+    /// Pad every rendered number to at least this many significant characters
+    /// (`padToDigits`). `None`/`0` = no padding.
+    pub pad_to_digits: Option<u32>,
+    /// Pad every rendered number to at least this many decimal places
+    /// (`padToDecimals`). `None`/`0` = no padding.
+    pub pad_to_decimals: Option<u32>,
+    /// Render blank leaves (`＿`) visibly (`showBlanks`); when false they emit
+    /// as the empty string.
+    pub show_blanks: bool,
+    /// Put an explicit `\cdot` between every pair of factors
+    /// (`explicitMultiplicationSymbols`). Legacy LaTeX had no such option;
+    /// honored here so the flag is not silently dropped.
+    pub explicit_multiplication_symbols: bool,
+}
+
+impl Default for LatexOpts {
+    fn default() -> Self {
+        LatexOpts {
+            notation: crate::notation::NumberNotation::default(),
+            pad_to_digits: None,
+            pad_to_decimals: None,
+            show_blanks: true,
+            explicit_multiplication_symbols: false,
+        }
+    }
 }
 
 pub fn convert(expr: &Expr, opts: &LatexOpts) -> String {
@@ -73,7 +98,14 @@ impl Writer<'_> {
             // Display only — see the text printer; no LaTeX spelling parses
             // back to a boolean.
             Expr::Bool(b) => (format!("\\operatorname{{{b}}}"), ATOM),
-            Expr::Blank => ("\u{ff3f}".to_string(), ATOM),
+            Expr::Blank => (
+                if self.opts.show_blanks {
+                    "\u{ff3f}".to_string()
+                } else {
+                    String::new()
+                },
+                ATOM,
+            ),
             Expr::Ldots => ("\\ldots".to_string(), ATOM),
 
             Expr::Add(terms) => (self.render_add(terms), ADD),
@@ -129,10 +161,11 @@ impl Writer<'_> {
         // — rendering `\frac{1}{2}` would re-parse to a `Div`.
         if let Some(dec) = n.terminating_decimal() {
             let p = if dec.starts_with('-') { NEG } else { ATOM };
-            return (self.decimal(dec), p);
+            return (self.decimal(self.pad(dec)), p);
         }
         // A non-terminating fraction renders as `\frac` (self-delimiting, so
         // an atom); only reachable from later normalization, not the parser.
+        // Padding is a decimal-display option and does not apply here.
         if let Some((num, den)) = n.rational_parts() {
             return match num.strip_prefix('-') {
                 Some(pos) => (format!("-\\frac{{{}}}{{{}}}", pos, den), NEG),
@@ -142,7 +175,13 @@ impl Writer<'_> {
         // Float: numerical-evaluation result, positional (never exponential).
         let s = f64_positional_string(n.to_f64());
         let p = if s.starts_with('-') { NEG } else { ATOM };
-        (self.decimal(s), p)
+        (self.decimal(self.pad(s)), p)
+    }
+
+    /// Apply the `padToDigits`/`padToDecimals` render options to a positional
+    /// number string (before the decimal separator is localized).
+    fn pad(&self, s: String) -> String {
+        super::pad_number(&s, self.opts.pad_to_digits, self.opts.pad_to_decimals)
     }
 
     /// The argument/tuple/list separator for the active notation, with a
@@ -207,6 +246,8 @@ impl Writer<'_> {
             MathConst::Inf => "\\infty".to_string(),
             MathConst::NegInf => "-\\infty".to_string(),
             MathConst::NaN => "NaN".to_string(),
+            // Display only — no LaTeX spelling parses back (see `Expr::Bool`).
+            MathConst::None => "\\operatorname{None}".to_string(),
         }
     }
 
@@ -243,9 +284,11 @@ impl Writer<'_> {
         for (i, f) in factors.iter().enumerate() {
             let s = self.emit(f, if i == 0 { prec::MUL } else { prec::MUL + 1 });
             if i > 0 {
-                // `\cdot` between adjacent numerals or after a shorthand `\angle A`
-                // (which would otherwise absorb the next factor); space otherwise.
-                if s.starts_with(|c: char| c.is_ascii_digit())
+                // `\cdot` when forced (`explicitMultiplicationSymbols`), between
+                // adjacent numerals, or after a shorthand `\angle A` (which would
+                // otherwise absorb the next factor); a space otherwise.
+                if self.opts.explicit_multiplication_symbols
+                    || s.starts_with(|c: char| c.is_ascii_digit())
                     || is_shorthand_angle(&factors[i - 1])
                 {
                     out.push_str(" \\cdot ");

@@ -54,6 +54,7 @@ fn const_index(c: MathConst) -> u8 {
         MathConst::Inf => 3,
         MathConst::NegInf => 4,
         MathConst::NaN => 5,
+        MathConst::None => 6,
     }
 }
 

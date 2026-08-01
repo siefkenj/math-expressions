@@ -21,6 +21,15 @@ pub fn is_constant_symbol(name: &str) -> bool {
     CONSTANT_SYMBOLS.contains(&name)
 }
 
+/// The number of distinct symbol names interned so far — a memory gauge for the
+/// long-lived worker (DoenetML issue #83, item 8). The interner is append-only:
+/// a `Sym` is a raw index into it, so names are never evicted while any `Sym`
+/// could still reference them. True eviction needs generational or ref-counted
+/// symbols (a redesign); this exposes the growth so it can be measured first.
+pub fn interner_len() -> usize {
+    INTERNER.with(|i| i.borrow().names.len())
+}
+
 thread_local! {
     static INTERNER: RefCell<Interner> = RefCell::new(Interner::default());
 }
