@@ -258,25 +258,38 @@ impl Number {
         if d >= 0 && is_int_value {
             return self.clone();
         }
-        match self.to_bigrational() {
-            Some(r) => {
-                let pow10 = BigInt::from(10).pow(d.unsigned_abs());
-                let scale = if d >= 0 {
-                    BigRational::from_integer(pow10)
-                } else {
-                    BigRational::new(BigInt::one(), pow10)
-                };
-                let rounded = (&r * &scale).round(); // half away from zero
-                                                     // Rounding *to decimal places* produces a decimal, whatever
-                                                     // went in: `round_numbers_to_decimals(1/3, 2)` is `0.33`, not
-                                                     // `33/100`.
-                Number::from_bigrational_spelled(rounded / scale, Spelling::Decimal)
-            }
-            None => {
-                let f = 10f64.powi(d);
-                Number::from_f64((self.to_f64() * f).round() / f)
-            }
+        // A `Float` rounds through its *exact* binary value, like every other
+        // variant — `BigRational::from_float` is lossless. The obvious
+        // `(v * 10^d).round() / 10^d` is not: both 10^d and the product are
+        // rounded, so `round_to_decimals(2e21, 2)` — a no-op on a value that
+        // is already an integer — came back as `1.9999999999999997e21`,
+        // because 2e23 is not representable. Doenet's display path asks for
+        // exactly that combination (`displayDigits=3, displayDecimals=2`), so
+        // every large number a student saw went through it. Legacy avoided the
+        // trap by routing through a decimal string (`parseFloat(toFixed(v, n))`),
+        // which is what the exact rational plus [`float_from_scaled`] does here.
+        let exact = match self.to_bigrational() {
+            Some(r) => r,
+            // `Float`; `None` only for NaN/±∞, which no rounding can change.
+            None => match BigRational::from_float(self.to_f64()) {
+                Some(r) => r,
+                None => return self.clone(),
+            },
+        };
+        let pow10 = BigInt::from(10).pow(d.unsigned_abs());
+        let scale = if d >= 0 {
+            BigRational::from_integer(pow10)
+        } else {
+            BigRational::new(BigInt::one(), pow10)
+        };
+        let rounded = (&exact * &scale).round(); // half away from zero
+        if self.is_float() {
+            // Stays inexact: rounding a computed value does not make it exact.
+            return Number::from_f64(float_from_scaled(&rounded.to_integer(), d));
         }
+        // Rounding *to decimal places* produces a decimal, whatever went in:
+        // `round_numbers_to_decimals(1/3, 2)` is `0.33`, not `33/100`.
+        Number::from_bigrational_spelled(rounded / scale, Spelling::Decimal)
     }
 
     /// `⌊log10 |self|⌋` — the decimal place of the leading significant digit —
@@ -509,6 +522,18 @@ impl Number {
         // `a/b`: canonicalization turns every division into a negative power.
         Some(Number::from_bigrational_spelled(result, self.spelling()))
     }
+}
+
+/// The nearest f64 to `m × 10^(−d)`, where `m` is an exact scaled integer.
+///
+/// Via the decimal spelling rather than arithmetic: `m as f64 / 10^d` would
+/// round twice and re-introduce the error the exact rounding just removed,
+/// whereas Rust's float parser is correctly rounded, so the one rounding it
+/// performs is the only one. (This is what legacy's `parseFloat(toFixed(…))`
+/// was doing.) `m` can be thousands of digits — the exponent form keeps the
+/// string proportional to `m`, not to `d`.
+fn float_from_scaled(m: &BigInt, d: i32) -> f64 {
+    format!("{m}e{}", -i64::from(d)).parse().unwrap_or(f64::NAN)
 }
 
 /// `base^n` by exponentiation-by-squaring (n unsigned; caller handles sign).

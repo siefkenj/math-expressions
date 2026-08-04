@@ -34,6 +34,15 @@ pub struct TextToAstOptions {
     pub function_symbols: Vec<String>,
     pub operator_symbols: Vec<String>,
     pub parse_leibniz_notation: bool,
+    /// Read `3.2E-12` as a single number rather than `3.2·E − 12`.
+    ///
+    /// **Uppercase `E` only, and only at the end of the expression or before
+    /// `, | ) } ]`.** Both restrictions are load-bearing rather than
+    /// oversights: `e` is Euler's number in this grammar, so `1.2e-3` is
+    /// `1.2·e − 3` whatever this flag says, and the delimiter rule keeps
+    /// `3.1E-3 + 2` from swallowing the `+ 2`. Legacy pinned both
+    /// (`spec/quick_text-to-ast.spec.js`), and DoenetML reported the option as
+    /// having no effect after testing it with a lowercase `e`.
     pub parse_scientific_notation: bool,
     /// Decimal / argument-separator notation.
     pub notation: crate::notation::NumberNotation,

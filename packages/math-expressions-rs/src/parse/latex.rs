@@ -26,6 +26,10 @@ pub struct LatexToAstOptions {
     pub applied_function_symbols: Vec<String>,
     pub function_symbols: Vec<String>,
     pub parse_leibniz_notation: bool,
+    /// Read `3.2E-12` as a single number rather than `3.2·E − 12`. Uppercase
+    /// `E` only — see
+    /// [`TextToAstOptions::parse_scientific_notation`](crate::TextToAstOptions::parse_scientific_notation)
+    /// for why lowercase cannot be accepted.
     pub parse_scientific_notation: bool,
     /// Decimal / argument-separator notation.
     pub notation: crate::notation::NumberNotation,
