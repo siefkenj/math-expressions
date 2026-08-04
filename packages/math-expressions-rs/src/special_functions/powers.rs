@@ -6,6 +6,9 @@
 use super::{FnDef, DEFAULTS};
 use crate::eval_numeric::certified_digits::kernels::{FixId, FnKernel};
 use crate::expr::Expr;
+use num_bigint::BigInt;
+use num_rational::BigRational;
+use num_traits::Signed;
 use crate::normalize::{mul, pow};
 use crate::num::Number;
 use num_complex::Complex64;
@@ -57,6 +60,10 @@ pub const ABS: FnDef = FnDef {
     parse_latex: &["abs"],
     derivative: Some("abs(x)/x"),
     eval1: Some(|z| Some(Complex64::new(z.norm(), 0.0))),
+    fold_exact: Some(|xs| match xs {
+        [v] => Some(v.abs()),
+        _ => None,
+    }),
     latex_commands: &[("abs", "abs")],
     kernel: Some(&ABS_KERNEL),
     ..DEFAULTS
@@ -81,6 +88,14 @@ pub const SIGN: FnDef = FnDef {
         } else {
             z / z.norm()
         })
+    }),
+    fold_exact: Some(|xs| match xs {
+        [v] => Some(BigRational::from(BigInt::from(match v.numer().sign() {
+            num_bigint::Sign::Minus => -1,
+            num_bigint::Sign::NoSign => 0,
+            num_bigint::Sign::Plus => 1,
+        }))),
+        _ => None,
     }),
     latex_commands: &[("sign", "sign")],
     ..DEFAULTS

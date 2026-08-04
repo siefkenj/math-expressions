@@ -140,6 +140,148 @@ describe("item 4 — dopri peer export (numeric.dopri drop-in)", () => {
   });
 });
 
+describe("§2 — fromAst accepts an Expression where a tree is expected", () => {
+  it("unwraps a bare Expression instead of throwing", () => {
+    // A math-valued DoenetML state variable *holds* an Expression, so code that
+    // re-wraps one hands it straight back to fromAst.
+    const e = me.fromText("3");
+    expect(me.fromAst(e).tree).toEqual(3);
+  });
+
+  it("unwraps an Expression nested inside a tree under construction", () => {
+    expect(me.fromAst(["+", me.fromText("3"), 2]).tree).toEqual(["+", 3, 2]);
+    expect(me.fromAst(["tuple", me.fromText("x+1"), me.fromText("3")]).tree).toEqual([
+      "tuple",
+      ["+", "x", 1],
+      3,
+    ]);
+  });
+
+  it("also accepts the serialized envelope, as reviver does", () => {
+    // A JSON.parse of a persisted expression that never went through reviver.
+    const envelope = JSON.parse(JSON.stringify(me.fromText("3")));
+    expect(envelope.objectType).toBe("math-expression");
+    expect(me.fromAst(envelope).tree).toEqual(3);
+  });
+});
+
+describe("§4 — an indeterminate form is NaN, not 0", () => {
+  it("does not annihilate 0/0 to zero", () => {
+    // DoenetML computes an undefined slope this way; 0 would report a degenerate
+    // line as horizontal — a wrong number on a grading path.
+    expect(me.fromText("0/0").simplify().tree).toEqual({ $: "NaN" });
+    expect(me.fromText("0*Infinity").simplify().tree).toEqual({ $: "NaN" });
+    expect(me.fromText("0*(1/0)").simplify().tree).toEqual({ $: "NaN" });
+    expect(me.fromText("0/0").evaluate_to_constant()).toBeNull();
+  });
+
+  it("still annihilates when the other factor is merely of unknown finiteness", () => {
+    // Legacy's `is_nonzero` had a third "undefined" state that fell through to 0.
+    expect(me.fromText("0*x").simplify().tree).toEqual(0);
+    expect(me.fromText("1/0").simplify().tree).toEqual({ $: "Inf" });
+  });
+});
+
+describe("§8 — the wasm load is deferred past module evaluation", () => {
+  it("touches no wasm while the barrel's own body runs", async () => {
+    // `_assumptionsHandle: new wasm.Assumptions()` in the Context literal used to
+    // force the load during module evaluation, so a consumer importing
+    // setWasmModule from the package root could never win the race.
+    const { createRequire } = await import("node:module");
+    const real = createRequire(import.meta.url)(
+      "../vendor/wasm/math_expressions_wasm.js",
+    ) as Record<string, unknown>;
+    let touches = 0;
+    const spy = new Proxy({} as never, {
+      get: (_t, p) => {
+        touches++;
+        return real[p as string];
+      },
+      has: (_t, p) => p in real,
+    });
+    setWasmModule(spy);
+    try {
+      // Re-import with a cache-busting query so the module body runs again.
+      await import("../lib/math-expressions?deferred-load-probe");
+      expect(touches).toBe(0);
+    } finally {
+      setWasmModule(undefined as never);
+    }
+  });
+});
+
+describe("§3 — simplify folds numeric function applications", () => {
+  const s = (tree: unknown) => me.fromAst(tree as never).simplify().tree;
+  // The aggregates have no default parser spelling (legacy has none either),
+  // so a caller opts in — exactly as DoenetML does.
+  const AGGREGATES = {
+    appliedFunctionSymbols: ["sum", "prod", "mean", "median", "variance", "std", "count", "max", "min", "log2"],
+  };
+
+  it("renders the report's student-visible case", () => {
+    // <math simplify>sum(3,17,5-4)</math> rendered the unevaluated application.
+    const e = me.fromText("sum(3,17,5-4)", AGGREGATES);
+    expect(e.tree).toEqual(["apply", "sum", ["tuple", 3, 17, ["+", 5, -4]]]);
+    expect(e.simplify().tree).toEqual(21);
+  });
+
+  it("folds rounding, magnitude and combinatoric functions", () => {
+    expect(s(["apply", "floor", 55.33])).toEqual(55);
+    expect(s(["apply", "ceil", 2.1])).toEqual(3);
+    expect(s(["apply", "abs", -3])).toEqual(3);
+    expect(s(["apply", "nCr", ["tuple", 5, 3]])).toEqual(10);
+    expect(s(["apply", "nPr", ["tuple", 5, 3]])).toEqual(60);
+  });
+
+  it("folds the aggregates, exactly", () => {
+    expect(s(["apply", "sum", ["tuple", 3, 17, 1]])).toEqual(21);
+    expect(s(["apply", "prod", ["tuple", 2, 3, 4]])).toEqual(24);
+    expect(s(["apply", "mean", ["tuple", 1, 2, 3]])).toEqual(2);
+    expect(s(["apply", "mean", ["tuple", 1, 2, 4]])).toEqual(["/", 7, 3]);
+    expect(s(["apply", "variance", ["tuple", 1, 2, 3]])).toEqual(1);
+    expect(s(["apply", "std", ["tuple", 1, 2, 3]])).toEqual(1);
+    expect(s(["apply", "count", ["tuple", 1, 2, 3]])).toEqual(3);
+    expect(s(["apply", "max", ["tuple", 1, 5, 3]])).toEqual(5);
+    expect(s(["apply", "min", ["tuple", 1, 5, 3]])).toEqual(1);
+  });
+
+  it("folds logarithms without the float noise legacy had", () => {
+    expect(s(["apply", "log10", ["^", 10, 3]])).toEqual(3);
+    expect(s(["apply", "log2", 8])).toEqual(3);
+    // The based form: legacy answers 2.9999999999999996 here, because it
+    // computes ln(1000)/ln(10) and then keeps the unrounded float.
+    expect(me.fromText("log_10(1000)").simplify().tree).toEqual(3);
+    expect(me.fromText("log_7(343)").simplify().tree).toEqual(3);
+    expect(me.fromText("log10(1000)").evaluate_to_constant()).toBe(3);
+  });
+
+  it("leaves an irrational or symbolic value alone", () => {
+    // The exactness gate: folding must never turn an exact value into a float.
+    expect(s(["apply", "sqrt", 2])).toEqual(["apply", "sqrt", 2]);
+    expect(s(["apply", "log10", 3])).toEqual(["apply", "log10", 3]);
+    expect(s(["apply", "asin", 1])).toEqual(["apply", "asin", 1]);
+    expect(s(["apply", "std", ["tuple", 1, 2, 4]])).toEqual(["apply", "std", ["tuple", 1, 2, 4]]);
+    expect(s(["apply", "sum", ["tuple", "x", "y"]])).toEqual(["apply", "sum", ["tuple", "x", "y"]]);
+  });
+
+  it("evaluates aggregates numerically too", () => {
+    // These returned null before: an unknown application was sampled as an
+    // opaque variable rather than evaluated.
+    expect(me.fromText("sum(1,2,3)", AGGREGATES).evaluate_to_constant()).toBe(6);
+    expect(me.fromText("max(1,5,3)", AGGREGATES).evaluate_to_constant()).toBe(5);
+    expect(me.fromText("std(1,2,3)", AGGREGATES).evaluate_to_constant()).toBe(1);
+  });
+
+  it("does not change the default parse", () => {
+    // Adding the aggregates to the parser's defaults would silently
+    // reinterpret `mean` and `max` where they are used as variables, so they
+    // stay opt-in — matching legacy, which also splits this into letters.
+    expect(me.fromText("sum(3,17,5-4)").tree).toEqual([
+      "*", "s", "u", "m", ["tuple", 3, 17, ["+", 5, -4]],
+    ]);
+  });
+});
+
 describe("item 3b — undefined quantities evaluate to undefined, not 0", () => {
   it("does not collapse 0*blank to a number", () => {
     // evaluate_to_constant underlies DoenetML's numeric reads; a hole must stay
@@ -223,15 +365,34 @@ describe("item 8 — handle lifetime & interner gauge", () => {
 });
 
 describe("item 6 — evaluate_numbers / passes", () => {
+  const skip = (s: string) => me.fromText(s).evaluate_numbers({ skip_ordering: true }).tree;
 
-  it("throws on evaluate_numbers({skip_ordering}) but honors the plain form", () => {
-    // skip_ordering has no core support and silently reordered before; reject it
-    // loudly. The plain form and a falsy flag pass through.
-    expect(() => me.fromText("1+x+2").evaluate_numbers({ skip_ordering: true })).toThrow(
-      /skip_ordering/,
-    );
+  it("folds without reordering under skip_ordering", () => {
+    // DoenetML's simplify="numberspreserveorder". A constant merges with an
+    // adjacent constant but never hops over a symbolic term. Expectations taken
+    // from the legacy library running the same option.
+    expect(skip("1+x+2")).toEqual(["+", 1, "x", 2]);
+    expect(skip("1+2+x")).toEqual(["+", 3, "x"]);
+    expect(skip("x+1+2")).toEqual(["+", "x", 3]);
+    expect(skip("1+x+2+3+y+4")).toEqual(["+", 1, "x", 5, "y", 4]);
+    expect(skip("2*x*3")).toEqual(["*", 2, "x", 3]);
+  });
+
+  it("no longer throws — the throw was a hard crash for the Rust core", () => {
+    // The core calls this mode and is built `panic = "abort"`, so an exception
+    // unwinding into it was a WASM trap that killed the worker, not a catchable
+    // missing feature.
+    expect(() => me.fromText("1+x+2").evaluate_numbers({ skip_ordering: true })).not.toThrow();
     expect(() => me.fromText("1+x+2").evaluate_numbers()).not.toThrow();
     expect(() => me.fromText("1+x+2").evaluate_numbers({ skip_ordering: false })).not.toThrow();
+  });
+
+  it("stays distinguishable from the ordering form", () => {
+    // If these ever coincide, the mode has silently stopped preserving order.
+    expect(skip("1+x+2")).not.toEqual(me.fromText("1+x+2").evaluate_numbers().tree);
+    expect(me.fromText("1+x+2").evaluate_numbers().tree).toEqual(["+", "x", 3]);
+    // Like symbolic terms are not collected either, unlike the ordering form.
+    expect(skip("x+x")).toEqual(["+", "x", "x"]);
   });
 
   it("leaves the unimplemented normalization passes as no-ops (not throws)", () => {

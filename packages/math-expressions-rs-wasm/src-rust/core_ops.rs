@@ -4,7 +4,7 @@
 use super::Expression;
 use math_expressions::{
     constants_to_floats, derivative as rust_derivative, equals as rust_equals,
-    evaluate_numbers, evaluate_to_constant as rust_evc, expand as rust_expand, ops, reduce_rational,
+    evaluate_numbers, evaluate_numbers_preserve_order, evaluate_to_constant as rust_evc, expand as rust_expand, ops, reduce_rational,
     round_numbers_to_decimals, round_numbers_to_precision, simplify as rust_simplify,
     simplify_with as rust_simplify_with, to_latex, to_text, Assumptions, EqOptions, Expr,
     LatexOpts, TextOpts, TextToAst, TextToAstOptions,
@@ -218,6 +218,14 @@ impl Expression {
     /// Fold numeric subexpressions exactly (`4+x-2` → `x+2`).
     pub fn evaluate_numbers(&self) -> Expression {
         self.derive(evaluate_numbers(&self.0))
+    }
+
+    /// Fold numeric subexpressions **without reordering operands** — the
+    /// `skip_ordering` form, backing DoenetML's
+    /// `simplify="numberspreserveorder"`. `1+x+2` stays `1+x+2`, where
+    /// [`Self::evaluate_numbers`] gives `x+3`.
+    pub fn evaluate_numbers_preserve_order(&self) -> Expression {
+        self.derive(evaluate_numbers_preserve_order(&self.0))
     }
 
     /// Cancel common polynomial factors in fractions

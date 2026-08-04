@@ -18,7 +18,7 @@
 //!   public `simplify` / `simplify_with` delegate to
 //!
 //! plus the `expand`, `order`, `present`, `simplify` (the base rewrite
-//! clusters), `special_values`, and `syntactic` passes.
+//! clusters), `special_values`, `fold_apply`, and `syntactic` passes.
 
 mod canonicalize;
 mod constructors;
@@ -28,6 +28,7 @@ mod units;
 
 pub(crate) mod expand;
 pub(crate) mod order;
+pub(crate) mod fold_apply;
 pub(crate) mod present;
 pub(crate) mod simplify;
 pub(crate) mod special_values;
@@ -35,10 +36,11 @@ pub(crate) mod syntactic;
 
 pub(crate) use expand::expand_core;
 pub(crate) use order::cmp;
-pub(crate) use present::present;
+pub(crate) use present::{present, split_number};
 pub(crate) use simplify::{simplify_base_with, simplify_canonical, simplify_core};
 pub use expand::expand;
 pub use simplify::{simplify, simplify_logical, simplify_with};
+pub use fold_apply::fold_numeric_applications;
 pub use special_values::fold_special_values;
 pub use syntactic::normalize_syntactic;
 

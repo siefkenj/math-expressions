@@ -3,7 +3,18 @@
 //! illustrate per-parser spellings: lowercase in text, capitalized in LaTeX.
 
 use super::{real_only, FnDef, DEFAULTS};
+use num_bigint::BigInt;
 use num_complex::Complex64;
+use num_rational::BigRational;
+use num_traits::{One, Signed, ToPrimitive, Zero};
+
+/// Apply an exact unary rational rule, or `None` for any other arity.
+fn unary(xs: &[BigRational], f: fn(&BigRational) -> Option<BigRational>) -> Option<BigRational> {
+    match xs {
+        [v] => f(v),
+        _ => None,
+    }
+}
 
 pub const MOD: FnDef = FnDef {
     name: "mod",
@@ -16,6 +27,13 @@ pub const MOD: FnDef = FnDef {
         let (x, y) = (a.re, b.re);
         let r = if y == 0.0 { x } else { x - y * (x / y).floor() };
         Some(Complex64::new(r, 0.0))
+    }),
+    fold_exact: Some(|xs| match xs {
+        // Floored division, as in the float rule above: the result takes the
+        // sign of the divisor, and `mod(x, 0)` is `x`.
+        [x, y] if y.is_zero() => Some(x.clone()),
+        [x, y] => Some(x - y * (x / y).floor()),
+        _ => None,
     }),
     ..DEFAULTS
 };
@@ -86,6 +104,7 @@ pub const NPR: FnDef = FnDef {
     parse_text: &["nPr"],
     parse_latex: &["nPr"],
     eval2: Some(|n, r| combinatorial(n, r, true)),
+    fold_exact: Some(|xs| combinatorial_exact(xs, true)),
     ..DEFAULTS
 };
 
@@ -94,6 +113,7 @@ pub const NCR: FnDef = FnDef {
     parse_text: &["nCr"],
     parse_latex: &["nCr"],
     eval2: Some(|n, r| combinatorial(n, r, false)),
+    fold_exact: Some(|xs| combinatorial_exact(xs, false)),
     ..DEFAULTS
 };
 
@@ -102,6 +122,7 @@ pub const FLOOR: FnDef = FnDef {
     parse_text: &["floor"],
     parse_latex: &["floor"],
     eval1: Some(|z| real_only(z, f64::floor)),
+    fold_exact: Some(|xs| unary(xs, |v| Some(v.floor()))),
     ..DEFAULTS
 };
 
@@ -110,6 +131,7 @@ pub const CEIL: FnDef = FnDef {
     parse_text: &["ceil"],
     parse_latex: &["ceil"],
     eval1: Some(|z| real_only(z, f64::ceil)),
+    fold_exact: Some(|xs| unary(xs, |v| Some(v.ceil()))),
     ..DEFAULTS
 };
 
@@ -118,6 +140,11 @@ pub const ROUND: FnDef = FnDef {
     parse_text: &["round"],
     parse_latex: &["round"],
     eval1: Some(|z| real_only(z, f64::round)),
+    // `BigRational::round` breaks ties away from zero, the same rule as the
+    // `f64::round` above — so the exact and float paths agree. (Both differ
+    // from JS `Math.round`, which breaks ties toward +∞: `round(-2.5)` is -3
+    // here and -2 there. That divergence predates this facet.)
+    fold_exact: Some(|xs| unary(xs, |v| Some(v.round()))),
     ..DEFAULTS
 };
 
@@ -196,4 +223,32 @@ fn combinatorial(n: Complex64, r: Complex64, ordered: bool) -> Option<Complex64>
         den *= k as f64;
     }
     Some(Complex64::new(num / den, 0.0))
+}
+
+/// Exact `nPr`/`nCr` on non-negative integers. `None` for anything else —
+/// including a huge `r`, where the product loop must stay bounded; the float
+/// rule refuses at the same point.
+fn combinatorial_exact(xs: &[BigRational], ordered: bool) -> Option<BigRational> {
+    let [n, r] = xs else { return None };
+    if !n.is_integer() || !r.is_integer() || n.is_negative() || r.is_negative() || r > n {
+        return None;
+    }
+    let r = r.numer().to_u64()?;
+    if r > 10_000 {
+        return None;
+    }
+    let n = n.numer();
+    // P(n,r) = n·(n−1)···(n−r+1);  C(n,r) = P(n,r)/r!.
+    let mut num = BigInt::one();
+    for k in 0..r {
+        num *= n - BigInt::from(k);
+    }
+    if ordered {
+        return Some(BigRational::from(num));
+    }
+    let mut den = BigInt::one();
+    for k in 1..=r {
+        den *= BigInt::from(k);
+    }
+    Some(BigRational::new(num, den))
 }

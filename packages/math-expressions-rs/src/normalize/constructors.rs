@@ -81,6 +81,40 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
     }
 }
 
+/// What a zero numeric coefficient collapses the product to. `0·x` is `0`, but
+/// `0·∞` and `0/0` are *indeterminate* and must be `NaN` — DoenetML computes an
+/// undefined slope as `0/0`, so annihilating it to `0` reports a degenerate line
+/// as horizontal: a wrong number on a grading path rather than a visible
+/// failure. Legacy made the same distinction, and in the same order — its
+/// `try_evaluate_quotient_of_numbers` tests `is_nonzero(denom) === false` before
+/// the `numer === 0 → 0` shortcut, and its product fold checks `!isFinite`
+/// before annihilating.
+fn annihilate(indeterminate: bool) -> Expr {
+    if indeterminate {
+        Expr::Const(crate::expr::MathConst::NaN)
+    } else {
+        Expr::Num(Number::zero())
+    }
+}
+
+/// Whether a `base^exp` factor is *provably* non-finite, and so blocks the
+/// annihilation above. Only a literal pole (`0^negative`, i.e. `1/0`) and the
+/// non-finite constants qualify. A factor whose finiteness is merely *unknown*
+/// — a bare symbol, `1/x`, a function application — does not: legacy's
+/// `is_nonzero` returned a third `undefined` state there and fell through to
+/// `0`, which is why `0·x` stays `0` and only the provable cases become `NaN`.
+fn is_infinite_factor(base: &Expr, exp: &Expr) -> bool {
+    use crate::expr::MathConst;
+    if matches!(base, Expr::Num(n) if n.is_zero()) && matches!(exp, Expr::Num(x) if x.is_negative())
+    {
+        return true;
+    }
+    matches!(
+        base,
+        Expr::Const(MathConst::Inf | MathConst::NegInf | MathConst::NaN)
+    )
+}
+
 /// Build a canonical product from canonical factors: flatten, fold the numeric
 /// coefficient exactly, annihilate on zero, combine like powers
 /// (`x² · x³ → x⁵`), drop ones, sort.
@@ -204,7 +238,7 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
     }
 
     if coeff.is_zero() {
-        return Expr::Num(Number::zero());
+        return annihilate(parts.iter().any(|(b, x)| is_infinite_factor(b, x)));
     }
 
     let mut out = Vec::with_capacity(parts.len() + 1);
@@ -226,7 +260,10 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         }
     }
     if coeff.is_zero() {
-        return Expr::Num(Number::zero());
+        return annihilate(out.iter().cloned().any(|f| {
+            let (b, x) = split_pow(f);
+            is_infinite_factor(&b, &x)
+        }));
     }
     // Re-run the combining pass so distributed factors pair up with the rest
     // (e.g. an existing `x⁻²` cancels the distributed `x²`). Terminates: the

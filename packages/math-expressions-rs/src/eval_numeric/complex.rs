@@ -100,9 +100,16 @@ fn head_evaluable(head: &Expr, nargs: usize) -> bool {
 }
 
 /// Can the registry evaluate this head at this arity? (`FnDef::eval1`/
-/// `eval2` in `crate::special_functions` — canonical spellings only, matching the
-/// historical hardcoded list.)
+/// `eval2`/`evaln` in `crate::special_functions` — canonical spellings only,
+/// matching the historical hardcoded list.)
 fn known_function(name: &str, nargs: usize) -> bool {
+    // A variadic aggregate is evaluable at every arity, so it is checked
+    // before the arity split. Without this an application like `sum(1,2,3)`
+    // would be classified as an opaque atom and *sampled as a variable*,
+    // which is why it used to make `evaluate_to_constant` return `None`.
+    if crate::special_functions::evaln(name).is_some() {
+        return true;
+    }
     match nargs {
         1 => crate::special_functions::eval1(name).is_some(),
         2 => crate::special_functions::eval2(name).is_some(),
@@ -139,8 +146,19 @@ fn eval_apply(head: &Expr, args: &[Expr], env: &Env) -> Option<Complex64> {
     let Expr::Sym(s) = head else { return None };
     let name = s.name();
 
-    // The per-function evaluation rules are `FnDef::eval1`/`eval2` in
+    // The per-function evaluation rules are `FnDef::eval1`/`eval2`/`evaln` in
     // `crate::special_functions`; this dispatch only routes by arity.
+    //
+    // The variadic rule comes first: an aggregate (`sum`, `mean`, `max`) is
+    // the same function at every arity, so `mean(1,2)` must not be routed to
+    // a two-argument rule it does not have.
+    if let Some(f) = crate::special_functions::evaln(&name) {
+        let zs: Vec<Complex64> = args
+            .iter()
+            .map(|a| eval_complex(a, env))
+            .collect::<Option<_>>()?;
+        return f(&zs);
+    }
     if let [arg] = args {
         let f = crate::special_functions::eval1(&name)?;
         let z = eval_complex(arg, env)?;

@@ -86,7 +86,23 @@ function componentPath(component: number | number[]): Uint32Array {
  * beats a half-symmetric one where `NaN`/`±Infinity` untag but `None` (which has
  * no JS scalar) cannot. See DOENET_INTEGRATION.md §"Non-finite and absent values".
  */
-function astReplacer(_key: string, value: unknown): unknown {
+function astReplacer(this: unknown, key: string, value: unknown): unknown {
+  // An `Expression` standing where a tree is expected — `fromAst(expr)`, or an
+  // `expr` nested inside one (`["+", someExpr, 2]`). A math-valued DoenetML
+  // state variable *holds* an Expression, so code that re-wraps one hands it
+  // straight back here; this makes that a no-op instead of a throw.
+  //
+  // Note this reads the *holder* rather than `value`: `JSON.stringify` calls
+  // `toJSON()` before consulting the replacer, so by the time `value` arrives an
+  // Expression has already become its `{objectType:"math-expression",tree:…}`
+  // envelope and `value instanceof Expression` is always false. That envelope is
+  // precisely the "object with no `$` key" the Rust side used to reject.
+  const held = (this as Record<string, unknown> | undefined)?.[key];
+  if (held instanceof Expression) return held.tree;
+  // The same envelope arriving as plain data — a `JSON.parse` of a persisted
+  // expression that never got run through `Context.reviver`. Keyed on the shape
+  // `reviver` itself recognizes.
+  if (isSerializedExpression(value)) return value.tree;
   if (typeof value === "number" && !Number.isFinite(value)) {
     if (Number.isNaN(value)) return { $: "NaN" };
     return { $: value > 0 ? "Inf" : "-Inf" };
@@ -94,13 +110,24 @@ function astReplacer(_key: string, value: unknown): unknown {
   return value;
 }
 
+/** The `toJSON()` envelope shape, as `Context.reviver` recognizes it. */
+function isSerializedExpression(v: unknown): v is { tree: unknown } {
+  return (
+    !!v &&
+    typeof v === "object" &&
+    (v as { objectType?: unknown }).objectType === "math-expression" &&
+    (v as { tree?: unknown }).tree !== undefined
+  );
+}
+
 /**
- * Whether a render call carries options worth forwarding to the wasm
- * `*_with_options` entry points (padToDigits, padToDecimals, showBlanks,
- * explicitMultiplicationSymbols, notation, unicode). An empty/absent object
- * takes the cheaper no-options render path.
+ * Whether a call carries options worth forwarding to the wasm
+ * `*_with_options` entry points — render options (padToDigits, padToDecimals,
+ * showBlanks, explicitMultiplicationSymbols, notation, unicode) or parser
+ * options (splitSymbols, appliedFunctionSymbols, …). An empty/absent object
+ * takes the cheaper no-options path.
  */
-function hasRenderOpts(opts: unknown): opts is Record<string, unknown> {
+function hasOptions(opts: unknown): opts is Record<string, unknown> {
   return !!opts && typeof opts === "object" && Object.keys(opts).length > 0;
 }
 
@@ -153,16 +180,16 @@ class Expression {
   // no-arg path stays on the cheap no-options render — `toString()` is what JS
   // coercion (`String(expr)`) calls.
   toString(opts?) {
-    return hasRenderOpts(opts) ? this._w.to_text_with_options(JSON.stringify(opts)) : this._w.to_text();
+    return hasOptions(opts) ? this._w.to_text_with_options(JSON.stringify(opts)) : this._w.to_text();
   }
   toText(opts?) {
-    return hasRenderOpts(opts) ? this._w.to_text_with_options(JSON.stringify(opts)) : this._w.to_text();
+    return hasOptions(opts) ? this._w.to_text_with_options(JSON.stringify(opts)) : this._w.to_text();
   }
   toLatex(opts?) {
-    return hasRenderOpts(opts) ? this._w.to_latex_with_options(JSON.stringify(opts)) : this._w.to_latex();
+    return hasOptions(opts) ? this._w.to_latex_with_options(JSON.stringify(opts)) : this._w.to_latex();
   }
   tex(opts?) {
-    return hasRenderOpts(opts) ? this._w.to_latex_with_options(JSON.stringify(opts)) : this._w.to_latex();
+    return hasOptions(opts) ? this._w.to_latex_with_options(JSON.stringify(opts)) : this._w.to_latex();
   }
   toJSON() {
     return JSON.parse(this._w.to_serialized());
@@ -238,16 +265,14 @@ class Expression {
     return wrap(this._w.factor(), this.context);
   }
   evaluate_numbers(opts) {
-    // The no-argument form (fold, then order) is supported. `skip_ordering`
-    // (DoenetML's `simplify="numberspreserveorder"`) is not — the core pass has
-    // no order-preserving mode — so reject it loudly rather than silently
-    // reorder, which is the bug this replaces (`1+x+2` came back `x+3`).
-    // `skip_ordering: false` is the default and passes straight through.
+    // `skip_ordering` (DoenetML's `simplify="numberspreserveorder"`) selects a
+    // genuinely different core pass: numbers fold only with *adjacent* numbers,
+    // so `1+x+2` stays `1+x+2` where the ordering form gives `x+3`. It used to
+    // throw here, which was worse than a missing feature — the Rust core calls
+    // this mode and is built `panic = "abort"`, so the exception unwound into
+    // it as a WASM trap and took the whole worker down.
     if (opts && opts.skip_ordering) {
-      throw new Error(
-        "math-expressions-js-compat: evaluate_numbers({skip_ordering:true}) is not " +
-          "implemented — the core pass always orders; only the ordering form is available",
-      );
+      return wrap(this._w.evaluate_numbers_preserve_order(), this.context);
     }
     return wrap(this._w.evaluate_numbers(), this.context);
   }
@@ -513,11 +538,25 @@ for (const name of [
   };
 }
 
-function parseText(string) {
-  return new Expression(wasm.parse_text(string), Context);
+// The parser options object is the legacy second argument (`splitSymbols`,
+// `appliedFunctionSymbols`, `functionSymbols`, `operatorSymbols`, …). It was
+// being dropped on the floor here, which mattered most for
+// `appliedFunctionSymbols`: without it there is no way to get `sum(1,2,3)` to
+// parse as an application rather than as `s·u·m·(1,2,3)`, since neither this
+// library nor the legacy one lists the aggregates by default.
+function parseText(string, opts?) {
+  return new Expression(
+    hasOptions(opts) ? wasm.parse_text_with_options(string, JSON.stringify(opts)) : wasm.parse_text(string),
+    Context,
+  );
 }
-function parseLatex(string) {
-  return new Expression(wasm.parse_latex(string), Context);
+function parseLatex(string, opts?) {
+  return new Expression(
+    hasOptions(opts)
+      ? wasm.parse_latex_with_options(string, JSON.stringify(opts))
+      : wasm.parse_latex(string),
+    Context,
+  );
 }
 function createFrom(expr) {
   if (typeof expr === "string") {
@@ -633,7 +672,19 @@ const Context = {
   // Backed by a wasm `Assumptions` handle plus a parallel text list so
   // `simplify_with_assumptions` can be fed. `get_assumptions` is best-effort —
   // the original returned a richly-structured object this does not reproduce.
-  _assumptionsHandle: new wasm.Assumptions(),
+  // Constructed lazily, and that is load-bearing. As a plain `new
+  // wasm.Assumptions()` in this literal it ran while *this module's body* was
+  // still evaluating, so any consumer importing `setWasmModule` from the package
+  // root forced the wasm load before it had a chance to inject — the injection
+  // could never win, and silently fell through to the node loader. Nothing here
+  // may touch `wasm` until someone actually calls a method.
+  _assumptionsHandleCache: undefined,
+  get _assumptionsHandle() {
+    return (this._assumptionsHandleCache ??= new wasm.Assumptions());
+  },
+  set _assumptionsHandle(h) {
+    this._assumptionsHandleCache = h;
+  },
   _assumptionTexts: [],
   set_to_default() {
     this._assumptionsHandle = new wasm.Assumptions();

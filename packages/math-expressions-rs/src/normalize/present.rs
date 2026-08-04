@@ -170,7 +170,7 @@ fn assemble(coeff: Number, factors: Vec<Expr>) -> Expr {
 
 /// `n` as (is_negative, |numerator|, denominator). Floats and integers have
 /// denominator 1; exact rationals split across the fraction bar.
-fn split_number(n: &Number) -> (bool, Number, Number) {
+pub(crate) fn split_number(n: &Number) -> (bool, Number, Number) {
     let neg = n.is_negative();
     let a = n.abs();
     match &a {

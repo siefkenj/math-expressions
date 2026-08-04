@@ -54,6 +54,8 @@ export interface WasmExpression {
   expand(): WasmExpression;
   factor(): WasmExpression;
   evaluate_numbers(): WasmExpression;
+  /** The `skip_ordering` fold: `1+x+2` stays `1+x+2`. */
+  evaluate_numbers_preserve_order(): WasmExpression;
   collect_like_terms_factors(): WasmExpression;
   simplify_ratios(): WasmExpression;
   reduce_rational(): WasmExpression;

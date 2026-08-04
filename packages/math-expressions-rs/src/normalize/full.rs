@@ -51,6 +51,10 @@ pub(crate) fn full_simplify(e: &Expr, a: &Assumptions) -> Expr {
         // the base, not the public `simplify`/`simplify_with`, which are this
         // function.)
         let folded = crate::normalize::fold_special_values(&cur);
+        // Exact numeric applications (`floor(55.33)`, `sum(3,17,1)`,
+        // `log10(1000)`) fold here rather than in the base rounds, so `equals`
+        // — which goes through `simplify_canonical` — stays byte-stable.
+        let folded = crate::normalize::fold_numeric_applications(&folded);
         let reduced = crate::ops::reduce_rational(&folded);
         let next = crate::normalize::simplify_base_with(&reduced, a);
         if next == cur {

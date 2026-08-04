@@ -3,6 +3,7 @@
 //!
 //! - [`components`] — component paths into the JS tree operand lists
 //! - [`numbers`] — numeric folding and display rounding
+//! - [`preserve_order`] — the order-preserving (`skip_ordering`) numeric fold
 //! - [`query`] — inspection (functions / operators / variables)
 //! - [`transforms`] — structural rewrites (substitute, subscripts, intervals, …)
 //! - [`vector_matrix`] — move `+`/scalar-`*` inside vector & matrix containers
@@ -16,6 +17,7 @@ mod components;
 mod evaluate;
 mod numbers;
 pub mod pm;
+mod preserve_order;
 mod query;
 mod transforms;
 mod units;
@@ -28,6 +30,7 @@ pub use numbers::{
     constants_to_floats, evaluate_numbers, reduce_rational, round_numbers_to_decimals,
     round_numbers_to_precision, round_numbers_to_precision_plus_decimals, set_small_zero,
 };
+pub use preserve_order::evaluate_numbers_preserve_order;
 pub use query::{functions, operators, variables};
 pub use transforms::{
     altvectors_to_vectors, normalize_function_names, strings_to_subscripts, subscripts_to_strings,
