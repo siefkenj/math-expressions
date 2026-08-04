@@ -98,12 +98,11 @@ pub use ops::pm::{contains_pm, count_pm, expand_pm_signs, PmOverflow, MAX_PM_COU
 pub use ops::{
     add_unit, altvectors_to_vectors, constants_to_floats, evaluate, evaluate_numbers,
     evaluate_numbers_preserve_order, evaluate_to_constant, functions, get_component, is_analytic,
-    normalize_function_names,
-    operators, perform_vector_matrix_additions_scalar_multiplications, reduce_rational,
-    remove_scaling_units, remove_units, round_numbers_to_decimals,
+    normalize_function_names, operators, perform_vector_matrix_additions_scalar_multiplications,
+    reduce_rational, remove_scaling_units, remove_units, round_numbers_to_decimals,
     round_numbers_to_precision, round_numbers_to_precision_plus_decimals, set_small_zero,
-    strings_to_subscripts, subscripts_to_strings, substitute, substitute_component,
-    to_intervals, tuples_to_vectors, variables, AnalyticOpts,
+    strings_to_subscripts, subscripts_to_strings, substitute, substitute_component, to_intervals,
+    tuples_to_vectors, variables, AnalyticOpts,
 };
 pub use parse::latex::{LatexToAst, LatexToAstOptions};
 pub use parse::text::{TextToAst, TextToAstOptions};

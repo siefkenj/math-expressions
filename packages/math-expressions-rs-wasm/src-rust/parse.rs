@@ -43,9 +43,17 @@ pub fn parse_text_with_options(s: &str, options_json: &str) -> Result<Expression
         &mut o.allow_simplified_function_application,
     );
     read_opt_bool(&v, "parseLeibnizNotation", &mut o.parse_leibniz_notation);
-    read_opt_bool(&v, "parseScientificNotation", &mut o.parse_scientific_notation);
+    read_opt_bool(
+        &v,
+        "parseScientificNotation",
+        &mut o.parse_scientific_notation,
+    );
     read_opt_strings(&v, "unsplitSymbols", &mut o.unsplit_symbols);
-    read_opt_strings(&v, "appliedFunctionSymbols", &mut o.applied_function_symbols);
+    read_opt_strings(
+        &v,
+        "appliedFunctionSymbols",
+        &mut o.applied_function_symbols,
+    );
     read_opt_strings(&v, "functionSymbols", &mut o.function_symbols);
     read_opt_strings(&v, "operatorSymbols", &mut o.operator_symbols);
     read_notation(&v, &mut o.notation).map_err(|e| JsError::new(&e))?;
@@ -71,9 +79,17 @@ pub fn parse_latex_with_options(s: &str, options_json: &str) -> Result<Expressio
         &mut o.allow_simplified_function_application,
     );
     read_opt_bool(&v, "parseLeibnizNotation", &mut o.parse_leibniz_notation);
-    read_opt_bool(&v, "parseScientificNotation", &mut o.parse_scientific_notation);
+    read_opt_bool(
+        &v,
+        "parseScientificNotation",
+        &mut o.parse_scientific_notation,
+    );
     read_opt_strings(&v, "allowedLatexSymbols", &mut o.allowed_latex_symbols);
-    read_opt_strings(&v, "appliedFunctionSymbols", &mut o.applied_function_symbols);
+    read_opt_strings(
+        &v,
+        "appliedFunctionSymbols",
+        &mut o.applied_function_symbols,
+    );
     read_opt_strings(&v, "functionSymbols", &mut o.function_symbols);
     read_notation(&v, &mut o.notation).map_err(|e| JsError::new(&e))?;
     let notation = o.notation.clone();
@@ -164,7 +180,9 @@ pub(super) fn read_opt_strings(v: &serde_json::Value, key: &str, target: &mut Ve
 
 /// First char of a string option, if present.
 fn opt_char(v: &serde_json::Value, key: &str) -> Option<char> {
-    v.get(key).and_then(|x| x.as_str()).and_then(|s| s.chars().next())
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .and_then(|s| s.chars().next())
 }
 
 /// Read the `notation` sub-object (I18N_MATH_NOTATION_PLAN) into `n`. Keys:
@@ -181,14 +199,14 @@ fn opt_char(v: &serde_json::Value, key: &str) -> Option<char> {
 /// Validation is built in (an explicit ambiguous pair, e.g. decimal and
 /// argument both `,`, is `Err`, not a silent misparse) so that a future
 /// notation-accepting entry point cannot forget it.
-pub(super) fn read_notation(
-    v: &serde_json::Value,
-    n: &mut NumberNotation,
-) -> Result<(), String> {
+pub(super) fn read_notation(v: &serde_json::Value, n: &mut NumberNotation) -> Result<(), String> {
     let Some(o) = v.get("notation") else {
         return Ok(());
     };
-    let (dec, arg) = (opt_char(o, "decimalSeparator"), opt_char(o, "argumentSeparator"));
+    let (dec, arg) = (
+        opt_char(o, "decimalSeparator"),
+        opt_char(o, "argumentSeparator"),
+    );
     if let Some(d) = dec {
         n.decimal_separator = d;
     }
@@ -272,7 +290,8 @@ mod tests {
     #[test]
     fn explicit_pair_is_respected_and_overrides_convention() {
         // Both given explicitly (even the unconventional '.'/';' combo).
-        let n = resolve(r#"{"notation":{"decimalSeparator":".","argumentSeparator":";"}}"#).unwrap();
+        let n =
+            resolve(r#"{"notation":{"decimalSeparator":".","argumentSeparator":";"}}"#).unwrap();
         assert_eq!((n.decimal_separator, n.argument_separator), ('.', ';'));
     }
 
@@ -296,7 +315,10 @@ mod tests {
             r#"{"notation":{"grouping":"western"}}"#,
             r#"{"notation":{"digits":"arabic"}}"#,
         ] {
-            assert!(resolve(json).is_err(), "{json} must be rejected until Phase 2");
+            assert!(
+                resolve(json).is_err(),
+                "{json} must be rejected until Phase 2"
+            );
         }
         // Explicit no-op values of the stub keys are fine.
         assert!(resolve(r#"{"notation":{"grouping":"none","digits":"latin"}}"#).is_ok());

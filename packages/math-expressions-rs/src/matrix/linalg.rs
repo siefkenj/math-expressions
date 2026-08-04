@@ -2,10 +2,10 @@
 //! that dispatch to the [`super::elimination`] elimination kernels.
 
 use crate::assumptions::{is_nonzero, Assumptions};
+use crate::expr::sym::Sym;
 use crate::expr::Expr;
 use crate::normalize::{canonicalize, mul, pow};
 use crate::num::Number;
-use crate::expr::sym::Sym;
 
 use super::elimination::{
     as_numbers, det_bareiss, det_cofactor, det_rational, is_polynomial, is_zero, rref_core,

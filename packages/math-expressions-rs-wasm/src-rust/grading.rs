@@ -45,7 +45,11 @@ impl Expression {
             "includeErrorInNumberExponents",
             &mut o.include_error_in_number_exponents,
         );
-        read_opt_bool(&v, "allowedErrorIsAbsolute", &mut o.allowed_error_is_absolute);
+        read_opt_bool(
+            &v,
+            "allowedErrorIsAbsolute",
+            &mut o.allowed_error_is_absolute,
+        );
         read_opt_bool(&v, "allowBlanks", &mut o.allow_blanks);
         Ok(math_expressions::equals(&self.0, &other.0, &o))
     }
@@ -80,7 +84,9 @@ impl Expression {
         let v: serde_json::Value =
             serde_json::from_str(comparison).unwrap_or(serde_json::Value::Null);
         match structural_comparison_from_json(&v) {
-            Some(c) => math_expressions::structural_equality(&self.0, &key.0, &c, &EqOptions::default()),
+            Some(c) => {
+                math_expressions::structural_equality(&self.0, &key.0, &c, &EqOptions::default())
+            }
             None => false,
         }
     }
@@ -114,7 +120,9 @@ impl Expression {
 /// Decode a `StructuralComparison` from either a bare name string or a
 /// `{"type": …}` object (STRUCTURAL_COMPARISON F3). Returns `None` for an unknown name.
 fn structural_comparison_from_json(v: &serde_json::Value) -> Option<StructuralComparison> {
-    let name = v.as_str().or_else(|| v.get("type").and_then(|t| t.as_str()))?;
+    let name = v
+        .as_str()
+        .or_else(|| v.get("type").and_then(|t| t.as_str()))?;
     Some(match name {
         "reducedFraction" => StructuralComparison::ReducedFraction,
         "mixedNumber" => StructuralComparison::MixedNumber,

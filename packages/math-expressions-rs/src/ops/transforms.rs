@@ -2,8 +2,8 @@
 //! substitution, subscript ⇄ flat-name conversion, tuple/vector reinterpretation,
 //! interval coercion, and function-name canonicalization.
 
-use crate::expr::Expr;
 use crate::expr::map_children;
+use crate::expr::Expr;
 use std::collections::HashMap;
 
 /// Simultaneously replace each `Sym(name)` with `subs[name]`. Substitution is

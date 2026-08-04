@@ -207,7 +207,7 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         let (scalars, matrices): (Vec<Expr>, Vec<Expr>) =
             flat.into_iter().partition(|f| !is_matrix_valued(f));
         let scalar_part = mul(scalars); // no matrices: the commutative pipeline
-        // Fold adjacent compatible literal matrices, left to right.
+                                        // Fold adjacent compatible literal matrices, left to right.
         let mut seq: Vec<Expr> = Vec::with_capacity(matrices.len());
         for m in matrices {
             match (seq.last(), &m) {
@@ -447,7 +447,10 @@ pub(crate) fn pow(base: Expr, exp: Expr) -> Expr {
     if let Expr::Mul(factors) = &base {
         // Not valid over a non-commutative (matrix) product: (A·B)² ≠ A²·B².
         if as_int(&exp).is_some() && !factors.iter().any(is_matrix_valued) {
-            return mul(factors.iter().map(|f| pow(f.clone(), exp.clone())).collect());
+            return mul(factors
+                .iter()
+                .map(|f| pow(f.clone(), exp.clone()))
+                .collect());
         }
     }
     if let Expr::Num(b) = &base {

@@ -113,7 +113,12 @@ fn inverse_trig_folds_at_exact_values() {
 #[test]
 fn inverse_trig_ignores_how_the_argument_is_written() {
     for group in [
-        vec!["asin(sqrt(2)/2)", "asin(1/sqrt(2))", "asin(0.5*sqrt(2))", "asin(2/(2sqrt(2)))"],
+        vec![
+            "asin(sqrt(2)/2)",
+            "asin(1/sqrt(2))",
+            "asin(0.5*sqrt(2))",
+            "asin(2/(2sqrt(2)))",
+        ],
         vec!["atan(sqrt(3)/3)", "atan(1/sqrt(3))"],
         vec!["asin(sqrt(6)/4+sqrt(2)/4)", "asin((sqrt(6)+sqrt(2))/4)"],
         vec!["asin(1/2)", "asin(0.5)", "asin(2/4)"],
@@ -125,7 +130,12 @@ fn inverse_trig_ignores_how_the_argument_is_written() {
             group[0]
         );
         for s in &group[1..] {
-            assert_eq!(simplify(&p(s)), first, "{s:?} spells the same value as {:?}", group[0]);
+            assert_eq!(
+                simplify(&p(s)),
+                first,
+                "{s:?} spells the same value as {:?}",
+                group[0]
+            );
         }
     }
 }
@@ -135,12 +145,18 @@ fn inverse_trig_ignores_how_the_argument_is_written() {
 /// of the fold layer keeps.
 #[test]
 fn inverse_trig_declines_everything_off_the_lattice() {
-    for s in ["asin(2)", "asin(x)", "atan(1/3)", "acos(0.3)", "asin(-3)"] {
+    for s in ["asin(2)", "asin(x)", "atan(1/3)", "acos(0.3)"] {
         assert!(
             matches!(simplify(&p(s)), Expr::Apply(..)),
             "{s:?} must stay symbolic"
         );
     }
+    // Parity pulls the sign out of a negative argument, but it does not invent
+    // an angle: the argument is still off the lattice underneath.
+    assert_eq!(
+        tree(&simplify(&p("asin(-3)"))),
+        r#"["-",["apply","asin",3]]"#
+    );
 }
 
 /// Each branch is inverted on its *principal* range, so the fold is a function
@@ -213,7 +229,11 @@ fn a_fraction_of_integers_stays_a_fraction() {
         let e = simplify(&p(input));
         assert_eq!(tree(&e), want_tree, "{input} tree");
         assert_eq!(text(&e), want_text, "{input} text");
-        assert_eq!(to_latex(&e, &LatexOpts::default()), want_latex, "{input} latex");
+        assert_eq!(
+            to_latex(&e, &LatexOpts::default()),
+            want_latex,
+            "{input} latex"
+        );
     }
 }
 
@@ -269,9 +289,18 @@ fn a_coefficient_is_not_forced_under_a_fraction_bar() {
 #[test]
 fn rounding_produces_decimals() {
     use math_expressions::{round_numbers_to_decimals, round_numbers_to_precision};
-    assert_eq!(tree(&round_numbers_to_decimals(&simplify(&p("1/3")), 2)), "0.33");
-    assert_eq!(tree(&round_numbers_to_decimals(&simplify(&p("3/6")), 3)), "0.5");
-    assert_eq!(tree(&round_numbers_to_precision(&simplify(&p("3/6")), 3)), "0.5");
+    assert_eq!(
+        tree(&round_numbers_to_decimals(&simplify(&p("1/3")), 2)),
+        "0.33"
+    );
+    assert_eq!(
+        tree(&round_numbers_to_decimals(&simplify(&p("3/6")), 3)),
+        "0.5"
+    );
+    assert_eq!(
+        tree(&round_numbers_to_precision(&simplify(&p("3/6")), 3)),
+        "0.5"
+    );
     assert_eq!(tree(&round_numbers_to_decimals(&p("2.345"), 2)), "2.35");
 }
 

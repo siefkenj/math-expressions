@@ -19,7 +19,10 @@ impl Expression {
     /// Matrix inverse (opaque when singular or symbolic without a nonzero-det
     /// proof under the default assumptions).
     pub fn matrix_inverse(&self) -> Expression {
-        self.derive(math_expressions::matrix_inverse(&self.0, &Assumptions::new()))
+        self.derive(math_expressions::matrix_inverse(
+            &self.0,
+            &Assumptions::new(),
+        ))
     }
     /// Reduced row-echelon form.
     pub fn rref(&self) -> Expression {

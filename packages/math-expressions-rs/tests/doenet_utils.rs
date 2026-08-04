@@ -3,8 +3,8 @@
 
 use math_expressions::{
     equals_syntactic, get_component, perform_vector_matrix_additions_scalar_multiplications,
-    simplify_with, strings_to_subscripts, subscripts_to_strings, substitute_component, to_intervals,
-    to_text, Assumptions, EqOptions, Expr, TextToAst, TextToAstOptions,
+    simplify_with, strings_to_subscripts, subscripts_to_strings, substitute_component,
+    to_intervals, to_text, Assumptions, EqOptions, Expr, TextToAst, TextToAstOptions,
 };
 
 fn parse(s: &str) -> Expr {
@@ -36,7 +36,7 @@ fn simplify_under_assumptions() {
     assert_eq!(s("abs(x)", &w("x>0")), "x");
     assert_eq!(s("abs(x)", &w("x<=0")), "-x");
     assert_eq!(s("abs(x)", &w("x != 0")), "|x|"); // nonzero alone: sign unknown
-    // No assumptions → unchanged.
+                                                  // No assumptions → unchanged.
     assert_eq!(
         txt(&math_expressions::simplify(&parse("sqrt(x^2)"))),
         "sqrt(x^2)"
@@ -54,7 +54,11 @@ fn components() {
     // indexes any operator node.
     assert_eq!(txt(&get_component(&parse("x+1"), &[0]).unwrap()), "x");
     let replaced = substitute_component(&t, &[1], &parse("z")).unwrap();
-    assert!(equals_syntactic(&replaced, &parse("(a, z, c)"), &EqOptions::default()));
+    assert!(equals_syntactic(
+        &replaced,
+        &parse("(a, z, c)"),
+        &EqOptions::default()
+    ));
 }
 
 #[test]

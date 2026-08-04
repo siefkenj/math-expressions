@@ -3,8 +3,8 @@
 //! every answer is *certified* (exact Sturm counts + certified refinement)
 //! or an honest refusal — never a wrong value or a wrong index order.
 
-use math_expressions::eval_numeric::complex::{eval_complex, Env};
 use math_expressions::eval_numeric::certified_digits::{evaluate_to_precision, Precise};
+use math_expressions::eval_numeric::complex::{eval_complex, Env};
 use math_expressions::{canonicalize, Expr, TextToAst, TextToAstOptions};
 use num_complex::Complex64;
 
@@ -106,7 +106,10 @@ fn mignotte_close_real_pair() {
             }
         }
     }
-    let near: Vec<&(usize, f64)> = reals.iter().filter(|(_, v)| (v - 0.1).abs() < 1e-3).collect();
+    let near: Vec<&(usize, f64)> = reals
+        .iter()
+        .filter(|(_, v)| (v - 0.1).abs() < 1e-3)
+        .collect();
     assert_eq!(near.len(), 2, "two roots near 1/10: {reals:?}");
     let (k0, v0) = *near[0];
     let (k1, v1) = *near[1];
@@ -128,7 +131,10 @@ fn mignotte_close_real_pair() {
         40,
     );
     assert_ne!(d0, d1, "certified digits distinguish the pair");
-    assert!(d0.starts_with("9999") && d1.starts_with("1000"), "{d0} / {d1}");
+    assert!(
+        d0.starts_with("9999") && d1.starts_with("1000"),
+        "{d0} / {d1}"
+    );
 }
 
 #[test]

@@ -3,8 +3,8 @@
 //! the display-rounding passes (`round_numbers_*`, `set_small_zero`,
 //! `constants_to_floats`).
 
-use crate::expr::Expr;
 use crate::expr::map_children;
+use crate::expr::Expr;
 use crate::normalize::{canonicalize, present};
 use crate::num::{Number, Spelling};
 use std::collections::BTreeSet;

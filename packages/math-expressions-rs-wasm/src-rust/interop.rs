@@ -39,7 +39,9 @@ pub fn from_serialized(json: &str) -> Result<Expression, JsError> {
     if value.get("objectType").and_then(serde_json::Value::as_str) != Some("math-expression") {
         return Err(JsError::new("not a serialized math-expression"));
     }
-    let tree = value.get("tree").ok_or_else(|| JsError::new("missing tree"))?;
+    let tree = value
+        .get("tree")
+        .ok_or_else(|| JsError::new("missing tree"))?;
     math_expressions::expr::serde::try_from_js(tree)
         .map(Expression::with_default_notation)
         .map_err(|e| JsError::new(&e))

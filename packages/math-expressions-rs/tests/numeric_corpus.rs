@@ -49,7 +49,12 @@ fn statistics_match_mathjs() {
     for case in corpus()["stats"].as_array().unwrap() {
         let data = fs(&case["data"]);
         assert_close(mathjs_compat::mean(&data), f(&case["mean"]), 1e-12, "mean");
-        assert_close(mathjs_compat::median(&data), f(&case["median"]), 1e-12, "median");
+        assert_close(
+            mathjs_compat::median(&data),
+            f(&case["median"]),
+            1e-12,
+            "median",
+        );
         assert_close(
             mathjs_compat::variance(&data),
             f(&case["variance"]),

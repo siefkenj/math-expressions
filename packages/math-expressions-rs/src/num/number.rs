@@ -267,9 +267,9 @@ impl Number {
                     BigRational::new(BigInt::one(), pow10)
                 };
                 let rounded = (&r * &scale).round(); // half away from zero
-                // Rounding *to decimal places* produces a decimal, whatever
-                // went in: `round_numbers_to_decimals(1/3, 2)` is `0.33`, not
-                // `33/100`.
+                                                     // Rounding *to decimal places* produces a decimal, whatever
+                                                     // went in: `round_numbers_to_decimals(1/3, 2)` is `0.33`, not
+                                                     // `33/100`.
                 Number::from_bigrational_spelled(rounded / scale, Spelling::Decimal)
             }
             None => {
@@ -496,7 +496,8 @@ impl Number {
         // |±1| is exempt: its powers stay one digit.
         let base_bits = base.numer().bits().max(base.denom().bits());
         if base_bits > 1
-            && exp.unsigned_abs().saturating_mul(base_bits) > crate::resource_limits::current().max_pow_bits
+            && exp.unsigned_abs().saturating_mul(base_bits)
+                > crate::resource_limits::current().max_pow_bits
         {
             return None;
         }
@@ -508,7 +509,6 @@ impl Number {
         // `a/b`: canonicalization turns every division into a negative power.
         Some(Number::from_bigrational_spelled(result, self.spelling()))
     }
-
 }
 
 /// `base^n` by exponentiation-by-squaring (n unsigned; caller handles sign).

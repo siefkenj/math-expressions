@@ -10,4 +10,4 @@ mod number;
 pub use number::{BigNumber, Number, Spelling, F64};
 
 // Used by the printer's f64 shortest-round-trip rendering.
-pub(crate) use decimal::shortest_digits;
+pub(crate) use decimal::{js_exponential_parts, positional_from_digits, shortest_digits};

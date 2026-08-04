@@ -85,13 +85,14 @@ fn complex_rootof_components() {
     let Precise::Complex { re: re2, im: im2 } = &p2 else {
         panic!("expected complex")
     };
-    let take = |m: &math_expressions::eval_numeric::certified_digits::fix::MpFix, d: usize| -> String {
-        m.to_decimal_string(d)
-            .chars()
-            .filter(|c| c.is_ascii_digit())
-            .take(d)
-            .collect()
-    };
+    let take =
+        |m: &math_expressions::eval_numeric::certified_digits::fix::MpFix, d: usize| -> String {
+            m.to_decimal_string(d)
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .take(d)
+                .collect()
+        };
     assert_eq!(take(re, 39), take(re2, 39));
     assert_eq!(take(im, 39), take(im2, 39));
     // And both components match the f64 seed to ~1e-12.

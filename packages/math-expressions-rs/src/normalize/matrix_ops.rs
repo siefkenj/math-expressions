@@ -51,7 +51,8 @@ pub(crate) fn matmul_literal(a: &Expr, b: &Expr) -> Option<Expr> {
         return None;
     }
     let (r1, c1, c2) = (*r1 as usize, *c1 as usize, *c2 as usize);
-    if r1.saturating_mul(c1).saturating_mul(c2) > crate::resource_limits::current().max_expand_terms {
+    if r1.saturating_mul(c1).saturating_mul(c2) > crate::resource_limits::current().max_expand_terms
+    {
         return None;
     }
     let mut entries = Vec::with_capacity(r1 * c2);

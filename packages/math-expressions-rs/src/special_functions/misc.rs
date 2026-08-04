@@ -261,7 +261,9 @@ fn combinatorial_exact(xs: &[BigRational], ordered: bool) -> Option<BigRational>
     // Exact division, not `BigRational::new`: `C(n,r)` is an integer whenever
     // `n ≥ r ≥ 0` are, so there is no fraction to reduce and reducing one would
     // mean a GCD over operands as large as the result.
-    Some(BigRational::from(num / balanced_product((1..=r).map(BigInt::from))))
+    Some(BigRational::from(
+        num / balanced_product((1..=r).map(BigInt::from)),
+    ))
 }
 
 /// The product of `xs`, paired up by halves rather than accumulated

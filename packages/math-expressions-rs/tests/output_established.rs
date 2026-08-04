@@ -38,12 +38,17 @@ struct Divergence {
     rust: String,
 }
 
-const SNAPSHOT: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ast-output-known-divergences.json");
+const SNAPSHOT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/ast-output-known-divergences.json"
+);
 
 fn render_latex(v: &Value) -> String {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        to_latex(&try_from_js(v).expect("fixture tree"), &LatexOpts::default())
+        to_latex(
+            &try_from_js(v).expect("fixture tree"),
+            &LatexOpts::default(),
+        )
     }))
     .unwrap_or_else(|_| "<PANIC>".to_string())
 }
@@ -67,21 +72,37 @@ fn current_divergences() -> BTreeMap<String, Divergence> {
                 let ast = c.ast.to_string();
                 out.insert(
                     format!("{kind}\0{ast}"),
-                    Divergence { kind: kind.to_string(), ast, js: c.out.clone(), rust: got },
+                    Divergence {
+                        kind: kind.to_string(),
+                        ast,
+                        js: c.out.clone(),
+                        rust: got,
+                    },
                 );
             }
         }
     };
-    add("latex", include_str!("fixtures/ast-to-latex.json"), &render_latex);
-    add("text", include_str!("fixtures/ast-to-text.json"), &render_text);
+    add(
+        "latex",
+        include_str!("fixtures/ast-to-latex.json"),
+        &render_latex,
+    );
+    add(
+        "text",
+        include_str!("fixtures/ast-to-text.json"),
+        &render_text,
+    );
     out
 }
 
 fn load_snapshot() -> BTreeMap<String, Divergence> {
-    let raw = std::fs::read_to_string(SNAPSHOT)
-        .unwrap_or_else(|e| panic!("read snapshot {SNAPSHOT}: {e} (run with BLESS=1 to create it)"));
+    let raw = std::fs::read_to_string(SNAPSHOT).unwrap_or_else(|e| {
+        panic!("read snapshot {SNAPSHOT}: {e} (run with BLESS=1 to create it)")
+    });
     let list: Vec<Divergence> = serde_json::from_str(&raw).unwrap();
-    list.into_iter().map(|d| (format!("{}\0{}", d.kind, d.ast), d)).collect()
+    list.into_iter()
+        .map(|d| (format!("{}\0{}", d.kind, d.ast), d))
+        .collect()
 }
 
 #[test]
@@ -91,8 +112,15 @@ fn ast_output_matches_established_modulo_snapshot() {
     if std::env::var("BLESS").is_ok() {
         let mut list: Vec<&Divergence> = current.values().collect();
         list.sort_by(|a, b| (&a.kind, &a.ast).cmp(&(&b.kind, &b.ast)));
-        std::fs::write(SNAPSHOT, serde_json::to_string_pretty(&list).unwrap() + "\n").unwrap();
-        eprintln!("blessed {} intentional divergences into {SNAPSHOT}", list.len());
+        std::fs::write(
+            SNAPSHOT,
+            serde_json::to_string_pretty(&list).unwrap() + "\n",
+        )
+        .unwrap();
+        eprintln!(
+            "blessed {} intentional divergences into {SNAPSHOT}",
+            list.len()
+        );
         return;
     }
 

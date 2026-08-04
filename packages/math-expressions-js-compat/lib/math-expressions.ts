@@ -8,6 +8,7 @@ import wasm, { setWasmModule } from "./_wasm";
 import math from "./mathjs";
 import { match, flatten, unflattenLeft, unflattenRight } from "./trees/flatten";
 import * as converters from "./converters/index";
+import { tagNonFinite } from "./converters/ast-json";
 import { compileRustExpr } from "math-expressions-rs-wasm";
 import type { WasmExpression } from "math-expressions-rs-wasm";
 import type { MathJsInstance } from "mathjs";
@@ -103,11 +104,9 @@ function astReplacer(this: unknown, key: string, value: unknown): unknown {
   // expression that never got run through `Context.reviver`. Keyed on the shape
   // `reviver` itself recognizes.
   if (isSerializedExpression(value)) return value.tree;
-  if (typeof value === "number" && !Number.isFinite(value)) {
-    if (Number.isNaN(value)) return { $: "NaN" };
-    return { $: value > 0 ? "Inf" : "-Inf" };
-  }
-  return value;
+  // Shared with the standalone converters, so the two cannot tag `Infinity`
+  // differently (see `converters/ast-json.ts`).
+  return tagNonFinite(value);
 }
 
 /** The `toJSON()` envelope shape, as `Context.reviver` recognizes it. */
@@ -399,9 +398,16 @@ class Expression {
   }
 
   // ---- evaluation ----
+  // Legacy returned a plain number for a real value and a math.js complex
+  // object for a non-real one, so `fromText("i").evaluate_to_constant()` is
+  // `{re:0, im:1}`, not null. The wasm entry point reports only the real case;
+  // the complex one comes back through `evaluate_to_complex`, which applies the
+  // same free-variable and undefined-leaf rules.
   evaluate_to_constant() {
     const v = this._w.evaluate_to_constant();
-    return v === undefined ? null : v;
+    if (v !== undefined) return v;
+    const c = this._w.evaluate_to_complex();
+    return c === undefined ? null : math.complex(c[0], c[1]);
   }
   evaluate_to_complex() {
     const v = this._w.evaluate_to_complex();

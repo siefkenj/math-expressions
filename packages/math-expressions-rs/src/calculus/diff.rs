@@ -133,7 +133,10 @@ fn apply_rule(head: &Expr, args: &[Expr], var: &str) -> Expr {
         }
         // Unknown single-arg function → prime notation: f'(u)·u'. Matches the
         // upstream "story" fallback for functions with no known derivative.
-        let fprime = Expr::Apply(Box::new(Expr::Prime(Box::new(Expr::Sym(*f)))), vec![arg.clone()]);
+        let fprime = Expr::Apply(
+            Box::new(Expr::Prime(Box::new(Expr::Sym(*f)))),
+            vec![arg.clone()],
+        );
         return mul2(fprime, inner);
     }
     // Multi-argument or non-symbol heads are not differentiated (rare; e.g.

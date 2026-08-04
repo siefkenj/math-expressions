@@ -160,9 +160,7 @@ pub(super) fn is_polynomial(e: &Expr) -> bool {
     match e {
         Expr::Num(_) | Expr::Sym(_) => true,
         Expr::Add(ts) | Expr::Mul(ts) => ts.iter().all(is_polynomial),
-        Expr::Pow(b, x) => {
-            is_polynomial(b) && matches!(&**x, Expr::Num(Number::Int(k)) if *k >= 0)
-        }
+        Expr::Pow(b, x) => is_polynomial(b) && matches!(&**x, Expr::Num(Number::Int(k)) if *k >= 0),
         _ => false,
     }
 }
@@ -193,12 +191,14 @@ pub(super) fn det_bareiss(entries: &[Expr], n: usize) -> Option<Expr> {
             for j in k + 1..n {
                 let num = add(vec![
                     mul(vec![m[i * n + j].clone(), m[k * n + k].clone()]),
-                    mul(vec![Expr::int(-1), m[i * n + k].clone(), m[k * n + j].clone()]),
+                    mul(vec![
+                        Expr::int(-1),
+                        m[i * n + k].clone(),
+                        m[k * n + j].clone(),
+                    ]),
                 ]);
-                let q = crate::ops::reduce_rational(&Expr::Div(
-                    Box::new(num),
-                    Box::new(prev.clone()),
-                ));
+                let q =
+                    crate::ops::reduce_rational(&Expr::Div(Box::new(num), Box::new(prev.clone())));
                 if !is_polynomial(&canonicalize(&q)) {
                     return None;
                 }

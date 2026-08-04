@@ -1,7 +1,7 @@
 //! Order-preserving numeric folding: the `skip_ordering` form of
 //! `me.evaluate_numbers`, backing DoenetML's `simplify="numberspreserveorder"`.
 
-use crate::expr::{Expr, MathConst, map_children};
+use crate::expr::{map_children, Expr, MathConst};
 use crate::num::Number;
 
 /// Fold numeric subexpressions **without reordering operands**: `1 + x + 2`
@@ -92,7 +92,8 @@ fn product(factors: Vec<Expr>) -> Expr {
     // `(−1)·x`), the convention the canonical `present` also uses. Any other
     // negative coefficient stays a literal, so `−9·(…)·8·(…)·(−3)` keeps its
     // `−9` rather than growing a wrapper.
-    if out.len() > 1 && matches!(out.first(), Some(Expr::Num(n)) if n.is_negative() && n.abs().is_one())
+    if out.len() > 1
+        && matches!(out.first(), Some(Expr::Num(n)) if n.is_negative() && n.abs().is_one())
     {
         let rest = out.split_off(1);
         return Expr::Neg(Box::new(collapse(rest, Expr::Mul)));
@@ -197,11 +198,7 @@ fn spell_exponent(x: Expr) -> Expr {
         let (neg, num, den) = crate::normalize::split_number(n);
         if !den.is_one() {
             let frac = Expr::Div(Box::new(Expr::Num(num)), Box::new(Expr::Num(den)));
-            return if neg {
-                Expr::Neg(Box::new(frac))
-            } else {
-                frac
-            };
+            return if neg { Expr::Neg(Box::new(frac)) } else { frac };
         }
     }
     x
@@ -331,7 +328,10 @@ mod tests {
     /// one, and a coefficient of exactly −1 spells back as a negation.
     #[test]
     fn negation_folds_into_a_leading_coefficient() {
-        assert_eq!(run("-2 cbrt(2x)"), r#"["*",-2,["apply","cbrt",["*",2,"x"]]]"#);
+        assert_eq!(
+            run("-2 cbrt(2x)"),
+            r#"["*",-2,["apply","cbrt",["*",2,"x"]]]"#
+        );
         assert_eq!(run("-5/e^t"), r#"["/",-5,["^","e","t"]]"#);
         assert_eq!(run("(-1+2-2)x"), r#"["-","x"]"#);
         // Nothing numeric to absorb into — the wrapper stays.

@@ -13,8 +13,8 @@
 //! Read-only traversal ([`Expr::children`], [`Expr::any_subexpr`]) and n-ary
 //! flattening ([`flatten`](super::flatten)) live in [`visit`](super::visit).
 
-use crate::num::Number;
 use crate::expr::sym::Sym;
+use crate::num::Number;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
@@ -48,7 +48,10 @@ pub enum Expr {
     /// `index` follows the canonical root order (real roots ascending, then
     /// conjugate pairs, negative imaginary part first). Text form
     /// `rootof(t^3 - t - 1, 2)`.
-    RootOf { poly: Box<[Number]>, index: u32 },
+    RootOf {
+        poly: Box<[Number]>,
+        index: u32,
+    },
     /// Missing operand "＿" — a real variant, not a magic symbol.
     Blank,
     /// "..." inside lists — ["ldots"] in the JS AST.

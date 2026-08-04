@@ -3,9 +3,7 @@
 //! built from that list.
 
 use super::def::FnDef;
-use super::{
-    aggregate, exp_log, hyperbolic, hyperbolic_inverse, misc, powers, trig, trig_inverse,
-};
+use super::{aggregate, exp_log, hyperbolic, hyperbolic_inverse, misc, powers, trig, trig_inverse};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 

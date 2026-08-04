@@ -27,26 +27,26 @@ mod matrix_ops;
 mod units;
 
 pub(crate) mod expand;
-pub(crate) mod order;
 pub(crate) mod fold_apply;
+pub(crate) mod order;
 pub(crate) mod present;
 pub(crate) mod simplify;
 pub(crate) mod special_values;
 pub(crate) mod syntactic;
 
+pub use expand::expand;
 pub(crate) use expand::expand_core;
+pub use fold_apply::fold_numeric_applications;
 pub(crate) use order::cmp;
 pub(crate) use present::{present, split_number};
-pub(crate) use simplify::{simplify_base_with, simplify_canonical, simplify_core};
-pub use expand::expand;
 pub use simplify::{simplify, simplify_logical, simplify_with};
-pub use fold_apply::fold_numeric_applications;
+pub(crate) use simplify::{simplify_base_with, simplify_canonical, simplify_core};
 pub use special_values::fold_special_values;
 pub use syntactic::normalize_syntactic;
 
 pub use canonicalize::canonicalize;
-pub(crate) use full::full_simplify;
-pub use units::desugar_units;
 pub(crate) use constructors::{add, mul, pow, split_coeff, without_like_term_collection};
-pub(crate) use units::unit_body;
+pub(crate) use full::full_simplify;
 pub(crate) use matrix_ops::{identity_matrix, is_matrix_valued, matmul_literal};
+pub use units::desugar_units;
+pub(crate) use units::unit_body;

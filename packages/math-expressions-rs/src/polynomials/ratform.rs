@@ -35,7 +35,9 @@ const MAX_INDETERMINATES: usize = 6;
 pub fn together(e: &Expr) -> Expr {
     match rational_normal(e) {
         Some((num, den)) if is_one_expr(&den) => num,
-        Some((num, den)) => crate::normalize::canonicalize(&Expr::Div(Box::new(num), Box::new(den))),
+        Some((num, den)) => {
+            crate::normalize::canonicalize(&Expr::Div(Box::new(num), Box::new(den)))
+        }
         None => crate::normalize::canonicalize(e),
     }
 }
@@ -142,7 +144,10 @@ fn rational_parts(e: &Expr) -> Option<(Expr, Expr)> {
         Expr::Div(a, b) => {
             let (na, da) = rational_parts(a)?;
             let (nb, db) = rational_parts(b)?;
-            (crate::normalize::mul(vec![na, db]), crate::normalize::mul(vec![da, nb]))
+            (
+                crate::normalize::mul(vec![na, db]),
+                crate::normalize::mul(vec![da, nb]),
+            )
         }
         Expr::Pow(b, k) => {
             let Expr::Num(Number::Int(k)) = &**k else {

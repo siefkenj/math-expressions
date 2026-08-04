@@ -86,6 +86,59 @@ impl Expression {
     }
 }
 
+/// Report a Rust panic to the JS console before the module traps
+/// (DOENET_INTEGRATION item 2).
+///
+/// A panic in wasm reaches the browser as `RuntimeError: unreachable executed`
+/// and nothing else, which makes a failing `assert_eq!` unreadable — you can
+/// see *that* something tripped, never *which* thing or with what values. That
+/// was long blamed on `panic = "abort"` in the release profile. It is not the
+/// cause: std runs the panic hook before aborting, and the payload survives the
+/// size-oriented profile intact. What was missing is a hook at all — the
+/// default one writes to stderr, which on `wasm32-unknown-unknown` goes
+/// nowhere.
+///
+/// So this is unconditional rather than gated behind a diagnostic build: it
+/// measured 1,958 bytes (0.14%) on the shipped binary, which is not a price
+/// worth making anyone opt into. It does not change *behaviour* — the trap
+/// still happens, right after — only whether the trap says anything. Written
+/// against `wasm-bindgen` directly rather than pulling in
+/// `console_error_panic_hook`, to leave the dependency set alone.
+mod panic_report {
+    use wasm_bindgen::prelude::*;
+
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(js_namespace = console)]
+        fn error(msg: String);
+    }
+
+    /// Installed automatically at module instantiation.
+    #[wasm_bindgen(start)]
+    pub fn install() {
+        // `PanicHookInfo`'s Display already carries the location and the
+        // payload — the same text the native runtime prints — so this only
+        // labels which module it came from.
+        std::panic::set_hook(Box::new(|info| {
+            error(format!("[math-expressions wasm] {info}"));
+        }));
+    }
+
+    /// Panic on purpose, to check that a harness actually surfaces the message.
+    /// Worth running first when a trap reports nothing: that looks identical
+    /// whether the hook is missing or the console output is being swallowed
+    /// somewhere upstream, and this tells the two apart before anyone starts
+    /// hunting a real panic.
+    ///
+    /// Behind the `debug-panics` feature (`build-wasm.sh --debug`) so a call
+    /// that kills the worker cannot be made against a shipped build.
+    #[cfg(feature = "debug-panics")]
+    #[wasm_bindgen]
+    pub fn debug_panic_selftest() {
+        assert_eq!(2 + 2, 5, "the panic hook reports assertion messages");
+    }
+}
+
 /// Free the handle's tree iteratively (STACK_SAFETY_PLAN item 21). A handle can
 /// hold an adversarially deep tree — `((((…))))` from student input — whose
 /// ordinary recursive `Drop` would blow the ~1 MB wasm shadow stack and, under

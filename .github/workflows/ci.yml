@@ -12,6 +12,34 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
+    rust-lint:
+        name: Lint Rust Code
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout sources
+              uses: actions/checkout@v6
+
+            # Modeled on DoenetML's "Lint Rust Code" job: install a minimal
+            # stable toolchain with the rustfmt + clippy components, then gate
+            # on formatting and a warning-free clippy. Uses rustup directly
+            # (not the devcontainer) so the lint job stays fast and independent
+            # of the wasm/Node toolchain the build/test jobs need.
+            - name: Install toolchain
+              run: |
+                  rustup set profile minimal
+                  rustup toolchain install stable --component rustfmt --component clippy
+                  rustup default stable
+
+            # `--all` covers the whole workspace (the wasm crate is not a
+            # default member; see rust-test).
+            - name: Cargo fmt
+              run: cargo fmt --all -- --check
+
+            # `--workspace --all-targets` lints the wasm crate and the test /
+            # example targets too, not just the default-member library.
+            - name: Cargo clippy
+              run: cargo clippy --workspace --all-targets -- -D warnings
+
     rust-build:
         name: Rust build
         runs-on: ubuntu-latest

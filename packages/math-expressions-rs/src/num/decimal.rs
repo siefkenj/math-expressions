@@ -206,23 +206,51 @@ pub(crate) fn js_f64_to_string(v: f64) -> String {
     if v.is_infinite() {
         return "Infinity".to_string();
     }
-    let (s, n) = shortest_digits(v);
-    let k = s.len() as i64;
+    match js_exponential_parts(v) {
+        Some((mantissa, e)) => {
+            let sign = if e >= 0 { "+" } else { "-" };
+            format!("{}e{}{}", mantissa, sign, e.abs())
+        }
+        None => {
+            let (s, n) = shortest_digits(v);
+            positional_from_digits(&s, n)
+        }
+    }
+}
 
-    if k <= n && n <= 21 {
-        format!("{}{}", s, "0".repeat((n - k) as usize))
-    } else if 0 < n && n <= 21 {
-        format!("{}.{}", &s[..n as usize], &s[n as usize..])
-    } else if -6 < n && n <= 0 {
-        format!("0.{}{}", "0".repeat((-n) as usize), s)
+/// The mantissa and decimal exponent JavaScript's `Number.prototype.toString()`
+/// renders `v` with, or `None` when the ECMAScript rule keeps it positional.
+/// `v` must be positive and finite; the sign belongs to the caller.
+///
+/// This *is* the threshold — the legacy printers had no constant of their own,
+/// they called `toString()` and looked for an `e`. Factored out so the output
+/// formatters can ask where the switch happens without restating it, and so
+/// there is exactly one place to change if the rule ever moves.
+pub(crate) fn js_exponential_parts(v: f64) -> Option<(String, i64)> {
+    debug_assert!(v > 0.0 && v.is_finite());
+    let (s, n) = shortest_digits(v);
+    // Positional over `0.000001 ..< 1e21`, exponential outside it.
+    if -6 < n && n <= 21 {
+        return None;
+    }
+    let mantissa = if s.len() == 1 {
+        s
     } else {
-        let e = n - 1;
-        let mantissa = if k == 1 {
-            s.to_string()
-        } else {
-            format!("{}.{}", &s[..1], &s[1..])
-        };
-        let sign = if e >= 0 { "+" } else { "-" };
-        format!("{}e{}{}", mantissa, sign, e.abs())
+        format!("{}.{}", &s[..1], &s[1..])
+    };
+    Some((mantissa, n - 1))
+}
+
+/// Positional decimal for the digit string and exponent of a positive finite
+/// f64 (value = `0.digits × 10^n`). Shared with the printers'
+/// `f64_positional_string` so the two render the same digits.
+pub(crate) fn positional_from_digits(s: &str, n: i64) -> String {
+    let k = s.len() as i64;
+    if k <= n {
+        format!("{}{}", s, "0".repeat((n - k) as usize))
+    } else if n > 0 {
+        format!("{}.{}", &s[..n as usize], &s[n as usize..])
+    } else {
+        format!("0.{}{}", "0".repeat((-n) as usize), s)
     }
 }

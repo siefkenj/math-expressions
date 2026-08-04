@@ -23,7 +23,7 @@
 //!
 //! [`FnDef::fold_exact`]: crate::special_functions::FnDef::fold_exact
 
-use crate::expr::{Expr, map_children};
+use crate::expr::{map_children, Expr};
 use crate::num::{Number, Spelling};
 use crate::special_functions::fold_exact;
 use num_rational::BigRational;
@@ -199,11 +199,17 @@ mod tests {
         assert_eq!(run_js(r#"["apply","sum",["tuple",3,17,["+",5,-4]]]"#), "21");
         assert_eq!(run_js(r#"["apply","prod",["tuple",2,3,4]]"#), "24");
         assert_eq!(run_js(r#"["apply","mean",["tuple",1,2,3]]"#), "2");
-        assert_eq!(run_js(r#"["apply","mean",["tuple",1,2,4]]"#), r#"["/",7,3]"#);
+        assert_eq!(
+            run_js(r#"["apply","mean",["tuple",1,2,4]]"#),
+            r#"["/",7,3]"#
+        );
         // A fraction of integers reads back as a fraction whether or not its
         // decimal expansion terminates — `5/2` is not `2.5` here, because
         // nothing decimal went into it (`num::Spelling`).
-        assert_eq!(run_js(r#"["apply","median",["tuple",1,2,3,4]]"#), r#"["/",5,2]"#);
+        assert_eq!(
+            run_js(r#"["apply","median",["tuple",1,2,3,4]]"#),
+            r#"["/",5,2]"#
+        );
         assert_eq!(run_js(r#"["apply","variance",["tuple",1,2,3]]"#), "1");
         assert_eq!(run_js(r#"["apply","std",["tuple",1,2,3]]"#), "1");
         assert_eq!(run_js(r#"["apply","count",["tuple",1,2,3]]"#), "3");
@@ -260,7 +266,10 @@ mod tests {
     #[test]
     fn nested_applications_fold_inside_out() {
         assert_eq!(run("abs(floor(-2.5))"), "3");
-        assert_eq!(run_js(r#"["apply","sum",["tuple",["apply","abs",-2],3]]"#), "5");
+        assert_eq!(
+            run_js(r#"["apply","sum",["tuple",["apply","abs",-2],3]]"#),
+            "5"
+        );
     }
 
     /// The contract this pass documents: canonical in, canonical out. Replacing
@@ -272,10 +281,19 @@ mod tests {
         assert_eq!(run("2*floor(55.33)*x"), r#"["*",110,"x"]"#);
         assert_eq!(run("floor(55.33) * x * 2"), r#"["*",110,"x"]"#);
         // Idempotent, which is what "canonical-out" buys the caller.
-        for s in ["floor(55.33) + 3", "abs(floor(-2.5))", "log10(3) + 1", "x + 1"] {
+        for s in [
+            "floor(55.33) + 3",
+            "abs(floor(-2.5))",
+            "log10(3) + 1",
+            "x + 1",
+        ] {
             let e = TextToAst::new(Default::default()).convert(s).unwrap();
             let once = fold_numeric_applications(&e);
-            assert_eq!(fold_numeric_applications(&once), once, "not idempotent on {s:?}");
+            assert_eq!(
+                fold_numeric_applications(&once),
+                once,
+                "not idempotent on {s:?}"
+            );
         }
     }
 }

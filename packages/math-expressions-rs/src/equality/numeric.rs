@@ -205,7 +205,12 @@ pub(super) fn sample_point(
 /// Tolerance test matching JS `find_equality_region`, plus the
 /// allowed number error. JS ordering: `tol = extra + min_mag·rel`, capped at
 /// 10% of the smaller magnitude, then the zero/absolute adjustment.
-pub(super) fn close_numeric_fuzzy(va: Complex64, vb: Complex64, opts: &EqOptions, extra: f64) -> bool {
+pub(super) fn close_numeric_fuzzy(
+    va: Complex64,
+    vb: Complex64,
+    opts: &EqOptions,
+    extra: f64,
+) -> bool {
     let min_mag = va.norm().min(vb.norm());
     let max_mag = va.norm().max(vb.norm());
     if max_mag == 0.0 {

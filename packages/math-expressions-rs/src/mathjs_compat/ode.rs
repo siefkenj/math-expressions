@@ -157,8 +157,14 @@ where
     F: FnMut(f64, &[f64], &mut [f64]) -> bool,
 {
     let dim = y0.len();
-    let tol = if tol.is_finite() && tol > 0.0 { tol } else { 1e-6 };
-    let max_steps = max_steps.min(crate::resource_limits::current().max_ode_steps).max(1);
+    let tol = if tol.is_finite() && tol > 0.0 {
+        tol
+    } else {
+        1e-6
+    };
+    let max_steps = max_steps
+        .min(crate::resource_limits::current().max_ode_steps)
+        .max(1);
     let mut sol = OdeSolution {
         dim,
         t0,
@@ -189,7 +195,11 @@ where
     let mut h = {
         let ynorm = y.iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1.0);
         let fnorm = k[0].iter().fold(0.0f64, |m, v| m.max(v.abs()));
-        let by_slope = if fnorm > 0.0 { 0.01 * ynorm / fnorm } else { span };
+        let by_slope = if fnorm > 0.0 {
+            0.01 * ynorm / fnorm
+        } else {
+            span
+        };
         dir * by_slope.min(span / 10.0).max(span * 1e-8)
     };
 
@@ -286,13 +296,7 @@ where
                 for (j, kj) in k.iter().enumerate() {
                     dsum += D[j] * kj[i];
                 }
-                rcont.push([
-                    y[i],
-                    ydiff,
-                    bspl,
-                    ydiff - h * k[6][i] - bspl,
-                    h * dsum,
-                ]);
+                rcont.push([y[i], ydiff, bspl, ydiff - h * k[6][i] - bspl, h * dsum]);
             }
             sol.segs.push(DenseSeg { t, h, rcont });
             t += h;
@@ -333,9 +337,7 @@ pub fn solve_ode_exprs(
     // All free variables must be the independent/state variables.
     for c in &canon {
         for v in crate::ops::variables(c) {
-            if v != ind_var
-                && !state_vars.contains(&v)
-                && !crate::expr::sym::is_constant_symbol(&v)
+            if v != ind_var && !state_vars.contains(&v) && !crate::expr::sym::is_constant_symbol(&v)
             {
                 return None;
             }
@@ -343,7 +345,12 @@ pub fn solve_ode_exprs(
     }
     // Tape path: compile each RHS and map its variable slots onto
     // [t, y0, y1, …].
-    let tapes: Option<Vec<(crate::eval_numeric::certified_digits::tape::CompiledExpr, Vec<usize>)>> = canon
+    let tapes: Option<
+        Vec<(
+            crate::eval_numeric::certified_digits::tape::CompiledExpr,
+            Vec<usize>,
+        )>,
+    > = canon
         .iter()
         .map(|c| {
             let tape = crate::eval_numeric::certified_digits::compile(c).ok()?;
@@ -401,7 +408,9 @@ pub fn solve_ode_exprs(
                     }
                     for (i, c) in canon.iter().enumerate() {
                         match crate::eval_numeric::complex::eval_complex(c, &env) {
-                            Some(z) if z.re.is_finite() && z.im.abs() < 1e-9 * z.re.abs().max(1.0) => {
+                            Some(z)
+                                if z.re.is_finite() && z.im.abs() < 1e-9 * z.re.abs().max(1.0) =>
+                            {
                                 out[i] = z.re
                             }
                             _ => return false,

@@ -271,7 +271,8 @@ fn eval(e: &Expr, bindings: &HashMap<String, i64>, modulus: i64) -> Ff {
             // 0^symbolic as NaN (the prime is skipped; the filter only ever
             // gets *less* aggressive, which is the safe direction for a
             // rejection-only stage).
-            if base.vals.contains(&0) && !matches!(ex.as_ref(), Expr::Num(Number::Int(k)) if *k >= 0)
+            if base.vals.contains(&0)
+                && !matches!(ex.as_ref(), Expr::Num(Number::Int(k)) if *k >= 0)
             {
                 return Ff::nan();
             }

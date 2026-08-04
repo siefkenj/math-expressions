@@ -290,7 +290,8 @@ fn combine_pow(base: &Facts, exp: &Expr, a: &Assumptions) -> Facts {
 
     // Positive real base: positive for any real exponent (covers 1/x, sqrt
     // as x^(1/2), and symbolic real exponents).
-    if base.positive == Some(true) && (ef.real == Some(true) || lit.is_some() || is_real_exponent_shape(exp))
+    if base.positive == Some(true)
+        && (ef.real == Some(true) || lit.is_some() || is_real_exponent_shape(exp))
     {
         out.real = Some(true);
         out.complex = Some(true);

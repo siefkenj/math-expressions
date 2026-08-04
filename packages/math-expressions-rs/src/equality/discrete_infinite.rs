@@ -306,9 +306,7 @@ pub fn create_discrete_infinite_set(
     min_index: Option<&Expr>,
     max_index: Option<&Expr>,
 ) -> Option<Expr> {
-    let min = min_index
-        .cloned()
-        .unwrap_or(Expr::Const(MathConst::NegInf));
+    let min = min_index.cloned().unwrap_or(Expr::Const(MathConst::NegInf));
     let max = max_index.cloned().unwrap_or(Expr::Const(MathConst::Inf));
 
     let offsets_list: Vec<&Expr> = match offsets {

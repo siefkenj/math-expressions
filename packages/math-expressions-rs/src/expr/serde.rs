@@ -187,7 +187,9 @@ fn from_js_array(arr: &[Value]) -> Result<Expr, String> {
 
 /// A `["tuple", a, b]`-shaped 3-element array (head + two entries).
 fn tuple3<'a>(v: Option<&'a Value>, what: &str) -> Result<&'a Vec<Value>, String> {
-    let arr = v.and_then(Value::as_array).ok_or_else(|| what.to_string())?;
+    let arr = v
+        .and_then(Value::as_array)
+        .ok_or_else(|| what.to_string())?;
     if arr.len() < 3 {
         return Err(format!("{what}: expected 3 elements"));
     }
@@ -243,7 +245,9 @@ fn to_js_rec(expr: &Expr) -> Value {
         Expr::Num(n) => number_to_js(n),
         // Serialized as its `rootof(p(t), k)` application; deserialization
         // re-canonicalizes that back into the leaf.
-        Expr::RootOf { poly, index } => to_js_rec(&crate::polynomials::rootof::as_apply(poly, *index)),
+        Expr::RootOf { poly, index } => {
+            to_js_rec(&crate::polynomials::rootof::as_apply(poly, *index))
+        }
         Expr::Sym(s) => Value::String(s.name()),
         Expr::Bool(b) => Value::Bool(*b),
         Expr::Blank => Value::String("\u{ff3f}".to_string()),
@@ -393,7 +397,11 @@ fn f64_to_js(v: f64) -> Value {
 
 fn relation_to_js(operands: &[Expr], ops: &[RelOp]) -> Value {
     if ops.len() == 1 {
-        return json!([ops[0].js_name(), to_js_rec(&operands[0]), to_js_rec(&operands[1])]);
+        return json!([
+            ops[0].js_name(),
+            to_js_rec(&operands[0]),
+            to_js_rec(&operands[1])
+        ]);
     }
     if ops.iter().all(|o| *o == RelOp::Eq) {
         // Chained equality: ["=", a, b, c, ...]
@@ -430,11 +438,7 @@ mod tests {
     #[test]
     fn chained_inequality_from_js_round_trips() {
         for head in ["gts", "lts"] {
-            let tree = json!([
-                head,
-                ["tuple", "x", "y", "z"],
-                ["tuple", true, false]
-            ]);
+            let tree = json!([head, ["tuple", "x", "y", "z"], ["tuple", true, false]]);
             let expr = try_from_js(&tree).expect("chained inequality should parse");
             let Expr::Relation { operands, ops } = &expr else {
                 panic!("expected Relation, got {expr:?}");
@@ -568,8 +572,12 @@ mod tests {
     /// structural rather than a runtime check.
     #[test]
     fn flag_tuples_stay_metadata_and_do_not_become_boolean_children() {
-        let interval = try_from_js(&json!(["interval", ["tuple", 0, 1], ["tuple", true, false]]))
-            .expect("interval should parse");
+        let interval = try_from_js(&json!([
+            "interval",
+            ["tuple", 0, 1],
+            ["tuple", true, false]
+        ]))
+        .expect("interval should parse");
         assert!(
             matches!(&interval, Expr::Interval { closed, .. } if *closed == (true, false)),
             "closure belongs in the `closed` field, got {interval:?}"

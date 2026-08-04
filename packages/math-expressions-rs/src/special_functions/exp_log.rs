@@ -137,7 +137,8 @@ pub(crate) fn exact_log(value: &BigRational, base: &BigRational) -> Option<BigRa
     // A power of an integer base is either an integer (non-negative exponent)
     // or the reciprocal of one; anything else — `2/3`, `12/5` — cannot be one.
     if value.is_integer() {
-        return integer_log(value.numer(), base.numer()).map(|k| BigRational::from(BigInt::from(k)));
+        return integer_log(value.numer(), base.numer())
+            .map(|k| BigRational::from(BigInt::from(k)));
     }
     if value.numer().is_one() {
         return integer_log(value.denom(), base.numer())

@@ -6,12 +6,12 @@
 use super::{FnDef, DEFAULTS};
 use crate::eval_numeric::certified_digits::kernels::{FixId, FnKernel};
 use crate::expr::Expr;
-use num_bigint::BigInt;
-use num_rational::BigRational;
-use num_traits::Signed;
 use crate::normalize::{mul, pow};
 use crate::num::Number;
+use num_bigint::BigInt;
 use num_complex::Complex64;
+use num_rational::BigRational;
+use num_traits::Signed;
 
 pub const SQRT: FnDef = FnDef {
     name: "sqrt",

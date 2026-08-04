@@ -226,7 +226,7 @@ mod tests {
         assert_eq!(f(&[r(1), r(2), r(3)]), Some(r(1))); // √1
         assert_eq!(f(&[r(1), r(2), r(4)]), None); // √(7/3)
         assert_eq!(f(&[r(1), r(2), r(3), r(4)]), None); // √(5/3)
-        // Variance 1/4, a perfect rational square.
+                                                        // Variance 1/4, a perfect rational square.
         assert_eq!(f(&[r(0), q(1, 2), r(1)]), Some(q(1, 2)));
         // No spread at all.
         assert_eq!(f(&[r(3), r(3)]), Some(r(0)));
@@ -273,7 +273,16 @@ mod tests {
     #[test]
     fn order_aggregates_survive_a_long_list_with_nans() {
         let xs: Vec<Complex64> = (0..200)
-            .map(|i| Complex64::new(if i % 7 == 0 { f64::NAN } else { (100 - i) as f64 }, 0.0))
+            .map(|i| {
+                Complex64::new(
+                    if i % 7 == 0 {
+                        f64::NAN
+                    } else {
+                        (100 - i) as f64
+                    },
+                    0.0,
+                )
+            })
             .collect();
         for d in [&MAX, &MIN, &MEDIAN] {
             assert!(d.evaln.unwrap()(&xs).unwrap().re.is_nan(), "{}", d.name);

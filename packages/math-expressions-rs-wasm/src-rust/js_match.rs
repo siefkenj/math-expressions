@@ -372,19 +372,33 @@ mod tests {
     #[test]
     fn flatten_and_unflatten() {
         // unflattenRight: ["+",1,2,3] -> ["+",1,["+",2,3]]
-        assert_eq!(unflatten_right(&json!(["+", 1, 2, 3])), json!(["+", 1, ["+", 2, 3]]));
+        assert_eq!(
+            unflatten_right(&json!(["+", 1, 2, 3])),
+            json!(["+", 1, ["+", 2, 3]])
+        );
         // unflattenLeft: ["+",1,2,3] -> ["+",["+",1,2],3]
-        assert_eq!(unflatten_left(&json!(["+", 1, 2, 3])), json!(["+", ["+", 1, 2], 3]));
+        assert_eq!(
+            unflatten_left(&json!(["+", 1, 2, 3])),
+            json!(["+", ["+", 1, 2], 3])
+        );
         // flatten both nestings back to the n-ary form.
-        assert_eq!(flatten_tree(&json!(["+", 1, ["+", 2, 3]])), json!(["+", 1, 2, 3]));
-        assert_eq!(flatten_tree(&json!(["+", ["+", 1, 2], 3])), json!(["+", 1, 2, 3]));
+        assert_eq!(
+            flatten_tree(&json!(["+", 1, ["+", 2, 3]])),
+            json!(["+", 1, 2, 3])
+        );
+        assert_eq!(
+            flatten_tree(&json!(["+", ["+", 1, 2], 3])),
+            json!(["+", 1, 2, 3])
+        );
     }
 
     #[test]
     fn substitute_symbols() {
         let sub = |e: &str, pairs: &[(&str, Expr)]| {
-            let map: HashMap<String, Expr> =
-                pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
+            let map: HashMap<String, Expr> = pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect();
             substitute(&parse(e), &map)
         };
 
@@ -405,11 +419,17 @@ mod tests {
         ));
         // recurses through relations (chained inequality)
         assert!(eq_expr(
-            &sub("x < y < z", &[("x", parse("a")), ("y", parse("b")), ("z", parse("c"))]),
+            &sub(
+                "x < y < z",
+                &[("x", parse("a")), ("y", parse("b")), ("z", parse("c"))]
+            ),
             &parse("a < b < c")
         ));
         assert!(eq_expr(
-            &sub("x < y <= z", &[("x", parse("a")), ("y", parse("b")), ("z", parse("c"))]),
+            &sub(
+                "x < y <= z",
+                &[("x", parse("a")), ("y", parse("b")), ("z", parse("c"))]
+            ),
             &parse("a < b <= c")
         ));
     }

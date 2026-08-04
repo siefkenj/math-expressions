@@ -3,11 +3,11 @@
 
 use super::Expression;
 use math_expressions::{
-    constants_to_floats, derivative as rust_derivative, equals as rust_equals,
-    evaluate_numbers, evaluate_numbers_preserve_order, evaluate_to_constant as rust_evc, expand as rust_expand, ops, reduce_rational,
-    round_numbers_to_decimals, round_numbers_to_precision, simplify as rust_simplify,
-    simplify_with as rust_simplify_with, to_latex, to_text, Assumptions, EqOptions, Expr,
-    LatexOpts, TextOpts, TextToAst, TextToAstOptions,
+    constants_to_floats, derivative as rust_derivative, equals as rust_equals, evaluate_numbers,
+    evaluate_numbers_preserve_order, evaluate_to_constant as rust_evc, expand as rust_expand, ops,
+    reduce_rational, round_numbers_to_decimals, round_numbers_to_precision,
+    simplify as rust_simplify, simplify_with as rust_simplify_with, to_latex, to_text, Assumptions,
+    EqOptions, Expr, LatexOpts, TextOpts, TextToAst, TextToAstOptions,
 };
 use wasm_bindgen::prelude::*;
 
@@ -17,20 +17,27 @@ fn to_path(path: Vec<u32>) -> Vec<usize> {
     path.into_iter().map(|i| i as usize).collect()
 }
 
-/// Read the four shared number/blank/multiplication render options DoenetML
+/// Read the five shared number/blank/multiplication render options DoenetML
 /// passes to `toLatex`/`toString` (`padToDigits`, `padToDecimals`, `showBlanks`,
-/// `explicitMultiplicationSymbols`). Keys absent from `v` leave the defaults.
+/// `explicitMultiplicationSymbols`, `avoidScientificNotation`). Keys absent
+/// from `v` leave the defaults.
 fn read_render_opts(
     v: &serde_json::Value,
     pad_to_digits: &mut Option<u32>,
     pad_to_decimals: &mut Option<u32>,
     show_blanks: &mut bool,
     explicit_multiplication_symbols: &mut bool,
+    avoid_scientific_notation: &mut bool,
 ) {
     super::parse::read_opt_u32(v, "padToDigits", pad_to_digits);
     super::parse::read_opt_u32(v, "padToDecimals", pad_to_decimals);
     super::parse::read_opt_bool(v, "showBlanks", show_blanks);
-    super::parse::read_opt_bool(v, "explicitMultiplicationSymbols", explicit_multiplication_symbols);
+    super::parse::read_opt_bool(
+        v,
+        "explicitMultiplicationSymbols",
+        explicit_multiplication_symbols,
+    );
+    super::parse::read_opt_bool(v, "avoidScientificNotation", avoid_scientific_notation);
 }
 
 #[wasm_bindgen]
@@ -70,7 +77,14 @@ impl Expression {
         };
         super::parse::read_opt_bool(&v, "unicode", &mut o.unicode);
         super::parse::read_notation(&v, &mut o.notation).map_err(|e| JsError::new(&e))?;
-        read_render_opts(&v, &mut o.pad_to_digits, &mut o.pad_to_decimals, &mut o.show_blanks, &mut o.explicit_multiplication_symbols);
+        read_render_opts(
+            &v,
+            &mut o.pad_to_digits,
+            &mut o.pad_to_decimals,
+            &mut o.show_blanks,
+            &mut o.explicit_multiplication_symbols,
+            &mut o.avoid_scientific_notation,
+        );
         Ok(to_text(&self.0, &o))
     }
 
@@ -85,7 +99,14 @@ impl Expression {
             ..Default::default()
         };
         super::parse::read_notation(&v, &mut o.notation).map_err(|e| JsError::new(&e))?;
-        read_render_opts(&v, &mut o.pad_to_digits, &mut o.pad_to_decimals, &mut o.show_blanks, &mut o.explicit_multiplication_symbols);
+        read_render_opts(
+            &v,
+            &mut o.pad_to_digits,
+            &mut o.pad_to_decimals,
+            &mut o.show_blanks,
+            &mut o.explicit_multiplication_symbols,
+            &mut o.avoid_scientific_notation,
+        );
         Ok(to_latex(&self.0, &o))
     }
 
@@ -166,25 +187,32 @@ impl Expression {
     }
 
     /// Evaluate a closed expression to a real number, or `undefined` (JS side)
-    /// when it has free variables, is non-finite, or is not purely real —
-    /// preserving the upstream null-vs-value distinction. The imaginary
-    /// tolerance is *relative* to the magnitude, since complex-arithmetic float
-    /// noise scales with it (`1e8·e^(iπ)` has im ≈ 1e-8 yet is real). Complex
-    /// results are a follow-up (they can be added without breaking this
-    /// signature).
+    /// when it has free variables or is not purely real — preserving the
+    /// upstream null-vs-value distinction. The imaginary tolerance is
+    /// *relative* to the magnitude, since complex-arithmetic float noise scales
+    /// with it (`1e8·e^(iπ)` has im ≈ 1e-8 yet is real).
+    ///
+    /// `±∞` is a real value and comes back as one; an infinite real part makes
+    /// the relative tolerance infinite, so the imaginary part is compared
+    /// exactly there instead of being swallowed. A non-real result is not lost
+    /// either — the JS wrapper falls back to [`Self::evaluate_to_complex`].
     pub fn evaluate_to_constant(&self) -> Option<f64> {
         let v = rust_evc(&self.0)?;
-        let tol = 1e-10 * v.re.abs().max(1.0);
-        (v.im.abs() <= tol).then_some(v.re)
+        let real = if v.re.is_finite() {
+            v.im.abs() <= 1e-10 * v.re.abs().max(1.0)
+        } else {
+            v.im == 0.0
+        };
+        real.then_some(v.re)
     }
 
     /// Evaluate a closed expression to a complex constant, returned as the pair
-    /// `[re, im]`, or `undefined` (JS side) when it has free variables or is
-    /// non-finite. Unlike [`Self::evaluate_to_constant`], this keeps a non-real
-    /// result instead of discarding it.
+    /// `[re, im]`, or `undefined` (JS side) when it has free variables or no
+    /// value at all. Unlike [`Self::evaluate_to_constant`], this keeps a
+    /// non-real result instead of discarding it.
     pub fn evaluate_to_complex(&self) -> Option<Vec<f64>> {
         let v = rust_evc(&self.0)?;
-        (v.re.is_finite() && v.im.is_finite()).then(|| vec![v.re, v.im])
+        (!v.re.is_nan() && !v.im.is_nan()).then(|| vec![v.re, v.im])
     }
 
     /// Replace `pi` and `e` with their floating-point values.

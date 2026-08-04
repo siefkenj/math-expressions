@@ -3,8 +3,12 @@
 //! silently regress. Under the workspace `panic = "abort"` profile, the
 //! panic/abort cases here would be full wasm-worker crashes if they regressed.
 
-use math_expressions::eval_numeric::certified_digits::{evaluate_to_precision, integrate_to_precision, Precise};
-use math_expressions::{canonicalize, det, Expr, LatexToAst, LatexToAstOptions, Number, NumberNotation};
+use math_expressions::eval_numeric::certified_digits::{
+    evaluate_to_precision, integrate_to_precision, Precise,
+};
+use math_expressions::{
+    canonicalize, det, Expr, LatexToAst, LatexToAstOptions, Number, NumberNotation,
+};
 
 fn parse_latex(nt: NumberNotation, s: &str) -> Result<Expr, math_expressions::ParseError> {
     LatexToAst::new(LatexToAstOptions {
@@ -124,7 +128,10 @@ fn certified_quadrature_sound_under_cancellation() {
         .filter(|c| c.is_ascii_digit())
         .take(digits - 1)
         .collect();
-    assert_eq!(got_digits, want_digits, "certified quadrature under cancellation");
+    assert_eq!(
+        got_digits, want_digits,
+        "certified quadrature under cancellation"
+    );
 }
 
 fn parse(s: &str) -> Expr {

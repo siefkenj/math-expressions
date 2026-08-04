@@ -17,9 +17,12 @@ pub fn canonicalize(e: &Expr) -> Expr {
         Expr::Const(crate::expr::MathConst::Pi) => Expr::sym("pi"),
         Expr::Const(crate::expr::MathConst::E) => Expr::sym("e"),
         Expr::Const(crate::expr::MathConst::I) => Expr::sym("i"),
-        Expr::Num(_) | Expr::Sym(_) | Expr::Const(_) | Expr::Bool(_) | Expr::Blank | Expr::Ldots => {
-            e.clone()
-        }
+        Expr::Num(_)
+        | Expr::Sym(_)
+        | Expr::Const(_)
+        | Expr::Bool(_)
+        | Expr::Blank
+        | Expr::Ldots => e.clone(),
         // Re-establish the canonical invariant (primitive integer squarefree
         // coefficients) for RootOf leaves built outside the smart
         // constructors, e.g. deserialized trees. An unrepresentable one

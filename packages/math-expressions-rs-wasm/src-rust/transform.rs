@@ -11,7 +11,10 @@ impl Expression {
 
     /// Logical simplification: De Morgan / not-pushdown (JS `simplify_logical`).
     pub fn simplify_logical(&self) -> Expression {
-        self.derive(math_expressions::simplify_logical(&self.0, &math_expressions::Assumptions::new()))
+        self.derive(math_expressions::simplify_logical(
+            &self.0,
+            &math_expressions::Assumptions::new(),
+        ))
     }
 
     /// Collect like terms and factors. Backed by the canonical simplifier

@@ -2,8 +2,8 @@
 //! source files (`text-to-ast.js`, `latex-to-ast.js`) duplicate these exact
 //! routines; here they live once. Everything is pure — no parser state.
 
-use crate::expr::{Expr, MathConst};
 use crate::expr::sym::Sym;
+use crate::expr::{Expr, MathConst};
 
 // `statement` must be among the counted frames: its bar-fallback catches
 // errors, rewinds, and re-descends, so budget freed by the failed descent's

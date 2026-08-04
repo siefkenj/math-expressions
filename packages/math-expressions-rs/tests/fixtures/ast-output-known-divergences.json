@@ -1,12 +1,6 @@
 [
   {
     "kind": "latex",
-    "ast": "1.23e-11",
-    "js": "1.23 \\cdot 10^{-11}",
-    "rust": "0.0000000000123"
-  },
-  {
-    "kind": "latex",
     "ast": "[\"*\",\"x\",[\"+\",\"y\"]]",
     "js": "x \\left(+ y\\right)",
     "rust": "x \\left(+y\\right)"
@@ -115,12 +109,6 @@
   },
   {
     "kind": "latex",
-    "ast": "[\"^\",1.23e-11,5]",
-    "js": "\\left(1.23 \\cdot 10^{-11}\\right)^{5}",
-    "rust": "0.0000000000123^{5}"
-  },
-  {
-    "kind": "latex",
     "ast": "[\"^\",[\"apply\",\"nthroot\",2],3]",
     "js": "\\left(\\sqrt{2}\\right)^{3}",
     "rust": "\\operatorname{nthroot}\\left(2\\right)^{3}"
@@ -214,18 +202,6 @@
     "ast": "[\"partial_derivative_leibniz\",[\"tuple\",\"x\",3],[\"tuple\",[\"tuple\",\"s\",2],[\"tuple\",\"t\",1]]]",
     "js": "\\frac{ \\partial^{3}x }{ \\partial s^{2} \\partial t }",
     "rust": "\\frac{\\partial ^3x}{\\partial s^2 \\partial t}"
-  },
-  {
-    "kind": "text",
-    "ast": "1.23e+22",
-    "js": "1.23 * 10^22",
-    "rust": "12300000000000000000000"
-  },
-  {
-    "kind": "text",
-    "ast": "1.23e-11",
-    "js": "1.23 * 10^(-11)",
-    "rust": "0.0000000000123"
   },
   {
     "kind": "text",
@@ -364,12 +340,6 @@
     "ast": "[\"^\",\"x\",[\"apply\",\"factorial\",[\"apply\",\"factorial\",2]]]",
     "js": "x^2!!",
     "rust": "x^(2!!)"
-  },
-  {
-    "kind": "text",
-    "ast": "[\"^\",1.23e-11,5]",
-    "js": "(1.23 * 10^(-11))^5",
-    "rust": "0.0000000000123^5"
   },
   {
     "kind": "text",

@@ -9,8 +9,7 @@
 //! `tests/roundtrip.rs` (`parse(to_text(e))` is structurally equal to `e`).
 
 use super::{
-    deriv_var, f64_positional_string, greek_unicode, number_is_negative as is_negative, pow_suffix,
-    prec, split_sign,
+    deriv_var, greek_unicode, number_is_negative as is_negative, pow_suffix, prec, split_sign,
 };
 use crate::expr::{Expr, MathConst, RelOp, SeqKind};
 use crate::num::Number;
@@ -33,6 +32,10 @@ pub struct TextOpts {
     /// Put an explicit `*` between every pair of factors instead of the usual
     /// juxtaposition (`explicitMultiplicationSymbols`).
     pub explicit_multiplication_symbols: bool,
+    /// Render every float positionally, however large or small
+    /// (`avoidScientificNotation`). Off by default, matching legacy: a float
+    /// outside `0.000001 ..< 1e21` renders as `1.23 * 10^22`.
+    pub avoid_scientific_notation: bool,
 }
 
 impl Default for TextOpts {
@@ -44,16 +47,20 @@ impl Default for TextOpts {
             pad_to_decimals: None,
             show_blanks: true,
             explicit_multiplication_symbols: false,
+            avoid_scientific_notation: false,
         }
     }
 }
 
 pub fn convert(expr: &Expr, opts: &TextOpts) -> String {
-    Writer { opts }.emit(expr, 0)
+    Writer { opts, pad: true }.emit(expr, 0)
 }
 
 struct Writer<'a> {
     opts: &'a TextOpts,
+    /// Whether the `padToDigits`/`padToDecimals` options apply here. Cleared
+    /// inside an `integer^integer` — see [`super::is_integer_power`].
+    pad: bool,
 }
 
 impl Writer<'_> {
@@ -121,11 +128,13 @@ impl Writer<'_> {
                 // `(x^y)^z` must parenthesize the inner power; only a power base
                 // needs it — other same-precedence bases (`f'` in `f'^a(x)`) stay
                 // unwrapped to round-trip.
-                let base_ctx = if matches!(&**b, Expr::Pow(..)) { POW + 1 } else { POW };
-                (
-                    format!("{}^{}", self.emit(b, base_ctx), self.superscript(e)),
-                    POW,
-                )
+                let base_ctx = if matches!(&**b, Expr::Pow(..)) {
+                    POW + 1
+                } else {
+                    POW
+                };
+                let w = self.without_padding_in_integer_power(b, e);
+                (format!("{}^{}", w.emit(b, base_ctx), w.superscript(e)), POW)
             }
 
             Expr::And(xs) => (self.join_logical(xs, " and "), AND),
@@ -253,20 +262,68 @@ impl Writer<'_> {
             };
             return (format!("{}/{}", num, den), p);
         }
-        // Float: numerical-evaluation result, positional (never exponential).
-        let s = f64_positional_string(n.to_f64());
-        let p = if s.starts_with('-') {
-            prec::NEG
+        // Float: a numerical-evaluation result, which past the ECMAScript
+        // magnitude threshold renders as `mantissa * 10^exponent` unless
+        // `avoid_scientific_notation` is set.
+        match self.render_float(n.to_f64()) {
+            super::FloatRender::Positional(s) => {
+                let p = if s.starts_with('-') {
+                    prec::NEG
+                } else {
+                    prec::ATOM
+                };
+                (self.decimal(s), p)
+            }
+            // `* 10^…` re-parses as the product it is spelled as, so it binds
+            // like one: parenthesised as a power's base (`(1.23 * 10^(-11))^5`)
+            // but not inside a sum. A negative exponent needs its own parens —
+            // `10^-11` is not text-grammar.
+            super::FloatRender::Scientific { mantissa, exponent } => {
+                let e = if exponent < 0 {
+                    format!("({exponent})")
+                } else {
+                    exponent.to_string()
+                };
+                let p = if mantissa.starts_with('-') {
+                    prec::NEG
+                } else {
+                    prec::MUL
+                };
+                (format!("{} * 10^{}", self.decimal(mantissa), e), p)
+            }
+        }
+    }
+
+    /// The padding bounds in force, which an `integer^integer` suppresses.
+    fn pad_bounds(&self) -> (Option<u32>, Option<u32>) {
+        if self.pad {
+            (self.opts.pad_to_digits, self.opts.pad_to_decimals)
         } else {
-            prec::ATOM
-        };
-        (self.decimal(self.pad(s)), p)
+            (None, None)
+        }
+    }
+
+    /// This writer, or a non-padding one for the operands of a power that
+    /// [`super::is_integer_power`] says legacy left alone.
+    fn without_padding_in_integer_power(&self, base: &Expr, exp: &Expr) -> Writer<'_> {
+        Writer {
+            opts: self.opts,
+            pad: self.pad && !super::is_integer_power(base, exp),
+        }
     }
 
     /// Apply the `padToDigits`/`padToDecimals` render options to a positional
     /// number string (before the decimal separator is localized).
     fn pad(&self, s: String) -> String {
-        super::pad_number(&s, self.opts.pad_to_digits, self.opts.pad_to_decimals)
+        let (digits, decimals) = self.pad_bounds();
+        super::pad_number(&s, digits, decimals)
+    }
+
+    /// Apply the notation threshold and the `padToDigits`/`padToDecimals`
+    /// render options to a float (before the decimal separator is localized).
+    fn render_float(&self, v: f64) -> super::FloatRender {
+        let (digits, decimals) = self.pad_bounds();
+        super::render_float(v, self.opts.avoid_scientific_notation, digits, decimals)
     }
 
     fn render_symbol(&self, name: &str) -> String {
@@ -692,7 +749,10 @@ impl Writer<'_> {
             ),
             "vec" => (format!("vec({})", one(self, LIST + 1)), ATOM),
             "linesegment" => (
-                format!("linesegment({})", self.join(args, &self.arg_sep(), LIST + 1)),
+                format!(
+                    "linesegment({})",
+                    self.join(args, &self.arg_sep(), LIST + 1)
+                ),
                 ATOM,
             ),
             "angle" => (self.render_angle(args), ATOM),
@@ -715,7 +775,11 @@ impl Writer<'_> {
         if args.len() == 1 {
             format!("{}{}", a, self.emit(&args[0], prec::POW))
         } else {
-            format!("{}({})", a, self.join(args, &self.arg_sep(), prec::LIST + 1))
+            format!(
+                "{}({})",
+                a,
+                self.join(args, &self.arg_sep(), prec::LIST + 1)
+            )
         }
     }
 

@@ -27,7 +27,9 @@ pub fn eval_complex(e: &Expr, env: &Env) -> Option<Complex64> {
         Expr::Num(n) => number_to_complex(n),
         // A numeric constant: the k-th root of its polynomial, isolation
         // cached per polynomial (MATRIX_PLAN §2d).
-        Expr::RootOf { poly, index } => return crate::polynomials::rootof::numeric_root(poly, *index),
+        Expr::RootOf { poly, index } => {
+            return crate::polynomials::rootof::numeric_root(poly, *index)
+        }
         Expr::Const(c) => match c {
             MathConst::Pi => Complex64::new(std::f64::consts::PI, 0.0),
             MathConst::E => Complex64::new(std::f64::consts::E, 0.0),

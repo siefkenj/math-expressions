@@ -21,8 +21,8 @@ use crate::assumptions::{is_nonnegative, is_real, Assumptions};
 use crate::expr::{Expr, MathConst, SeqKind};
 use crate::num::Number;
 
-use crate::expr::map_children;
 use super::{add, canonicalize, mul, split_coeff};
+use crate::expr::map_children;
 
 // Max rewrite rounds: resource_limits::current().max_simplify_rounds (§7f). Every
 // round strictly makes progress or we stop, so this only bounds pathological

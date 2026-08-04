@@ -4,8 +4,8 @@
 
 use crate::assumptions::{is_negative, is_nonzero, is_positive, Assumptions};
 use crate::equality::{equals, EqOptions};
-use crate::expr::{Expr, RelOp, SeqKind};
 use crate::expr::map_children;
+use crate::expr::{Expr, RelOp, SeqKind};
 use crate::normalize::{canonicalize, simplify_with};
 
 /// Does `a` equal `b` after exactly `n` sign flips of subtrees of `a`?
@@ -66,7 +66,10 @@ pub fn solve_linear(e: &Expr, var: &str, assumptions: &Assumptions) -> Option<Ex
     let ([lhs, rhs], [op]) = (operands.as_slice(), ops.as_slice()) else {
         return None;
     };
-    if !matches!(op, RelOp::Eq | RelOp::Ne | RelOp::Lt | RelOp::Le | RelOp::Gt | RelOp::Ge) {
+    if !matches!(
+        op,
+        RelOp::Eq | RelOp::Ne | RelOp::Lt | RelOp::Le | RelOp::Gt | RelOp::Ge
+    ) {
         return None;
     }
 
@@ -127,10 +130,7 @@ pub fn solve_linear(e: &Expr, var: &str, assumptions: &Assumptions) -> Option<Ex
 
     // var <op'> −b/a, flipping strict/loose inequalities for negative a.
     let solution = simplify_with(
-        &Expr::Div(
-            Box::new(Expr::Neg(Box::new(b))),
-            Box::new(a.clone()),
-        ),
+        &Expr::Div(Box::new(Expr::Neg(Box::new(b))), Box::new(a.clone())),
         assumptions,
     );
     let out_op = match op {

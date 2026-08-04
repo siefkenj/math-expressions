@@ -187,7 +187,10 @@ fn from_ast_names_the_actual_problem() {
         !missing.contains("None"),
         "a missing `$` must not be reported with the word None: {missing}"
     );
-    assert!(missing.contains('$'), "should name the missing key: {missing}");
+    assert!(
+        missing.contains('$'),
+        "should name the missing key: {missing}"
+    );
 
     let unknown = err(r#"{"$":"Bogus"}"#);
     assert!(

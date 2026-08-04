@@ -4,7 +4,7 @@
 //! is otherwise the same precedence comparison as the text formatter.
 //! Correctness is enforced by round-tripping through the LaTeX parser.
 
-use super::{deriv_var, f64_positional_string, pow_suffix, prec, split_sign};
+use super::{deriv_var, pow_suffix, prec, split_sign};
 use crate::expr::{Expr, MathConst, RelOp, SeqKind};
 use crate::num::Number;
 
@@ -25,6 +25,10 @@ pub struct LatexOpts {
     /// (`explicitMultiplicationSymbols`). Legacy LaTeX had no such option;
     /// honored here so the flag is not silently dropped.
     pub explicit_multiplication_symbols: bool,
+    /// Render every float positionally, however large or small
+    /// (`avoidScientificNotation`). Off by default, matching legacy: a float
+    /// outside `0.000001 ..< 1e21` renders as `1.23 \cdot 10^{22}`.
+    pub avoid_scientific_notation: bool,
 }
 
 impl Default for LatexOpts {
@@ -35,16 +39,20 @@ impl Default for LatexOpts {
             pad_to_decimals: None,
             show_blanks: true,
             explicit_multiplication_symbols: false,
+            avoid_scientific_notation: false,
         }
     }
 }
 
 pub fn convert(expr: &Expr, opts: &LatexOpts) -> String {
-    Writer { opts }.emit(expr, 0)
+    Writer { opts, pad: true }.emit(expr, 0)
 }
 
 struct Writer<'a> {
     opts: &'a LatexOpts,
+    /// Whether the `padToDigits`/`padToDecimals` options apply here. Cleared
+    /// inside an `integer^integer` — see [`super::is_integer_power`].
+    pad: bool,
 }
 
 impl Writer<'_> {
@@ -119,12 +127,13 @@ impl Writer<'_> {
             // Other same-precedence bases (`f'` in `f'^a(x)`) stay unwrapped so
             // they round-trip.
             Expr::Pow(b, e) => {
+                let w = self.without_padding_in_integer_power(b, e);
                 let base = if matches!(&**b, Expr::Pow(..)) || is_radical(b) {
-                    format!("\\left({}\\right)", self.emit(b, 0))
+                    format!("\\left({}\\right)", w.emit(b, 0))
                 } else {
-                    self.emit(b, POW)
+                    w.emit(b, POW)
                 };
-                (format!("{}^{}", base, self.braced(e)), POW)
+                (format!("{}^{}", base, w.braced(e)), POW)
             }
 
             Expr::And(xs) => (self.join_logical(xs, " \\land "), AND),
@@ -171,16 +180,60 @@ impl Writer<'_> {
                 None => (format!("\\frac{{{}}}{{{}}}", num, den), ATOM),
             };
         }
-        // Float: numerical-evaluation result, positional (never exponential).
-        let s = f64_positional_string(n.to_f64());
-        let p = if s.starts_with('-') { NEG } else { ATOM };
-        (self.decimal(self.pad(s)), p)
+        // Float: a numerical-evaluation result, which past the ECMAScript
+        // magnitude threshold renders as `mantissa \cdot 10^{exponent}` unless
+        // `avoid_scientific_notation` is set.
+        let (digits, decimals) = self.pad_bounds();
+        match super::render_float(
+            n.to_f64(),
+            self.opts.avoid_scientific_notation,
+            digits,
+            decimals,
+        ) {
+            super::FloatRender::Positional(s) => {
+                let p = if s.starts_with('-') { NEG } else { ATOM };
+                (self.decimal(s), p)
+            }
+            // The braces delimit the exponent, so a negative one needs no
+            // parens; the product itself still binds like a product, and so
+            // parenthesises as a power's base.
+            super::FloatRender::Scientific { mantissa, exponent } => {
+                let p = if mantissa.starts_with('-') {
+                    NEG
+                } else {
+                    prec::MUL
+                };
+                (
+                    format!("{} \\cdot 10^{{{}}}", self.decimal(mantissa), exponent),
+                    p,
+                )
+            }
+        }
+    }
+
+    /// The padding bounds in force, which an `integer^integer` suppresses.
+    fn pad_bounds(&self) -> (Option<u32>, Option<u32>) {
+        if self.pad {
+            (self.opts.pad_to_digits, self.opts.pad_to_decimals)
+        } else {
+            (None, None)
+        }
+    }
+
+    /// This writer, or a non-padding one for the operands of a power that
+    /// [`super::is_integer_power`] says legacy left alone.
+    fn without_padding_in_integer_power(&self, base: &Expr, exp: &Expr) -> Writer<'_> {
+        Writer {
+            opts: self.opts,
+            pad: self.pad && !super::is_integer_power(base, exp),
+        }
     }
 
     /// Apply the `padToDigits`/`padToDecimals` render options to a positional
     /// number string (before the decimal separator is localized).
     fn pad(&self, s: String) -> String {
-        super::pad_number(&s, self.opts.pad_to_digits, self.opts.pad_to_decimals)
+        let (digits, decimals) = self.pad_bounds();
+        super::pad_number(&s, digits, decimals)
     }
 
     /// The argument/tuple/list separator for the active notation, with a

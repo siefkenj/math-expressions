@@ -236,7 +236,12 @@ impl TextToAst {
 
         if self.token.ttype == Tok::Number {
             // Decimals parse to exact rationals, never floats (§3a).
-            result = Some(Expr::Num(Number::from_decimal_str(self.opts.notation.normalize_number(&self.token.text).as_ref())));
+            result = Some(Expr::Num(Number::from_decimal_str(
+                self.opts
+                    .notation
+                    .normalize_number(&self.token.text)
+                    .as_ref(),
+            )));
             self.advance()?;
         } else if self.token.ttype == Tok::Infinity {
             result = Some(Expr::Const(MathConst::Inf));
@@ -600,7 +605,12 @@ impl TextToAst {
                 if self.token.ttype != Tok::Number {
                     return Ok(None);
                 }
-                n_deriv = parse_js_float(self.opts.notation.normalize_number(&self.token.text).as_ref());
+                n_deriv = parse_js_float(
+                    self.opts
+                        .notation
+                        .normalize_number(&self.token.text)
+                        .as_ref(),
+                );
                 if n_deriv.fract() != 0.0 {
                     return Ok(None);
                 }
@@ -672,7 +682,12 @@ impl TextToAst {
                 if self.token.ttype != Tok::Number {
                     return Ok(None);
                 }
-                this_exponent = parse_js_float(self.opts.notation.normalize_number(&self.token.text).as_ref());
+                this_exponent = parse_js_float(
+                    self.opts
+                        .notation
+                        .normalize_number(&self.token.text)
+                        .as_ref(),
+                );
                 if this_exponent.fract() != 0.0 {
                     return Ok(None);
                 }

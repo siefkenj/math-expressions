@@ -27,24 +27,42 @@ fn constants_to_floats_cases() {
 
 #[test]
 fn round_to_decimals_cases() {
-    assert_eq!(txt(&round_numbers_to_decimals(&parse("3.14159"), 2)), "3.14");
+    assert_eq!(
+        txt(&round_numbers_to_decimals(&parse("3.14159"), 2)),
+        "3.14"
+    );
     assert_eq!(txt(&round_numbers_to_decimals(&parse("3.7"), 0)), "4");
-    assert_eq!(txt(&round_numbers_to_decimals(&parse("-2.567"), 2)), "-2.57");
+    assert_eq!(
+        txt(&round_numbers_to_decimals(&parse("-2.567"), 2)),
+        "-2.57"
+    );
     assert_eq!(txt(&round_numbers_to_decimals(&parse("100"), 2)), "100");
     // Exact-rational rounding: 2.345 is exactly 469/200, so ties go away → 2.35.
     assert_eq!(txt(&round_numbers_to_decimals(&parse("2.345"), 2)), "2.35");
     assert_eq!(txt(&round_numbers_to_decimals(&parse("2.355"), 2)), "2.36");
     // Recurses into subexpressions.
-    assert_eq!(txt(&round_numbers_to_decimals(&parse("x + 1.9999"), 2)), "x + 2");
+    assert_eq!(
+        txt(&round_numbers_to_decimals(&parse("x + 1.9999"), 2)),
+        "x + 2"
+    );
 }
 
 #[test]
 fn round_to_precision_cases() {
-    assert_eq!(txt(&round_numbers_to_precision(&parse("1234.5"), 3)), "1230");
-    assert_eq!(txt(&round_numbers_to_precision(&parse("0.0012345"), 3)), "0.00123");
+    assert_eq!(
+        txt(&round_numbers_to_precision(&parse("1234.5"), 3)),
+        "1230"
+    );
+    assert_eq!(
+        txt(&round_numbers_to_precision(&parse("0.0012345"), 3)),
+        "0.00123"
+    );
     assert_eq!(txt(&round_numbers_to_precision(&parse("5"), 3)), "5");
     // Recurses; keeps the variable factor.
-    assert_eq!(txt(&round_numbers_to_precision(&parse("3.14159*x"), 2)), "3.1 x");
+    assert_eq!(
+        txt(&round_numbers_to_precision(&parse("3.14159*x"), 2)),
+        "3.1 x"
+    );
 }
 
 #[test]
@@ -89,17 +107,41 @@ fn eq(a: &Expr, b: &str) -> bool {
 #[test]
 fn precision_does_not_round_fractions() {
     let e = parse("3/7x + 381439619649.253 y");
-    assert!(eq(&round_numbers_to_precision(&e, 100), "3/7x + 381439619649.253 y"));
-    assert!(eq(&round_numbers_to_precision(&e, 14), "3/7x + 381439619649.25 y"));
-    assert!(eq(&round_numbers_to_precision(&e, 10), "3/7x + 381439619600 y"));
-    assert!(eq(&round_numbers_to_precision(&e, 4), "3/7x + 381400000000 y"));
+    assert!(eq(
+        &round_numbers_to_precision(&e, 100),
+        "3/7x + 381439619649.253 y"
+    ));
+    assert!(eq(
+        &round_numbers_to_precision(&e, 14),
+        "3/7x + 381439619649.25 y"
+    ));
+    assert!(eq(
+        &round_numbers_to_precision(&e, 10),
+        "3/7x + 381439619600 y"
+    ));
+    assert!(eq(
+        &round_numbers_to_precision(&e, 4),
+        "3/7x + 381400000000 y"
+    ));
 }
 
 #[test]
 fn precision_does_not_round_pi_or_e() {
     let e = parse("3/7e + 381439619649.253 pi");
-    assert!(eq(&round_numbers_to_precision(&e, 100), "3/7exp(1) + 381439619649.253 pi"));
-    assert!(eq(&round_numbers_to_precision(&e, 14), "3/7exp(1) + 381439619649.25 pi"));
-    assert!(eq(&round_numbers_to_precision(&e, 10), "3/7exp(1) + 381439619600 pi"));
-    assert!(eq(&round_numbers_to_precision(&e, 4), "3/7exp(1) + 381400000000 pi"));
+    assert!(eq(
+        &round_numbers_to_precision(&e, 100),
+        "3/7exp(1) + 381439619649.253 pi"
+    ));
+    assert!(eq(
+        &round_numbers_to_precision(&e, 14),
+        "3/7exp(1) + 381439619649.25 pi"
+    ));
+    assert!(eq(
+        &round_numbers_to_precision(&e, 10),
+        "3/7exp(1) + 381439619600 pi"
+    ));
+    assert!(eq(
+        &round_numbers_to_precision(&e, 4),
+        "3/7exp(1) + 381400000000 pi"
+    ));
 }

@@ -73,7 +73,10 @@ fn evaluate_corpus_no_regressions() {
     if std::env::var("UPDATE_KNOWN_FAILURES").is_ok() {
         let list: Vec<&String> = failures.iter().collect();
         std::fs::write(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/evaluate-known-failures.json"),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/evaluate-known-failures.json"
+            ),
             serde_json::to_string_pretty(&list).unwrap() + "\n",
         )
         .unwrap();
@@ -89,7 +92,11 @@ fn evaluate_corpus_no_regressions() {
         new.is_empty(),
         "{} NEW evaluate divergences from JS:\n{}",
         new.len(),
-        new.iter().take(40).map(|k| format!("  {k}")).collect::<Vec<_>>().join("\n"),
+        new.iter()
+            .take(40)
+            .map(|k| format!("  {k}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
     );
 }
 

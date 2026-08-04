@@ -41,9 +41,7 @@ pub(crate) fn full_simplify(e: &Expr, a: &Assumptions) -> Expr {
     // guaranteed to reach a fixpoint on adversarial input, and a run that exits
     // on the counter simply returns the last tree it produced (still canonical,
     // still equal to the input, just possibly not idempotent).
-    let max_rounds = crate::resource_limits::current()
-        .max_simplify_rounds
-        .max(1);
+    let max_rounds = crate::resource_limits::current().max_simplify_rounds.max(1);
     let mut cur = crate::normalize::simplify_base_with(e, a);
     for _ in 0..max_rounds {
         // Each pass is sound and canonical-in/out; re-run the *base* simplify

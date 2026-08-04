@@ -50,13 +50,14 @@ fn same_skeleton(a: &Expr, b: &Expr) -> bool {
         (Expr::Const(x), Expr::Const(y)) => x == y,
         (Expr::Seq(k1, _), Expr::Seq(k2, _)) => k1 == k2,
         (Expr::OtherOp(n1, _), Expr::OtherOp(n2, _)) => n1 == n2,
+        (Expr::Relation { ops: o1, .. }, Expr::Relation { ops: o2, .. }) => o1 == o2,
         (
-            Expr::Relation { ops: o1, .. },
-            Expr::Relation { ops: o2, .. },
-        ) => o1 == o2,
-        (
-            Expr::Matrix { rows: r1, cols: c1, .. },
-            Expr::Matrix { rows: r2, cols: c2, .. },
+            Expr::Matrix {
+                rows: r1, cols: c1, ..
+            },
+            Expr::Matrix {
+                rows: r2, cols: c2, ..
+            },
         ) => r1 == r2 && c1 == c2,
         (Expr::Interval { closed: cl1, .. }, Expr::Interval { closed: cl2, .. }) => cl1 == cl2,
         _ => true,
@@ -92,7 +93,12 @@ pub(super) struct FuzzyTol {
 
 pub(super) fn build_fuzzy_tol(expr: &Expr, vars: &[String], opts: &EqOptions) -> Option<FuzzyTol> {
     let mut params: Vec<(String, f64)> = Vec::new();
-    let with_params = replace_numbers(expr, vars, opts.include_error_in_number_exponents, &mut params);
+    let with_params = replace_numbers(
+        expr,
+        vars,
+        opts.include_error_in_number_exponents,
+        &mut params,
+    );
     if params.is_empty() {
         return None;
     }
@@ -154,9 +160,7 @@ fn replace_numbers(
             Box::new(replace_numbers(b, vars, include_exponents, params)),
             x.clone(),
         ),
-        _ => crate::expr::map_children(e, |c| {
-            replace_numbers(c, vars, include_exponents, params)
-        }),
+        _ => crate::expr::map_children(e, |c| replace_numbers(c, vars, include_exponents, params)),
     }
 }
 

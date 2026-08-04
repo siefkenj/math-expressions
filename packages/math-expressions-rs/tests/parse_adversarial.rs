@@ -18,10 +18,14 @@ use std::thread;
 use std::time::Duration;
 
 fn text_ok(s: &str) -> bool {
-    TextToAst::new(TextToAstOptions::default()).convert(s).is_ok()
+    TextToAst::new(TextToAstOptions::default())
+        .convert(s)
+        .is_ok()
 }
 fn latex_ok(s: &str) -> bool {
-    LatexToAst::new(LatexToAstOptions::default()).convert(s).is_ok()
+    LatexToAst::new(LatexToAstOptions::default())
+        .convert(s)
+        .is_ok()
 }
 
 /// Run `f` on a worker thread; fail if it panics or does not finish in time.
@@ -114,8 +118,8 @@ fn adversarial_corpus_terminates() {
     assert_terminates(&r"\frac{".repeat(2_000)); // deep recursion → depth cap
     assert_terminates(&r"\sqrt{".repeat(2_000));
     assert_terminates(&"!".repeat(20_000)); // postfix run → depth cap errors
-    // Unclosed matrix with many entries: without the EOF exit this looped
-    // forever; now it breaks at EOF (and fuel would catch it regardless).
+                                            // Unclosed matrix with many entries: without the EOF exit this looped
+                                            // forever; now it breaks at EOF (and fuel would catch it regardless).
     assert_terminates(&(r"\begin{bmatrix}".to_string() + &"1 & ".repeat(20_000)));
     // NOTE: `"^".repeat(N)` for large N is deliberately NOT here — it exposes a
     // SEPARATE, pre-existing bug (deep `Pow` AST from the loop-based caret
@@ -152,7 +156,10 @@ fn superscript_nesting_overflows_known_bug() {
 fn begin_bmatrix_is_an_error_not_a_hang() {
     must_terminate(r"\begin{bmatrix}".to_string(), || {
         let r = LatexToAst::new(LatexToAstOptions::default()).convert(r"\begin{bmatrix}");
-        assert!(r.is_err(), "unclosed \\begin{{bmatrix}} must be a parse error");
+        assert!(
+            r.is_err(),
+            "unclosed \\begin{{bmatrix}} must be a parse error"
+        );
     });
 }
 

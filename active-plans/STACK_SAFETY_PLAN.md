@@ -1,16 +1,35 @@
 # Stack-safety plan: iterative traversals for a small-stack WASM target
 
-> **PROGRESS (re-audited 2026-07-22):** item 22 (parser depth caps) is DONE —
-> `MAX_PARSE_DEPTH = 64` in `parse/common.rs`, enforced by `enter`/`leave` in
-> both parsers, exercised by `tests/stack_safety.rs`; `from_js` documents its
-> reliance on serde_json's 128-depth limit. Items 21, 23–26 remain open:
-> iterative `Drop`, `children()`/iterative fold driver, pass port,
-> `opaque_key` replacement, small-stack CI. Shares a `children()` primitive
-> with IMPROVEMENT Phase 3/4.
+> **PROGRESS (re-audited 2026-08-04):**
+>
+> - **21 (iterative `Drop`) — DONE.** `expr/teardown.rs`, a `Vec<Expr>`
+>   worklist, wired into `impl Drop for Expression` at the wasm boundary
+>   (`math-expressions-rs-wasm/src-rust/lib.rs`). Deviates from the plan
+>   deliberately: a free function `tear_down`, not `impl Drop for Expr`, since a
+>   `Drop` impl makes every by-value `match` destructure an E0509 error.
+> - **22 (parser depth caps) — DONE.** `MAX_PARSE_DEPTH = 64` in
+>   `parse/common.rs`, enforced by `enter`/`leave` in both parsers, exercised by
+>   `tests/stack_safety.rs`; `from_js` documents its reliance on serde_json's
+>   128-depth limit.
+> - **26 (verification) — PARTIAL.** `tests/stack_safety.rs` has both the
+>   10⁵-deep-paren test and a small-stack test (at 256 KB, not the planned
+>   128 KB). What remains is the `-zstack-size` flag and its documentation;
+>   there is no `.cargo/config.toml` in the repo, so `build-wasm.sh` is where it
+>   would go.
+> - **23, 24, 25 — OPEN, and the real remaining exposure.** No `children()`
+>   helper and no iterative fold driver exist; `opaque_key` is unchanged. Shares
+>   a `children()` primitive with IMPROVEMENT Phase 3/4.
+>
+> Unrelated but previously conflated with this plan: a wasm panic reaching the
+> browser as a bare `unreachable` was blamed on `panic = "abort"`. That was
+> wrong — std runs the panic hook before aborting, and there simply was no hook.
+> One is installed now (`panic_report` in the wasm crate's `lib.rs`), so a stack
+> overflow or assertion failure says what it was. That improves *diagnosis*, not
+> safety; 23–25 are still the fix.
 
-Status: **draft for decision — nothing implemented.** Companion to
-PORTING_PLAN.md §7f (resource limits). Scope: everything already implemented
-(parsers, normalization, ordering, evaluation, equality, formatters, expr::serde).
+Companion to PORTING_PLAN.md §7f (resource limits). Scope: everything already
+implemented (parsers, normalization, ordering, evaluation, equality, formatters,
+expr::serde).
 
 ## 1. Problem
 

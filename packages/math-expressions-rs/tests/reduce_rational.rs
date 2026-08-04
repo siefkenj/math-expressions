@@ -4,7 +4,9 @@
 //! mathematically equal — the presented output canonicalizes back to the
 //! reduced form, never to the unreduced input).
 
-use math_expressions::{canonicalize, equals, reduce_rational, EqOptions, Expr, TextToAst, TextToAstOptions};
+use math_expressions::{
+    canonicalize, equals, reduce_rational, EqOptions, Expr, TextToAst, TextToAstOptions,
+};
 
 fn parse(s: &str) -> Expr {
     TextToAst::new(TextToAstOptions::default())

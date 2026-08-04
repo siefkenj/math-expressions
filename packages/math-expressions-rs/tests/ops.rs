@@ -1,7 +1,9 @@
 //! `substitute` and `variables` (PORTING_PLAN.md §15). Expected values verified
 //! against `me.substitute` / `me.variables`.
 
-use math_expressions::{equals, substitute, variables, EqOptions, Expr, TextToAst, TextToAstOptions};
+use math_expressions::{
+    equals, substitute, variables, EqOptions, Expr, TextToAst, TextToAstOptions,
+};
 use std::collections::HashMap;
 
 fn parse(s: &str) -> Expr {
@@ -41,7 +43,10 @@ fn substitute_does_not_simplify() {
     // `x^2 + x` with x → 2 yields `2^2 + 2`, structurally (not folded to 6).
     let got = sub("x^2 + x", &[("x", "2")]);
     let text = math_expressions::to_text(&got, &Default::default());
-    assert!(text.contains("2^2"), "expected unsimplified 2^2, got {text:?}");
+    assert!(
+        text.contains("2^2"),
+        "expected unsimplified 2^2, got {text:?}"
+    );
     // ...but it is still numerically 6.
     assert!(eq(&got, "6"));
 }
@@ -50,7 +55,7 @@ fn substitute_does_not_simplify() {
 fn variables_order_and_membership() {
     assert_eq!(variables(&parse("x^2 + y*z")), vec!["x", "y", "z"]);
     assert_eq!(variables(&parse("2*a*b + f(x)")), vec!["a", "b", "x"]); // f excluded
-    // pi/e/i count as variables (they are ordinary symbols here).
+                                                                        // pi/e/i count as variables (they are ordinary symbols here).
     assert_eq!(variables(&parse("sin(x) + pi")), vec!["x", "pi"]);
     assert_eq!(variables(&parse("pi + e + x")), vec!["pi", "e", "x"]);
     // First-appearance order, de-duplicated.
@@ -87,7 +92,10 @@ fn evaluate_numbers_folds_exactly() {
     use math_expressions::{canonicalize, evaluate_numbers};
     // Exact fold, returned in display form (canonically the same tree).
     let e = parse("4 + x - 2");
-    assert_eq!(canonicalize(&evaluate_numbers(&e)), canonicalize(&parse("x + 2")));
+    assert_eq!(
+        canonicalize(&evaluate_numbers(&e)),
+        canonicalize(&parse("x + 2"))
+    );
     // §3a payoff: the fold is exact AND still renders as a decimal, not 3/10.
     let e = parse("0.1 + 0.2");
     assert_eq!(evaluate_numbers(&e), canonicalize(&parse("0.3")));

@@ -348,10 +348,7 @@ pub(crate) fn refine_real(poly: &[Number], index: u32, target_scale: i32) -> Opt
     for extra_guard in [8i32, 64] {
         // Precision ladder: double the working bits each Newton step.
         let final_scale = target_scale.saturating_sub(extra_guard);
-        let mut x = round_dyadic(
-            &BigRational::from_float(seed).unwrap_or_default(),
-            -52,
-        );
+        let mut x = round_dyadic(&BigRational::from_float(seed).unwrap_or_default(), -52);
         let mut s = -52i32;
         let mut steps = 0;
         loop {
@@ -494,7 +491,11 @@ pub(crate) fn refine_complex(
         if !budget.tick() {
             return None;
         }
-        s = if s <= w { w } else { s.saturating_mul(2).max(w) };
+        s = if s <= w {
+            w
+        } else {
+            s.saturating_mul(2).max(w)
+        };
         let work = s - 8;
         let pz = horner_cfix(poly, &z, work)?;
         let dpz = horner_cfix(&dcoeffs, &z, work)?;

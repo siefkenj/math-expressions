@@ -100,7 +100,7 @@ pub fn desugar_units(e: &Expr) -> Expr {
                             Expr::sym("pi"),
                         ])),
                         Box::new(Expr::int(180)),
-                    )
+                    );
                 }
                 // An `OtherOp("unit", …)` that does not match a known unit
                 // shape is left structurally intact (recurse into operands

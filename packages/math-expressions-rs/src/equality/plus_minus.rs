@@ -50,9 +50,8 @@ pub(super) fn pm_equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
         if ca.op != cb.op {
             return false;
         }
-        let std_form = |c: Comparison| {
-            canonicalize(&Expr::Add(vec![c.lhs, Expr::Neg(Box::new(c.rhs))]))
-        };
+        let std_form =
+            |c: Comparison| canonicalize(&Expr::Add(vec![c.lhs, Expr::Neg(Box::new(c.rhs))]));
         let sa = std_form(ca);
         let sb = std_form(cb);
         if a_is_equation(a) {
@@ -99,9 +98,10 @@ fn pm_branch_product(e: &Expr) -> Option<Expr> {
 /// accept; any mismatch rejects). Per-variant numeric-error tolerance is built
 /// from the `a` (LHS) side only, mirroring `component_equals`.
 fn pm_multiset_equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
-    let (Ok(a_variants), Ok(b_variants)) =
-        (crate::ops::pm::expand_pm_signs(a), crate::ops::pm::expand_pm_signs(b))
-    else {
+    let (Ok(a_variants), Ok(b_variants)) = (
+        crate::ops::pm::expand_pm_signs(a),
+        crate::ops::pm::expand_pm_signs(b),
+    ) else {
         return false;
     };
 
@@ -132,8 +132,14 @@ fn pm_multiset_equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
         let env = sample_point(&vars, scale, None, &mut rng, true);
 
         let (Some(av), Some(bv)) = (
-            a_variants.iter().map(|e| eval_complex(e, &env)).collect::<Option<Vec<_>>>(),
-            b_variants.iter().map(|e| eval_complex(e, &env)).collect::<Option<Vec<_>>>(),
+            a_variants
+                .iter()
+                .map(|e| eval_complex(e, &env))
+                .collect::<Option<Vec<_>>>(),
+            b_variants
+                .iter()
+                .map(|e| eval_complex(e, &env))
+                .collect::<Option<Vec<_>>>(),
         ) else {
             continue;
         };

@@ -164,11 +164,12 @@ pub(crate) fn greek_unicode(name: &str) -> Option<&'static str> {
 }
 
 /// Render a float in positional decimal notation, never exponential, using
-/// the shortest digit string that round-trips. Exponential forms cannot be
-/// re-parsed reliably: the parsers' scientific literals are context-sensitive
-/// (the exponent is spelled `E` and folds only before a delimiter) and a
-/// lowercase `e` means Euler's number. Positional form parses unambiguously
-/// anywhere, at worst verbosely (3e-12 → "0.000000000003").
+/// the shortest digit string that round-trips. This is what
+/// `avoidScientificNotation` selects, and the legacy `expandScientificNotation`
+/// helper it is a port of: positional form parses unambiguously anywhere, at
+/// worst verbosely (3e-12 → "0.000000000003"), whereas the parsers' scientific
+/// literals are context-sensitive (the exponent is spelled `E` and folds only
+/// before a delimiter) and a lowercase `e` means Euler's number.
 pub(crate) fn f64_positional_string(v: f64) -> String {
     if v.is_nan() {
         return "NaN".to_string();
@@ -183,13 +184,84 @@ pub(crate) fn f64_positional_string(v: f64) -> String {
         return "Infinity".to_string();
     }
     let (s, n) = crate::num::shortest_digits(v);
-    let k = s.len() as i64;
-    if k <= n {
-        format!("{}{}", s, "0".repeat((n - k) as usize))
-    } else if n > 0 {
-        format!("{}.{}", &s[..n as usize], &s[n as usize..])
+    crate::num::positional_from_digits(&s, n)
+}
+
+/// Whether a power is `integer ^ integer`, which neither printer pads.
+///
+/// Legacy carved this out explicitly ("have integer^integer, as in scientific
+/// notation … don't want to pad these numbers with zeros"): a product like
+/// `123 * 10^28` is scientific notation written by hand, and padding it to five
+/// digits gives `123.00 * 10.000^28.000`. Padding is a decimal-display option,
+/// and an integer power is not a decimal.
+pub(crate) fn is_integer_power(base: &Expr, exp: &Expr) -> bool {
+    // An integer is exactly a number with no `a/b` spelling to report.
+    let integer = |e: &Expr| {
+        matches!(e, Expr::Num(n) if n.rational_parts().is_none()
+        && !matches!(n, Number::Float(_)))
+    };
+    integer(base) && integer(exp)
+}
+
+/// How a float should display: as one positional string, or split into the
+/// `mantissa × 10^exponent` pair the two printers spell differently
+/// (`1.23 * 10^(-11)` vs `1.23 \cdot 10^{-11}`).
+pub(crate) enum FloatRender {
+    Positional(String),
+    Scientific { mantissa: String, exponent: i64 },
+}
+
+/// Decide how a float displays, resolving the notation threshold and the
+/// padding options *together* — they interact, and legacy resolved the
+/// interaction in one place (`ast-to-text.js`, the `eIndex` branch), so this
+/// does too rather than leaving each printer to rediscover it.
+///
+/// Three rules come from there:
+/// - `avoid_scientific` forces positional at any magnitude.
+/// - Padding decimals onto a *positive* exponent saves no zeros, so the whole
+///   number reverts to positional (legacy's `toLocaleString("fullwide")`).
+/// - Otherwise the padding applies to the mantissa, with the requested decimal
+///   places shifted by the exponent — asking for 5 decimals of `1.23e-12` asks
+///   nothing of the mantissa.
+///
+/// Non-finite values are never padded: `NaN` padded to five digits would read
+/// `NaN.00`.
+pub(crate) fn render_float(
+    v: f64,
+    avoid_scientific: bool,
+    pad_to_digits: Option<u32>,
+    pad_to_decimals: Option<u32>,
+) -> FloatRender {
+    let positional = || {
+        FloatRender::Positional(pad_number(
+            &f64_positional_string(v),
+            pad_to_digits,
+            pad_to_decimals,
+        ))
+    };
+    if !v.is_finite() {
+        return FloatRender::Positional(f64_positional_string(v));
+    }
+    if avoid_scientific || v == 0.0 {
+        return positional();
+    }
+    let Some((mantissa, exponent)) = crate::num::js_exponential_parts(v.abs()) else {
+        return positional();
+    };
+    if exponent > 0 && pad_to_decimals.is_some() {
+        return positional();
+    }
+    let decimals = pad_to_decimals
+        .map(|d| i64::from(d) + exponent)
+        .and_then(|d| u32::try_from(d).ok());
+    let signed = if v < 0.0 {
+        format!("-{mantissa}")
     } else {
-        format!("0.{}{}", "0".repeat((-n) as usize), s)
+        mantissa
+    };
+    FloatRender::Scientific {
+        mantissa: pad_number(&signed, pad_to_digits, decimals),
+        exponent,
     }
 }
 

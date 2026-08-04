@@ -20,8 +20,8 @@
 use crate::expr::Expr;
 use crate::num::Number;
 
-use crate::expr::map_children;
 use super::{add, mul, pow};
+use crate::expr::map_children;
 
 // Caps (resource_limits::current().max_expand_power / max_expand_terms): the exponent
 // bound on multinomial expansion, and the raw term-count bound per
@@ -118,7 +118,9 @@ fn try_distribute(factors: &[Expr]) -> Option<Expr> {
     let mut acc = vec![Expr::int(1)];
     for f in factors {
         let f_terms = terms_of(f.clone());
-        if acc.len().saturating_mul(f_terms.len()) > crate::resource_limits::current().max_expand_terms {
+        if acc.len().saturating_mul(f_terms.len())
+            > crate::resource_limits::current().max_expand_terms
+        {
             return None;
         }
         let mut next = Vec::with_capacity(acc.len() * f_terms.len());

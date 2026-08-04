@@ -129,10 +129,7 @@ fn char_poly_rational_2x2() {
 fn char_poly_symbolic_2x2() {
     let a = mat(2, 2, &["a", "b", "c", "d"]);
     let p = char_poly(&a, "x").expect("char poly");
-    assert!(
-        eq(&p, &parse("x^2 - (a+d)x + (a d - b c)")),
-        "got {p:?}"
-    );
+    assert!(eq(&p, &parse("x^2 - (a+d)x + (a d - b c)")), "got {p:?}");
 }
 
 #[test]
@@ -259,7 +256,10 @@ fn eigenvalues_degree4_index_ordering() {
         .collect();
     assert!(zs[0].im.abs() < 1e-12 && zs[1].im.abs() < 1e-12);
     assert!(zs[0].re < zs[1].re, "real roots ascending");
-    assert!(zs[2].im < 0.0 && zs[3].im > 0.0, "conjugates, negative first");
+    assert!(
+        zs[2].im < 0.0 && zs[3].im > 0.0,
+        "conjugates, negative first"
+    );
     assert!((zs[2].re - zs[3].re).abs() < 1e-9);
 }
 
@@ -338,7 +338,11 @@ fn eigenvectors_defective_matrix_shows_multiplicity_gap() {
     assert_eq!(pairs.len(), 1);
     assert!(eq(&pairs[0].value, &parse("0")));
     assert_eq!(pairs[0].alg_mult, 2);
-    assert_eq!(pairs[0].basis.len(), 1, "defective: geometric 1 < algebraic 2");
+    assert_eq!(
+        pairs[0].basis.len(),
+        1,
+        "defective: geometric 1 < algebraic 2"
+    );
     assert_eigen_pair(&a, &pairs[0].value, &pairs[0].basis[0], "defective");
 }
 
@@ -425,9 +429,18 @@ fn eigenvectors_block_diagonal_discovers_factors() {
 #[test]
 fn eigen_self_verification_sweep() {
     let cases: Vec<(&str, Expr)> = vec![
-        ("triangular", mat(3, 3, &["1", "2", "3", "0", "4", "5", "0", "0", "6"])),
-        ("singular", mat(3, 3, &["1", "2", "3", "4", "5", "6", "7", "8", "9"])),
-        ("symmetric", mat(3, 3, &["2", "1", "0", "1", "2", "1", "0", "1", "2"])),
+        (
+            "triangular",
+            mat(3, 3, &["1", "2", "3", "0", "4", "5", "0", "0", "6"]),
+        ),
+        (
+            "singular",
+            mat(3, 3, &["1", "2", "3", "4", "5", "6", "7", "8", "9"]),
+        ),
+        (
+            "symmetric",
+            mat(3, 3, &["2", "1", "0", "1", "2", "1", "0", "1", "2"]),
+        ),
         (
             "integer 4×4",
             mat(
@@ -444,12 +457,15 @@ fn eigen_self_verification_sweep() {
         let p = char_poly(a, "t").unwrap_or_else(|| panic!("{name}: char poly"));
         let vals = eigenvalues(a, &Assumptions::new()).unwrap_or_else(|| panic!("{name}: values"));
         let n: u32 = vals.iter().map(|(_, m)| m).sum();
-        let Expr::Matrix { rows, .. } = a else { unreachable!() };
+        let Expr::Matrix { rows, .. } = a else {
+            unreachable!()
+        };
         assert_eq!(n, *rows, "{name}: multiplicities sum to n");
         for (v, _) in &vals {
             assert_annihilates(&p, v, name);
         }
-        let pairs = eigenvectors(a, &Assumptions::new()).unwrap_or_else(|| panic!("{name}: vectors"));
+        let pairs =
+            eigenvectors(a, &Assumptions::new()).unwrap_or_else(|| panic!("{name}: vectors"));
         for pair in &pairs {
             assert!(!pair.basis.is_empty(), "{name}: at least one eigenvector");
             for v in &pair.basis {
@@ -486,7 +502,11 @@ fn symbolic_larger_matrices_return_none() {
 #[test]
 fn eigen_caps_are_honest_refusals() {
     use math_expressions::resource_limits::{self, ResourceLimits};
-    assert!(eigenvalues(&mat(2, 3, &["1", "2", "3", "4", "5", "6"]), &Assumptions::new()).is_none());
+    assert!(eigenvalues(
+        &mat(2, 3, &["1", "2", "3", "4", "5", "6"]),
+        &Assumptions::new()
+    )
+    .is_none());
     assert!(eigenvalues(&parse("x"), &Assumptions::new()).is_none());
     // Degree cap: a cubic RootOf is refused under max_rootof_degree = 2.
     let a = companion(&["1", "1", "0"]);

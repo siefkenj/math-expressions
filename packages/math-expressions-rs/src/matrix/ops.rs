@@ -1,8 +1,8 @@
 //! Eager matrix operations: `transpose`, `trace`, `matmul`.
 
+use crate::expr::sym::Sym;
 use crate::expr::Expr;
 use crate::normalize::{add, canonicalize};
-use crate::expr::sym::Sym;
 
 /// Matrix transpose. Literal matrices transpose eagerly; anything else stays
 /// an opaque `transpose(e)` node.

@@ -78,7 +78,10 @@ fn vector_kind(e: &Expr) -> Option<SeqKind> {
 /// A factor that is not one of these is a scalar and gets folded into the
 /// container's components.
 fn is_container(e: &Expr) -> bool {
-    matches!(e, Expr::Seq(..) | Expr::Matrix { .. } | Expr::Interval { .. })
+    matches!(
+        e,
+        Expr::Seq(..) | Expr::Matrix { .. } | Expr::Interval { .. }
+    )
 }
 
 // ---- scalar × vector -------------------------------------------------------
@@ -247,7 +250,10 @@ fn vector_matrix_addition(e: &Expr) -> Expr {
     for a in addends {
         if let (Some(_), Expr::Seq(_, xs)) = (vector_kind(a), a) {
             let n = xs.len();
-            match slots.iter_mut().find(|s| matches!(s, Slot::Vectors(m, _) if *m == n)) {
+            match slots
+                .iter_mut()
+                .find(|s| matches!(s, Slot::Vectors(m, _) if *m == n))
+            {
                 Some(Slot::Vectors(_, g)) => g.push(a.clone()),
                 _ => slots.push(Slot::Vectors(n, vec![a.clone()])),
             }
@@ -297,7 +303,11 @@ fn vector_matrix_addition(e: &Expr) -> Expr {
 /// one, else `tuple`.
 fn combined_kind(group: &[Expr]) -> SeqKind {
     let has = |k: SeqKind| group.iter().any(|x| vector_kind(x) == Some(k));
-    let (v, t, a) = (has(SeqKind::Vector), has(SeqKind::Tuple), has(SeqKind::AltVector));
+    let (v, t, a) = (
+        has(SeqKind::Vector),
+        has(SeqKind::Tuple),
+        has(SeqKind::AltVector),
+    );
     if v || (t && a) {
         SeqKind::Vector
     } else if a {
@@ -524,7 +534,9 @@ mod tests {
     fn recurses_into_subexpressions() {
         // The container move must happen wherever a sum-of-vectors appears.
         let r = run("f((1,2)+(3,4))");
-        let Expr::Apply(_, args) = &r else { panic!("got {r:?}") };
+        let Expr::Apply(_, args) = &r else {
+            panic!("got {r:?}")
+        };
         assert!(matches!(args[0], Expr::Seq(SeqKind::Tuple, _)));
     }
 }
