@@ -16,9 +16,43 @@
 >   128 KB). What remains is the `-zstack-size` flag and its documentation;
 >   there is no `.cargo/config.toml` in the repo, so `build-wasm.sh` is where it
 >   would go.
-> - **23, 24, 25 — OPEN, and the real remaining exposure.** No `children()`
->   helper and no iterative fold driver exist; `opaque_key` is unchanged. Shares
->   a `children()` primitive with IMPROVEMENT Phase 3/4.
+> - **23 — HALF DONE.** `Expr::children()` and `map_children` already exist in
+>   `expr/visit.rs` and are used in 27 files. What is missing is only the
+>   iterative driver itself: no `fold`, no `Step`/`Prune`, no explicit-stack
+>   traversal anywhere except `teardown::tear_down`. Note the two existing
+>   helpers are by-reference; the by-value gap is why `flatten` still hand-rolls
+>   a full variant match *in the same file*, and a `drain_children`/
+>   `map_children_mut` is the missing third member of the family.
+> - **24, 25 — OPEN, and the real remaining exposure.** No pass is iterative;
+>   `opaque_key` is unchanged.
+>
+> Two corrections to §2 below, which is optimistic:
+>
+> - The recursion inventory is not ~10 functions. Counted against source it is
+>   **~90 in the core crate plus 4 in the wasm crate** — every `ops/` transform,
+>   the `equality_structural` predicates, `calculus::diff`, `eval_exact::eval`,
+>   the polynomial walkers, and so on.
+> - §3(c) says canonicalize "adds ≤1 level". That is per *node*: `Div(a,b) →
+>   Mul[a, Pow(b,−1)]` is ×2 down a `Div` spine, so a chain of nested divisions
+>   doubles in depth.
+>
+> Measured depth at which each pass overflows a **1 MB stack** (the wasm32
+> default), release profile, on a single-child `Neg` tower / a two-child `Add`
+> tower:
+>
+> | pass | traps at (Neg / Add) | bytes per level |
+> |---|---|---|
+> | `flatten`, `serde::to_js` | 2,976 / 1,824 | ~360 / ~585 |
+> | `print::to_text` | 2,048 / 1,824 | ~520 / ~585 |
+> | `canonicalize` | 2,624 / 1,984 | ~405 / ~537 |
+> | derived `Clone` | 3,104 / 3,264 | ~340 |
+> | `eval_complex` | 5,440 / 5,440 | ~195 |
+> | derived `Drop` (no `tear_down`) | 32,768 / 13,056 | ~33 / ~82 |
+> | derived `PartialEq` / `Hash` | loop-optimized / 21,760, 32,768 | ~49, ~33 |
+>
+> In a **debug** build the same passes are 5–20× worse: `to_js` overflows at
+> **126 levels**, which is *below* the 128 that `from_js` admits. Release wasm
+> has ~15× margin against `from_js`; a debug host has none.
 >
 > Unrelated but previously conflated with this plan: a wasm panic reaching the
 > browser as a bare `unreachable` was blamed on `panic = "abort"`. That was
