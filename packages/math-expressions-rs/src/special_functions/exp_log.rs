@@ -146,18 +146,28 @@ pub(crate) fn exact_log(value: &BigRational, base: &BigRational) -> Option<BigRa
     None
 }
 
-/// `k` such that `base^k == value`, for positive integers. Terminates because
-/// each division by a base of at least 2 drops at least one bit.
+/// `k` such that `base^k == value`, for positive integers with `base ≥ 2`.
+///
+/// Binary search on `k`, not repeated division: stripping one factor per
+/// iteration costs `k` big divisions on operands that stay nearly full size, so
+/// `log₂(2^200000)` — one short expression — took seconds. `base^k` has more
+/// than `k · (bits(base) − 1)` bits, so `k ≤ bits(value) / (bits(base) − 1)`
+/// bounds the search, and that bound also keeps every `pow` inside it to about
+/// the size of `value` itself. `O(log k)` bignum powers rather than `O(k)`
+/// divisions.
 fn integer_log(value: &BigInt, base: &BigInt) -> Option<i64> {
-    let mut v = value.clone();
-    let mut k = 0i64;
-    while !v.is_one() {
-        let (q, r) = (&v / base, &v % base);
-        if !r.is_zero() {
-            return None;
-        }
-        v = q;
-        k += 1;
+    let base_bits = base.bits();
+    if base_bits < 2 {
+        return None; // `base ≥ 2`; the caller guarantees it, but the bound below needs it
     }
-    Some(k)
+    let (mut lo, mut hi) = (0u32, (value.bits() / (base_bits - 1)) as u32);
+    while lo < hi {
+        let mid = lo + (hi - lo).div_ceil(2); // upper mid: `lo` only ever grows
+        if &base.pow(mid) <= value {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    (base.pow(lo) == *value).then_some(lo as i64)
 }

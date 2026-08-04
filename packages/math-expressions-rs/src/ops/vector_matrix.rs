@@ -46,8 +46,20 @@ use crate::expr::{Expr, SeqKind};
 /// their own bottom-up transform over the whole tree; applying all three at each
 /// node in one post-order walk is equivalent, because every rewrite is local to
 /// its node and reads only already-transformed children.
+///
+/// **Flattened first.** Every rewrite below reads the operand list of a *single*
+/// `Add`/`Mul` node, but `Expr` keeps those left-nested the way the text parser
+/// built them — `(1,2)+(3,4)+x` arrives as `Add[Add[(1,2),(3,4)], x]`, where no
+/// one node sees both containers *and* the scalar. Without this the pass would
+/// silently no-op on any sum or product of three or more operands built by
+/// `parse_text` (the JS tree spelling is already n-ary, so `from_ast` input
+/// happened to work — the two entry points disagreed).
 pub fn perform_vector_matrix_additions_scalar_multiplications(e: &Expr) -> Expr {
-    let e = map_children(e, perform_vector_matrix_additions_scalar_multiplications);
+    distribute(&crate::expr::flatten(e.clone()))
+}
+
+fn distribute(e: &Expr) -> Expr {
+    let e = map_children(e, distribute);
     let e = matrix_scalar_mult(&e);
     let e = vector_scalar_mult(&e);
     vector_matrix_addition(&e)
@@ -151,11 +163,18 @@ fn matrix_scalar_mult(e: &Expr) -> Expr {
 /// and the caller should try the next one. A literal `1` is absorbed — removed
 /// from the product — but not distributed, so `1·(1,2)` stays `(1,2)` instead of
 /// becoming `(1·1, 2·1)` (legacy's `if (preFactors[i] !== 1)` guard).
+///
+/// An *empty* container absorbs nothing: distributing into zero components would
+/// consume the scalar without recording it anywhere, so `3·()` would come back
+/// as `()` — a silently dropped factor rather than a wrong shape.
 fn consume_scalars(
     before: &[Expr],
     mut components: Vec<Expr>,
     after: &[Expr],
 ) -> (Vec<Expr>, Option<Vec<Expr>>, Vec<Expr>) {
+    if components.is_empty() {
+        return (before.to_vec(), None, after.to_vec());
+    }
     let distribute = |components: Vec<Expr>, s: &Expr| {
         if matches!(s, Expr::Num(n) if n.is_one()) {
             return components;
@@ -210,45 +229,59 @@ fn vector_matrix_addition(e: &Expr) -> Expr {
         return e.clone();
     };
 
-    // Preserve first-appearance order for the pass-through addends and use
-    // ordered maps so the combined groups come out deterministically.
-    let mut passthrough: Vec<Expr> = Vec::new();
-    let mut vectors: std::collections::BTreeMap<usize, Vec<Expr>> = Default::default();
-    let mut matrices: std::collections::BTreeMap<(u32, u32), Vec<Expr>> = Default::default();
-
-    for a in addends {
-        if let Some(_k) = vector_kind(a) {
-            if let Expr::Seq(_, xs) = a {
-                vectors.entry(xs.len()).or_default().push(a.clone());
-                continue;
-            }
-        }
-        if let Expr::Matrix { rows, cols, .. } = a {
-            matrices.entry((*rows, *cols)).or_default().push(a.clone());
-            continue;
-        }
-        passthrough.push(a.clone());
+    /// One output position, held in first-appearance order: an addend that
+    /// combines with nothing, or the group a combinable addend opened.
+    enum Slot {
+        Through(Expr),
+        Vectors(usize, Vec<Expr>),
+        Matrices(u32, u32, Vec<Expr>),
     }
 
-    let any_pair =
-        vectors.values().any(|g| g.len() >= 2) || matrices.values().any(|g| g.len() >= 2);
+    // A combinable addend joins the group its *first* member opened, and a group
+    // occupies that first member's position — so the sum keeps the order it was
+    // written in. (Addition commutes, so reordering would still be
+    // value-preserving, but the caller is a grading shape pass: it hands the
+    // result to a componentwise comparison that reads positions, and legacy
+    // emitted the written order.)
+    let mut slots: Vec<Slot> = Vec::new();
+    for a in addends {
+        if let (Some(_), Expr::Seq(_, xs)) = (vector_kind(a), a) {
+            let n = xs.len();
+            match slots.iter_mut().find(|s| matches!(s, Slot::Vectors(m, _) if *m == n)) {
+                Some(Slot::Vectors(_, g)) => g.push(a.clone()),
+                _ => slots.push(Slot::Vectors(n, vec![a.clone()])),
+            }
+            continue;
+        }
+        if let Expr::Matrix { rows, cols, .. } = a {
+            let (r, c) = (*rows, *cols);
+            match slots
+                .iter_mut()
+                .find(|s| matches!(s, Slot::Matrices(sr, sc, _) if (*sr, *sc) == (r, c)))
+            {
+                Some(Slot::Matrices(_, _, g)) => g.push(a.clone()),
+                _ => slots.push(Slot::Matrices(r, c, vec![a.clone()])),
+            }
+            continue;
+        }
+        slots.push(Slot::Through(a.clone()));
+    }
+
+    let any_pair = slots.iter().any(|s| match s {
+        Slot::Vectors(_, g) | Slot::Matrices(_, _, g) => g.len() >= 2,
+        Slot::Through(_) => false,
+    });
     if !any_pair {
         return e.clone();
     }
 
-    let mut out = passthrough;
-    for (n, group) in vectors {
-        if group.len() < 2 {
-            out.extend(group);
-        } else {
-            out.push(combine_vectors(n, &group));
-        }
-    }
-    for ((rows, cols), group) in matrices {
-        if group.len() < 2 {
-            out.extend(group);
-        } else {
-            out.push(combine_matrices(rows, cols, &group));
+    let mut out: Vec<Expr> = Vec::with_capacity(slots.len());
+    for slot in slots {
+        match slot {
+            Slot::Through(x) => out.push(x),
+            Slot::Vectors(n, g) if g.len() >= 2 => out.push(combine_vectors(n, &g)),
+            Slot::Matrices(r, c, g) if g.len() >= 2 => out.push(combine_matrices(r, c, &g)),
+            Slot::Vectors(_, g) | Slot::Matrices(_, _, g) => out.extend(g),
         }
     }
 
@@ -319,8 +352,11 @@ mod tests {
             .convert(s)
             .unwrap_or_else(|e| panic!("parse {s:?}: {e:?}"))
     }
+    /// Deliberately does *not* pre-flatten: the parser's left-nested output is
+    /// exactly what the production caller passes in, and pre-flattening here is
+    /// what hid the 3-addend no-op.
     fn run(s: &str) -> Expr {
-        perform_vector_matrix_additions_scalar_multiplications(&crate::expr::flatten(p(s)))
+        perform_vector_matrix_additions_scalar_multiplications(&p(s))
     }
     fn txt(e: &Expr) -> String {
         to_text(e, &Default::default())
@@ -382,6 +418,61 @@ mod tests {
     fn leaves_non_vectors_untouched() {
         assert_eq!(run("x+y"), crate::expr::flatten(p("x+y")));
         assert_eq!(run("3x"), crate::expr::flatten(p("3x")));
+    }
+
+    /// The regression the pass existed to prevent and did not: `+` is parsed
+    /// left-nested, so with three or more addends no single `Add` node saw both
+    /// containers and the pass silently returned its input — leaving `+` on top,
+    /// which is precisely what makes grading's componentwise branch not engage.
+    #[test]
+    fn combines_across_a_left_nested_sum() {
+        for s in [
+            "x+(1,2)+(3,4)",
+            "(1,2)+x+(3,4)",
+            "(1,2)+(3,4)+x",
+            "1+(1,2)+(3,4)",
+            "x+(1,2)+2(3,4)",
+        ] {
+            let r = run(s);
+            let Expr::Add(xs) = &r else {
+                panic!("{s:?} should stay a sum, got {r:?}")
+            };
+            assert!(
+                xs.iter().any(|x| matches!(x, Expr::Seq(SeqKind::Tuple, _))),
+                "{s:?} did not combine its tuples: {}",
+                txt(&r)
+            );
+        }
+        // And the same tree reached through `from_ast`'s already-flat spelling
+        // must agree — the two entry points disagreeing was the bug.
+        assert_eq!(
+            run("x+(1,2)+(3,4)"),
+            perform_vector_matrix_additions_scalar_multiplications(&Expr::Add(vec![
+                p("x"),
+                p("(1,2)"),
+                p("(3,4)"),
+            ]))
+        );
+    }
+
+    /// Addition commutes, but this is a shape pass feeding a positional
+    /// comparison: the sum must come back in the order it was written.
+    #[test]
+    fn preserves_addend_order() {
+        assert_eq!(txt(&run("x+(1,2)+(3,4)")), "x + (1 + 3, 2 + 4)");
+        assert_eq!(txt(&run("(1,2)+(3,4)+x")), "(1 + 3, 2 + 4) + x");
+        assert_eq!(txt(&run("(1,2)+x+(3,4)")), "(1 + 3, 2 + 4) + x");
+    }
+
+    /// An empty container has nowhere to put a scalar, so it must not absorb
+    /// one — distributing into zero components would delete the factor.
+    #[test]
+    fn an_empty_container_does_not_swallow_its_scalar() {
+        let r = perform_vector_matrix_additions_scalar_multiplications(&Expr::Mul(vec![
+            p("3"),
+            Expr::Seq(SeqKind::Tuple, vec![]),
+        ]));
+        assert!(matches!(r, Expr::Mul(_)), "the 3 was dropped: {r:?}");
     }
 
     #[test]

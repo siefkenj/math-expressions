@@ -204,16 +204,23 @@ fn combinatorial(n: Complex64, r: Complex64, ordered: bool) -> Option<Complex64>
     if !is_int(n) || !is_int(r) {
         return None;
     }
-    let (n, r) = (n.re.round() as i64, r.re.round() as i64);
+    // Both stay f64. `as i64` saturates, so `n = 1e20` silently became
+    // `i64::MAX` and the product loop returned a confidently wrong number
+    // (`nCr(1e20,3)` came back ~1275× low). Only `r` bounds the loop, and it is
+    // capped below, so `n` never needs to be an integer type at all — past 2^53
+    // an f64 is not a faithful integer anyway, and `n - k` correctly evaluates
+    // to `n` there.
+    let (n, r) = (n.re.round(), r.re.round());
     // The r-length product loop must stay bounded on any input; past ~10^4
     // the f64 result is astronomically large/imprecise anyway.
-    if n < 0 || r < 0 || r > n || r > 10_000 {
+    if n < 0.0 || r < 0.0 || r > n || r > 10_000.0 {
         return None;
     }
+    let r = r as i64;
     // P(n,r) = n·(n-1)···(n-r+1); C(n,r) = P(n,r)/r!.
     let mut num = 1.0f64;
     for k in 0..r {
-        num *= (n - k) as f64;
+        num *= n - k as f64;
     }
     if ordered {
         return Some(Complex64::new(num, 0.0));
@@ -238,17 +245,42 @@ fn combinatorial_exact(xs: &[BigRational], ordered: bool) -> Option<BigRational>
         return None;
     }
     let n = n.numer();
-    // P(n,r) = n·(n−1)···(n−r+1);  C(n,r) = P(n,r)/r!.
-    let mut num = BigInt::one();
-    for k in 0..r {
-        num *= n - BigInt::from(k);
+    // Bounding `r` alone leaves the *size* unbounded: the numerator runs to
+    // about `r · bits(n)` bits and `n` may be as large as the parser will
+    // build. Charge the result against the same budget `pow` charges its own
+    // against — student input is adversarial by construction, and declining
+    // leaves the application symbolic rather than wrong.
+    if r.saturating_mul(n.bits()) > crate::resource_limits::current().max_pow_bits {
+        return None;
     }
+    // P(n,r) = n·(n−1)···(n−r+1);  C(n,r) = P(n,r)/r!.
+    let num = balanced_product((0..r).map(|k| n - BigInt::from(k)));
     if ordered {
         return Some(BigRational::from(num));
     }
-    let mut den = BigInt::one();
-    for k in 1..=r {
-        den *= BigInt::from(k);
+    // Exact division, not `BigRational::new`: `C(n,r)` is an integer whenever
+    // `n ≥ r ≥ 0` are, so there is no fraction to reduce and reducing one would
+    // mean a GCD over operands as large as the result.
+    Some(BigRational::from(num / balanced_product((1..=r).map(BigInt::from))))
+}
+
+/// The product of `xs`, paired up by halves rather than accumulated
+/// left-to-right.
+///
+/// The size bound above caps the *result*, but a running product multiplies an
+/// ever-growing accumulator by one small factor at a time, which costs about
+/// `r ·` (result size) — quadratic, and measurably so: `nCr(10^500, 500)` sat
+/// inside the budget and still took ~4 s. Halving keeps both operands the same
+/// size at every level, which is where num-bigint's subquadratic multiplication
+/// actually engages. Same value, same accepted inputs, ~30 ms.
+fn balanced_product(xs: impl IntoIterator<Item = BigInt>) -> BigInt {
+    fn go(xs: &[BigInt]) -> BigInt {
+        match xs.len() {
+            0 => BigInt::one(),
+            1 => xs[0].clone(),
+            // Depth is log2(r) ≤ 14 given `r ≤ 10_000`, so this cannot run deep.
+            n => go(&xs[..n / 2]) * go(&xs[n / 2..]),
+        }
     }
-    Some(BigRational::new(num, den))
+    go(&xs.into_iter().collect::<Vec<_>>())
 }

@@ -40,7 +40,19 @@ pub fn try_from_js(value: &Value) -> Result<Expr, String> {
             Some("-Inf") => Ok(Expr::Const(MathConst::NegInf)),
             Some("NaN") => Ok(Expr::Const(MathConst::NaN)),
             Some("None") => Ok(Expr::Const(MathConst::None)),
-            other => Err(format!("unknown special {other:?}")),
+            // Report the two failures apart. `{"$":"None"}` is a *valid* tree
+            // (matched above), so an object with no usable `$` must not be
+            // described with the word `None` — that is the `Option::None` of the
+            // lookup leaking into the message, and it read as though a legal
+            // input had been rejected. It cost the DoenetML team a debugging
+            // cycle; the fix is naming what was actually wrong.
+            Some(tag) => Err(format!(
+                "unknown special {tag:?} (expected \"Inf\", \"-Inf\", \"NaN\" or \"None\")"
+            )),
+            None => Err(
+                "object is not a tree node: expected a `$` string tag such as {\"$\":\"NaN\"}"
+                    .into(),
+            ),
         },
         Value::Array(arr) => from_js_array(arr),
         other => Err(format!("unexpected value {other}")),

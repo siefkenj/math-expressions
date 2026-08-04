@@ -58,7 +58,7 @@ pub const MEDIAN: FnDef = FnDef {
     name: "median",
     // Ordering is not defined on the complex plane, so the float path takes
     // the real parts — the same restriction `floor`/`ceil` accept.
-    evaln: Some(|xs| real_sorted(xs).map(|s| middle(&s))),
+    evaln: Some(|xs| ordered(xs, middle)),
     fold_exact: Some(|xs| {
         let mut s = xs.to_vec();
         s.sort();
@@ -70,14 +70,14 @@ pub const MEDIAN: FnDef = FnDef {
 
 pub const MAX: FnDef = FnDef {
     name: "max",
-    evaln: Some(|xs| real_sorted(xs).map(|s| Complex64::new(*s.last().unwrap(), 0.0))),
+    evaln: Some(|xs| ordered(xs, |s| *s.last().unwrap())),
     fold_exact: Some(|xs| xs.iter().max().cloned()),
     ..DEFAULTS
 };
 
 pub const MIN: FnDef = FnDef {
     name: "min",
-    evaln: Some(|xs| real_sorted(xs).map(|s| Complex64::new(s[0], 0.0))),
+    evaln: Some(|xs| ordered(xs, |s| s[0])),
     fold_exact: Some(|xs| xs.iter().min().cloned()),
     ..DEFAULTS
 };
@@ -149,27 +149,44 @@ fn exact_sqrt(v: &BigRational) -> Option<BigRational> {
     (&root * &root == *v).then_some(root)
 }
 
-fn real_sorted(xs: &[Complex64]) -> Option<Vec<f64>> {
+/// The shared float path of the order-based aggregates (`max`, `min`,
+/// `median`): take the real parts, sort ascending, and `pick` from the sorted
+/// list. `None` — leaving the application unfolded — for an empty list or a
+/// genuinely complex argument, since ordering is undefined off the real line.
+///
+/// **NaN short-circuits to NaN** instead of being sorted. It has to: `partial_cmp`
+/// answers `None` for every comparison involving a NaN, and the old
+/// `.unwrap_or(Ordering::Equal)` turned that into a comparator that is not a
+/// total order, so the sort returned garbage — `max(4,NaN,3,2,1)` gave 3 while
+/// `min` of the same list gave 4, two wrong numbers that disagreed with each
+/// other. Rust's sort is also entitled to *panic* once it detects the
+/// inconsistency, which under `panic = "abort"` would abort the whole WASM
+/// module. Propagating is what IEEE-754 and mathjs do. `sort_by(f64::total_cmp)`
+/// then keeps the comparator total by construction rather than by the caller's
+/// good behaviour.
+fn ordered(xs: &[Complex64], pick: fn(&[f64]) -> f64) -> Option<Complex64> {
     non_empty(xs)?;
     let mut s: Vec<f64> = Vec::with_capacity(xs.len());
     for z in xs {
         if z.im != 0.0 {
             return None;
         }
+        if z.re.is_nan() {
+            return Some(Complex64::new(f64::NAN, 0.0));
+        }
         s.push(z.re);
     }
-    s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    Some(s)
+    s.sort_by(f64::total_cmp);
+    Some(Complex64::new(pick(&s), 0.0))
 }
 
-fn middle(sorted: &[f64]) -> Complex64 {
+fn middle(sorted: &[f64]) -> f64 {
     let n = sorted.len();
-    let v = if n % 2 == 1 {
+    if n % 2 == 1 {
         sorted[n / 2]
     } else {
         (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
-    };
-    Complex64::new(v, 0.0)
+    }
 }
 
 #[cfg(test)]
@@ -230,6 +247,47 @@ mod tests {
         // A one-element sum is still that element.
         assert_eq!(SUM.fold_exact.unwrap()(&[r(3)]), Some(r(3)));
         assert_eq!(COUNT.fold_exact.unwrap()(&[]), Some(BigRational::zero()));
+    }
+
+    /// A NaN argument propagates rather than being sorted against. The old
+    /// `partial_cmp(…).unwrap_or(Equal)` comparator was not a total order, so
+    /// the sort silently returned the wrong element — `max` gave 3 and `min`
+    /// gave 4 for the *same* list.
+    #[test]
+    fn nan_propagates_through_the_order_aggregates() {
+        let c = |x: f64| Complex64::new(x, 0.0);
+        let xs = [c(4.0), c(f64::NAN), c(3.0), c(2.0), c(1.0)];
+        for d in [&MAX, &MIN, &MEDIAN] {
+            let got = d.evaln.unwrap()(&xs).expect("should still evaluate");
+            assert!(got.re.is_nan(), "{} lost the NaN: {got}", d.name);
+        }
+        // Without a NaN the same lists answer normally, in a total order.
+        let ok = [c(4.0), c(3.0), c(2.0), c(1.0)];
+        assert_eq!(MAX.evaln.unwrap()(&ok), Some(c(4.0)));
+        assert_eq!(MIN.evaln.unwrap()(&ok), Some(c(1.0)));
+        assert_eq!(MEDIAN.evaln.unwrap()(&ok), Some(c(2.5)));
+    }
+
+    /// The sort must stay well-defined at any length — a non-total comparator
+    /// is entitled to panic, and `panic = "abort"` makes that a WASM crash.
+    #[test]
+    fn order_aggregates_survive_a_long_list_with_nans() {
+        let xs: Vec<Complex64> = (0..200)
+            .map(|i| Complex64::new(if i % 7 == 0 { f64::NAN } else { (100 - i) as f64 }, 0.0))
+            .collect();
+        for d in [&MAX, &MIN, &MEDIAN] {
+            assert!(d.evaln.unwrap()(&xs).unwrap().re.is_nan(), "{}", d.name);
+        }
+    }
+
+    /// Ordering is undefined off the real line, so a genuinely complex argument
+    /// leaves the application unfolded rather than picking arbitrarily.
+    #[test]
+    fn order_aggregates_decline_complex_arguments() {
+        let xs = [Complex64::new(1.0, 0.0), Complex64::new(0.0, 1.0)];
+        for d in [&MAX, &MIN, &MEDIAN] {
+            assert_eq!(d.evaln.unwrap()(&xs), None, "{}", d.name);
+        }
     }
 
     #[test]

@@ -598,14 +598,57 @@ function dopri(
 ) {
   const scalar = typeof y0 === "number";
   const y0arr = scalar ? [y0 as number] : Array.from(y0 as ArrayLike<number>);
-  const rhs = scalar
-    ? (x: number, y: Float64Array) => [Number(f(x, y[0]))]
-    : (x: number, y: Float64Array) => Array.from(f(x, Array.from(y)) as number[], Number);
+  const dim = y0arr.length;
+  // `f` is called from inside the integrator, across the wasm boundary, where
+  // an exception must not unwind — `panic = "abort"` makes that a module crash,
+  // so the Rust side treats a throwing stage as a failed step and stops early.
+  // Correct, but on its own it hands the caller a short, entirely
+  // plausible-looking trajectory with only `terminatedEarly` to hint at why:
+  // `dopri(0,1,1,()=>{throw …}).at(1)` returned the initial condition. Capture
+  // the first failure and rethrow it on this side once the integrator is done.
+  // A wrong-length derivative is caught here for the same reason — silently
+  // integrating one component of a two-component system is a wrong answer.
+  let failure: { error: unknown } | undefined;
+  const zeros = () => new Array<number>(dim).fill(0);
+  const rhs = (x: number, y: Float64Array): number[] => {
+    if (failure) return zeros(); // already doomed; just let the solver wind down
+    let out: number | number[];
+    try {
+      out = f(x, scalar ? y[0] : Array.from(y));
+    } catch (error) {
+      failure = { error };
+      return zeros();
+    }
+    const arr =
+      typeof out === "number" ? [out] : Array.from(out as ArrayLike<number>, Number);
+    if (arr.length !== dim) {
+      failure = {
+        error: new TypeError(
+          `dopri: the derivative returned ${arr.length} component(s) for a ${dim}-component state`,
+        ),
+      };
+      return zeros();
+    }
+    return arr;
+  };
   const sol = wasm.solve_ode(rhs, x0, x1, Float64Array.from(y0arr), tol, maxit);
+  if (failure) {
+    sol.free(); // nothing will read this solution; do not leak its handle
+    throw failure.error;
+  }
   const n = sol.dim();
   const state = (flat: Float64Array, i: number) => {
     const s = Array.from(flat.subarray(i * n, (i + 1) * n));
     return scalar ? s[0] : s;
+  };
+  // Guarded so a second `free()` is a no-op rather than the "null pointer
+  // passed to rust" that a wasm-bindgen double free raises — same reasoning as
+  // `Expression.free`.
+  let freed = false;
+  const freeSolution = () => {
+    if (freed) return;
+    freed = true;
+    sol.free();
   };
   return {
     /** Dense output: interpolated state at `x` (or one per element of an `x` array). */
@@ -631,6 +674,21 @@ function dopri(
     get terminatedEarly(): boolean {
       return sol.terminated_early();
     },
+    // Same contract as `Expression.free`/`dispose`: the solution owns a wasm
+    // handle, and a worker that integrates in a loop leaks one per call
+    // otherwise. numeric.js had nothing to release, so this is additive —
+    // callers that never free behave exactly as before.
+    /** Release the underlying wasm handle. Idempotent. */
+    free() {
+      freeSolution();
+    },
+    /** Alias of `free()`, and the `using`-statement protocol where supported. */
+    dispose() {
+      freeSolution();
+    },
+    ...(typeof Symbol.dispose === "symbol"
+      ? { [Symbol.dispose]: freeSolution }
+      : {}),
   };
 }
 
@@ -728,14 +786,28 @@ const Context = {
 // `expr.simplify()`. Mirror the prototype onto `Context` once both exist.
 //
 // Anything already reachable on `Context` wins, so the factories (`from`,
-// `fromAst`, `match`, …) are never shadowed — and neither are the inherited
+// `fromAst`, `fromText`, …) are never shadowed — and neither are the inherited
 // `Object.prototype` members, which is why `toString`/`valueOf` stay put rather
 // than becoming expression-first functions that would break `String(me)`.
 //
+// `NOT_EXPRESSION_FIRST` covers what that `in Context` test misses. A protocol
+// method the *runtime* calls is not a candidate for the expression-first
+// treatment, because the runtime supplies its own argument: `JSON.stringify`
+// invokes `toJSON(key)`, so mirroring it made the property key the "expression",
+// and `JSON.stringify({me})` emitted a `{objectType:"math-expression"}` envelope
+// that `Context.reviver` would then revive the whole library context from —
+// while `JSON.stringify({"(": me})` *threw* a parse error out of a plain
+// stringify. `toJSON` is not on `Object.prototype`, so only naming it works.
+// `free`/`dispose` are excluded for a milder reason: they manage this port's
+// wasm handles, which legacy had no concept of, so there is no expression-first
+// spelling of them to be compatible with — and `me.dispose()` reads like "tear
+// down the context", which it would not do.
+//
 // Coercion goes through `toExpr`, not `Context.from`: the argument is usually
 // an `Expression` already, and `from` would try to read that as an AST.
+const NOT_EXPRESSION_FIRST = new Set(["constructor", "toJSON", "free", "dispose"]);
 for (const name of Object.getOwnPropertyNames(Expression.prototype)) {
-  if (name === "constructor" || name in Context) continue;
+  if (NOT_EXPRESSION_FIRST.has(name) || name in Context) continue;
   const desc = Object.getOwnPropertyDescriptor(Expression.prototype, name);
   if (typeof desc?.value !== "function") continue; // skip accessors such as `tree`
   (Context as Record<string, unknown>)[name] = (expr: ExpressionLike, ...args: unknown[]) =>

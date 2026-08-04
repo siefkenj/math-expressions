@@ -97,22 +97,33 @@ fn annihilate(indeterminate: bool) -> Expr {
     }
 }
 
-/// Whether a `base^exp` factor is *provably* non-finite, and so blocks the
-/// annihilation above. Only a literal pole (`0^negative`, i.e. `1/0`) and the
-/// non-finite constants qualify. A factor whose finiteness is merely *unknown*
-/// — a bare symbol, `1/x`, a function application — does not: legacy's
-/// `is_nonzero` returned a third `undefined` state there and fell through to
-/// `0`, which is why `0·x` stays `0` and only the provable cases become `NaN`.
+/// Whether a `base^exp` factor blocks the annihilation above — because it is
+/// *provably* non-finite, or because it is already undefined and must poison
+/// the product. Only a literal pole (`0^negative`, i.e. `1/0`), the non-finite
+/// constants, and `None`/`NaN` qualify. A factor whose finiteness is merely
+/// *unknown* — a bare symbol, `1/x`, a function application — does not:
+/// legacy's `is_nonzero` returned a third `undefined` state there and fell
+/// through to `0`, which is why `0·x` stays `0` and only the provable cases
+/// become `NaN`.
+///
+/// The exponent matters for the infinities as much as it does for `0`: `∞^(-1)`
+/// *is* `0`, so `0/∞` is a plain `0` and not the indeterminate `0·∞`. Ignoring
+/// it here reported `0/∞` as `NaN` — the same wrong-number failure this guard
+/// exists to prevent, in the opposite direction. `NaN`/`None` are undefined at
+/// every exponent (`NaN^0` included: the product is still meaningless), so they
+/// poison unconditionally.
 fn is_infinite_factor(base: &Expr, exp: &Expr) -> bool {
     use crate::expr::MathConst;
-    if matches!(base, Expr::Num(n) if n.is_zero()) && matches!(exp, Expr::Num(x) if x.is_negative())
-    {
+    let negative_exponent = matches!(exp, Expr::Num(x) if x.is_negative());
+    if matches!(base, Expr::Num(n) if n.is_zero()) && negative_exponent {
         return true;
     }
-    matches!(
-        base,
-        Expr::Const(MathConst::Inf | MathConst::NegInf | MathConst::NaN)
-    )
+    match base {
+        // `∞^negative` → 0, which annihilates like any other zero.
+        Expr::Const(MathConst::Inf | MathConst::NegInf) => !negative_exponent,
+        Expr::Const(MathConst::NaN | MathConst::None) => true,
+        _ => false,
+    }
 }
 
 /// Build a canonical product from canonical factors: flatten, fold the numeric

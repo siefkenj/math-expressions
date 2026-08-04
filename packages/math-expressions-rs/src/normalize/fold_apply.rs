@@ -37,7 +37,19 @@ use num_rational::BigRational;
 /// `sum(3, 17, 5−4)` and `log₂(1/8)` fold only once `5−4` and `1/8` have
 /// become single numbers.
 pub fn fold_numeric_applications(e: &Expr) -> Expr {
-    fold_nodes(&super::canonicalize(e))
+    let canon = super::canonicalize(e);
+    let folded = fold_nodes(&canon);
+    // Folding swaps an `Apply` node for a `Num` leaf *in place*, which breaks
+    // the canonical invariant of whatever contained it: `floor(55.33) + 3`
+    // came back as `["+",55,3]`, two numeric terms left uncombined. Re-establish
+    // it rather than relying on the caller running its own simplify afterwards
+    // — `full_simplify` does, but this function is public and its contract says
+    // canonical-out.
+    if folded == canon {
+        canon
+    } else {
+        super::canonicalize(&folded)
+    }
 }
 
 fn fold_nodes(e: &Expr) -> Expr {
@@ -233,5 +245,21 @@ mod tests {
     fn nested_applications_fold_inside_out() {
         assert_eq!(run("abs(floor(-2.5))"), "3");
         assert_eq!(run_js(r#"["apply","sum",["tuple",["apply","abs",-2],3]]"#), "5");
+    }
+
+    /// The contract this pass documents: canonical in, canonical out. Replacing
+    /// an application with a number leaves its *parent* uncanonical, so the
+    /// numbers a fold exposes must still get combined and sorted.
+    #[test]
+    fn the_output_is_canonical() {
+        assert_eq!(run("floor(55.33) + 3"), "58");
+        assert_eq!(run("2*floor(55.33)*x"), r#"["*",110,"x"]"#);
+        assert_eq!(run("floor(55.33) * x * 2"), r#"["*",110,"x"]"#);
+        // Idempotent, which is what "canonical-out" buys the caller.
+        for s in ["floor(55.33) + 3", "abs(floor(-2.5))", "log10(3) + 1", "x + 1"] {
+            let e = TextToAst::new(Default::default()).convert(s).unwrap();
+            let once = fold_numeric_applications(&e);
+            assert_eq!(fold_numeric_applications(&once), once, "not idempotent on {s:?}");
+        }
     }
 }
