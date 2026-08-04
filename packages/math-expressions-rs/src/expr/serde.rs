@@ -329,19 +329,21 @@ fn number_to_js(n: &Number) -> Value {
     match n {
         Number::Int(i) => json!(i),
         Number::Float(_) => f64_to_js(n.to_f64()),
-        // Exact rationals split on whether their decimal expansion terminates.
+        // Exact rationals split on their recorded `Spelling`.
         //
-        // A *terminating* one (denominator 2^a·5^b) keeps its positional
-        // spelling, because it is indistinguishable from a decimal literal:
-        // user-typed decimals parse to exact rationals, so `0.5` and `1/2` are
-        // the same `Number::Rat(1, 2)`. Emitting `["/", …]` here would turn
-        // `19.9` into `["/", 199, 10]` — the fraction/decimal distinction is
-        // already gone by this point and cannot be recovered at the boundary.
+        // A *decimal*-spelled one keeps its positional spelling when the
+        // expansion terminates: user-typed decimals parse to exact rationals,
+        // so `19.9` is `Rat(199, 10)` and emitting `["/", 199, 10]` for it
+        // would be a wrong answer, not a stylistic one.
         //
-        // A *non*-terminating one (`1/3`, `5/6`) has no such ambiguity: it can
-        // never have come from a decimal literal, and the f64 projection loses
-        // it irreversibly (`0.3333333333333333` does not come back). The JS
-        // trees spell these `["/", 1, 3]`, so this is also the faithful shape.
+        // A *fraction*-spelled one (`3/6`, `cos(pi/3)`) emits `["/", n, d]`.
+        // Before the spelling was tracked this branch could only ask whether
+        // the expansion terminated, which meant `3/6` crossed as `0.5` and
+        // DoenetML's `ReducedFraction`/`ExactValue` criteria could not see a
+        // fraction that was no longer there.
+        //
+        // Either way, a value the JS side cannot hold exactly falls back to the
+        // f64 projection.
         Number::Rat(..) | Number::Big(_) => match exact_ratio(n) {
             Some((num, den)) => json!(["/", num, den]),
             None => f64_to_js(n.to_f64()),
@@ -355,13 +357,14 @@ fn number_to_js(n: &Number) -> Value {
 const JS_MAX_SAFE_INT: u64 = 9_007_199_254_740_991;
 
 /// Numerator/denominator for a rational that must *not* be decimalized.
-/// `None` when the value terminates as a decimal (it keeps the positional
-/// spelling) or when the parts exceed JS's exact-integer range.
+/// `None` when the value displays as a decimal (see
+/// [`Number::decimal_spelling`]) or when the parts exceed JS's exact-integer
+/// range.
 ///
 /// The `Rat` normal form puts the sign on the numerator with `den > 0`, so
 /// negatives come out as `["/", -2, 3]` — the spelling the JS fixtures use.
 fn exact_ratio(n: &Number) -> Option<(i64, i64)> {
-    if n.terminating_decimal().is_some() {
+    if n.decimal_spelling().is_some() {
         return None;
     }
     let (num, den) = n.rational_parts()?;
@@ -417,6 +420,7 @@ fn relation_to_js(operands: &[Expr], ops: &[RelOp]) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::num::Spelling;
 
     // A chained inequality `["gts"/"lts", ["tuple", ...operands],
     // ["tuple", ...strict-flags]]` has one more operand than strict-flag, so
@@ -461,16 +465,30 @@ mod tests {
 
     /// The other half of the same rule, and the reason the naive "emit every
     /// `Rat` as a fraction" version is wrong: user-typed decimals parse to
-    /// exact rationals, so `19.9` *is* `Rat(199, 10)`. Terminating rationals
-    /// keep the positional spelling the JS trees use, or `19.9` would go out as
-    /// `["/", 199, 10]`.
+    /// exact rationals, so `19.9` *is* `Rat(199, 10)`. A rational carrying the
+    /// `Decimal` spelling keeps the positional form the JS trees use, or `19.9`
+    /// would go out as `["/", 199, 10]`.
     #[test]
-    fn terminating_rationals_keep_their_decimal_spelling() {
+    fn decimal_spelled_rationals_keep_their_positional_form() {
         for (num, den, expected) in [(1, 2, 0.5), (199, 10, 19.9), (-3, 4, -0.75)] {
             assert_eq!(
-                number_to_js(&Number::rat(num, den)),
+                number_to_js(&Number::rat_spelled(num, den, Spelling::Decimal)),
                 json!(expected),
                 "{num}/{den} must stay positional"
+            );
+        }
+    }
+
+    /// The same values with the other spelling. This is the pair that could not
+    /// be told apart before `Spelling` existed, and the reason DoenetML's
+    /// structural criteria could not see a fraction in `3/6`.
+    #[test]
+    fn fraction_spelled_rationals_cross_as_fractions_even_when_they_terminate() {
+        for (num, den) in [(1, 2), (199, 10), (-3, 4)] {
+            assert_eq!(
+                number_to_js(&Number::rat(num, den)),
+                json!(["/", num, den]),
+                "{num}/{den} must stay a fraction"
             );
         }
     }

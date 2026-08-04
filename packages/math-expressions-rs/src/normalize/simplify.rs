@@ -676,7 +676,7 @@ fn rule_radical(e: &Expr) -> Option<Expr> {
         // an exact number (base is a perfect q-th power). Partial extraction
         // from a `Pow` form is left alone.
         Expr::Pow(base, exp) => {
-            if let (Expr::Num(b), Expr::Num(Number::Rat(p, q))) = (&**base, &**exp) {
+            if let (Expr::Num(b), Expr::Num(Number::Rat(p, q, _))) = (&**base, &**exp) {
                 return fold_numeric_radical(b, *p, *q);
             }
             None

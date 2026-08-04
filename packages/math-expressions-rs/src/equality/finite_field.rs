@@ -364,7 +364,7 @@ fn number(n: &Number, modulus: i64) -> Ff {
         // treat it as unrepresentable (skip). Genuine small fractions stay exact,
         // which is what lets the field reject `0.33 ≠ 1/3`. Mirrors JS's
         // `rationalApproximation` `approximate` flag.
-        Number::Rat(num, den) if den.unsigned_abs() <= 1_000_000_000 => {
+        Number::Rat(num, den, _) if den.unsigned_abs() <= 1_000_000_000 => {
             Ff::num(*num, modulus).div(&Ff::num(*den, modulus))
         }
         // Big integers/rationals, high-precision decimals, and evaluation floats

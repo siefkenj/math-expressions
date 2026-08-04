@@ -47,6 +47,6 @@ pub use syntactic::normalize_syntactic;
 pub use canonicalize::canonicalize;
 pub(crate) use full::full_simplify;
 pub use units::desugar_units;
-pub(crate) use constructors::{add, mul, pow, split_coeff};
+pub(crate) use constructors::{add, mul, pow, split_coeff, without_like_term_collection};
 pub(crate) use units::unit_body;
 pub(crate) use matrix_ops::{identity_matrix, is_matrix_valued, matmul_literal};

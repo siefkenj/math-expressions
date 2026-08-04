@@ -194,21 +194,82 @@ fn eval_trig(name: &str, arg: &Expr, budget: &mut i64) -> Option<Exact> {
 /// single-term inversion supported here.
 pub(crate) fn trig_special_value(name: &str, arg: &Expr) -> Option<Expr> {
     let mut budget = crate::resource_limits::current().max_exact_eval_ops;
-    let v = match name {
-        "sin" | "cos" | "tan" => eval_trig(name, arg, &mut budget)?,
+    Some(trig_exact(name, arg, &mut budget)?.to_expr())
+}
+
+/// All six trig functions on the lattice, as a ring element rather than an
+/// expression — the shared core of [`trig_special_value`] and
+/// [`inverse_trig_special_value`], which needs to *compare* values and so must
+/// not go through a spelling.
+fn trig_exact(name: &str, arg: &Expr, budget: &mut i64) -> Option<Exact> {
+    Some(match name {
+        "sin" | "cos" | "tan" => eval_trig(name, arg, budget)?,
         // cot θ = cos θ / sin θ, computed directly. The `1/tan θ` route returned
         // None at tan's poles (θ = π/2 + kπ) — precisely cot's *zeros*, where
         // cot is 0, not undefined.
         "cot" => {
-            let cos = eval_trig("cos", arg, &mut budget)?;
-            let sin = eval_trig("sin", arg, &mut budget)?;
-            cos.mul(&sin.inverse()?, &mut budget)?
+            let cos = eval_trig("cos", arg, budget)?;
+            let sin = eval_trig("sin", arg, budget)?;
+            cos.mul(&sin.inverse()?, budget)?
         }
-        "sec" => eval_trig("cos", arg, &mut budget)?.inverse()?,
-        "csc" => eval_trig("sin", arg, &mut budget)?.inverse()?,
+        "sec" => eval_trig("cos", arg, budget)?.inverse()?,
+        "csc" => eval_trig("sin", arg, budget)?.inverse()?,
+        _ => return None,
+    })
+}
+
+/// The exact angle `θ` in `name(x) = θ`, when `x` is one of the finitely many
+/// values the forward table takes on the π/12 lattice inside the function's
+/// principal branch (`asin(1) → π/2`, `acos(√3/2) → π/6`, `atan(1) → π/4`).
+/// `None` for everything else, including a genuinely transcendental angle.
+///
+/// Computed by *inverting the forward table* rather than tabulating the values
+/// a second time: each admissible angle's forward value is built and compared
+/// with the argument. One table, so the two directions cannot drift apart, and
+/// the only thing this function has to get right is the index range — which is
+/// exactly the principal branch. Each forward function is injective on its
+/// range, so the first match is the only match.
+///
+/// The comparison happens **in the ring, not on trees**. [`Exact`] is a sparse
+/// normal form that is zero exactly when the term map is empty, so
+/// `value − arg` decides equality no matter how either side was written:
+/// `asin(1/√2)`, `asin(√2/2)` and `asin(0.5·√2)` all fold. Comparing
+/// canonicalized expressions instead made the fold depend on whether the
+/// radical rules happened to have rationalized the argument first, so
+/// `asin(√2/2)` folded and `asin(1/√2)` — the same number — did not.
+pub(crate) fn inverse_trig_special_value(name: &str, arg: &Expr) -> Option<Expr> {
+    // (forward function, inclusive angle range in units of π/12). Branches match
+    // the numeric `eval1`s in `special_functions::trig_inverse`: [−π/2, π/2] for
+    // asin/acsc, [0, π] for acos/asec, and the open (−π/2, π/2) for atan/acot,
+    // whose reciprocal members are defined there as `a…(1/z)` on those same
+    // ranges. Endpoints where the forward value does not exist — csc/cot at 0,
+    // sec at π/2 — drop out on their own, since `trig_exact` declines at a pole.
+    let (forward, lo, hi) = match name {
+        "asin" => ("sin", -6, 6),
+        "acsc" => ("csc", -6, 6),
+        "acos" => ("cos", 0, 12),
+        "asec" => ("sec", 0, 12),
+        "atan" => ("tan", -5, 5),
+        "acot" => ("cot", -5, 5),
         _ => return None,
     };
-    Some(v.to_expr())
+    let mut budget = crate::resource_limits::current().max_exact_eval_ops;
+    // Outside the tower (a symbolic argument, a transcendental one) there is
+    // nothing to compare and no reason to walk the lattice at all.
+    let arg = eval(arg, &mut budget)?;
+    (lo..=hi).find_map(|j| {
+        let angle = twelfths_of_pi(j);
+        let value = trig_exact(forward, &angle, &mut budget)?;
+        value.add(&arg.neg()).is_zero().then_some(angle)
+    })
+}
+
+/// The angle `j·π/12`, canonical.
+fn twelfths_of_pi(j: i64) -> Expr {
+    crate::normalize::canonicalize(&crate::normalize::mul(vec![
+        Expr::Num(crate::num::Number::rat(j, 12)),
+        Expr::Const(crate::expr::MathConst::Pi),
+    ]))
 }
 
 /// sin at k·15°, k ∈ 0..24. Uses the 0..12 table and sin(θ+180°) = −sin θ.

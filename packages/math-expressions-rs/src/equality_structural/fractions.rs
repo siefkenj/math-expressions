@@ -11,7 +11,7 @@ fn is_decimal_literal(n: &Number) -> bool {
     // In the faithful tree a decimal parses to Rat (fractional part) or Float
     // (huge). Integers are `Int`; typed fractions are `Div`, not `Rat`.
     matches!(n, Number::Rat(..) | Number::Float(_))
-        || matches!(n, Number::Big(b) if matches!(**b, crate::num::BigNumber::Rat(_)))
+        || matches!(n, Number::Big(b) if matches!(**b, crate::num::BigNumber::Rat(..)))
 }
 
 pub(super) fn contains_decimal(e: &Expr) -> bool {

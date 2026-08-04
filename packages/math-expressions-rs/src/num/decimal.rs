@@ -6,7 +6,7 @@
 //! round-trips exactly. The f64 path reproduces JavaScript
 //! `Number.prototype.toString()` for the parser's sign-string concatenation.
 
-use super::number::{BigNumber, Number, F64};
+use super::number::{BigNumber, Number, Spelling, F64};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{One, Signed, Zero};
@@ -78,22 +78,39 @@ impl Number {
             Number::from_bigint(numer * ten.pow(pow10 as u32))
         } else {
             let den = ten.pow((-pow10) as u32);
-            Number::from_bigrational(BigRational::new(numer, den))
+            // Decimal-spelled: this is where the one and only decimal *origin*
+            // is recorded, so `19.9` reads back as `19.9` rather than `199/10`.
+            Number::from_bigrational_spelled(BigRational::new(numer, den), Spelling::Decimal)
         }
+    }
+
+    /// The positional decimal string this value should *display* as, or `None`
+    /// when it should display as a fraction. That is
+    /// [`terminating_decimal`](Number::terminating_decimal) plus the
+    /// [`Spelling`] gate: a terminating rational that came from a fraction
+    /// (`3/6`, `cos(pi/3)`) keeps its `n/d` spelling everywhere — the `.tree`,
+    /// the text printer, and the LaTeX printer all read this one method, so
+    /// they cannot disagree.
+    pub fn decimal_spelling(&self) -> Option<String> {
+        (self.spelling() == Spelling::Decimal || self.rational_parts().is_none())
+            .then(|| self.terminating_decimal())
+            .flatten()
     }
 
     /// Render an exact rational in positional decimal notation, iff its
     /// denominator divides a power of ten (`2^a·5^b`). Integers always
-    /// succeed; a fraction like `1/3` returns `None`. Computed with exact
+    /// succeed; a fraction like `1/3` returns `None`. **Asks whether the
+    /// expansion terminates, not whether it should be used** — for display,
+    /// call [`decimal_spelling`](Number::decimal_spelling). Computed with exact
     /// big-integer arithmetic so even long or `Big` literals reproduce
     /// digit-for-digit (an f64 projection would truncate).
     pub fn terminating_decimal(&self) -> Option<String> {
         let (numer, denom): (BigInt, BigInt) = match self {
             Number::Int(i) => return Some(i.to_string()),
-            Number::Rat(n, d) => (BigInt::from(*n), BigInt::from(*d)),
+            Number::Rat(n, d, _) => (BigInt::from(*n), BigInt::from(*d)),
             Number::Big(b) => match &**b {
                 BigNumber::Int(i) => return Some(i.to_string()),
-                BigNumber::Rat(r) => (r.numer().clone(), r.denom().clone()),
+                BigNumber::Rat(r, _) => (r.numer().clone(), r.denom().clone()),
             },
             Number::Float(_) => return None,
         };

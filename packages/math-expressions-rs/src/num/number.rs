@@ -25,12 +25,49 @@ impl F64 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// How a non-integer exact rational should be *written back out*.
+///
+/// The two are the same value and compare equal; this only decides spelling.
+/// It has to be carried rather than derived because the value alone cannot
+/// answer the question: decimals parse to exact rationals by design, so `0.5`
+/// and `1/2` are both `Rat(1, 2)` and the distinction is gone by the time
+/// anything reaches the serializer or a printer.
+///
+/// `Decimal` is contagious through arithmetic, the same way `Float` is: once a
+/// decimal quantity is involved the result is a decimal quantity. That makes
+/// `Fraction` the identity for [`join`](Spelling::join) and hence the right
+/// default for integers, floats, and every exact value the engine *computes*.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum Spelling {
+    /// `n/d` — a fraction of integers, or anything derived from one.
+    #[default]
+    Fraction,
+    /// A positional decimal, when the expansion terminates — a decimal literal
+    /// the user typed, or a value rounded to a number of decimal places.
+    Decimal,
+}
+
+impl Spelling {
+    /// The spelling of a result computed from two operands: `Decimal` wins.
+    pub fn join(self, other: Spelling) -> Spelling {
+        if self == Spelling::Decimal || other == Spelling::Decimal {
+            Spelling::Decimal
+        } else {
+            Spelling::Fraction
+        }
+    }
+}
+
+/// Note the hand-written `PartialEq`/`Hash` below: [`Spelling`] is *not* part
+/// of a number's identity. `0.5 == 1/2` structurally, so canonical trees stay
+/// comparable by `==` and hashable as keys, exactly as before this field
+/// existed.
+#[derive(Debug, Clone)]
 pub enum Number {
     /// Integers that fit in i64. No allocation.
     Int(i64),
     /// Reduced fractions. Invariant: den > 0, gcd(|num|, den) == 1, den != 1.
-    Rat(i64, i64),
+    Rat(i64, i64, Spelling),
     /// Arbitrary precision fallback. Boxed to keep Number small.
     Big(Box<BigNumber>),
     /// Floating-point value — produced by numerical evaluation only. User
@@ -38,10 +75,57 @@ pub enum Number {
     Float(F64),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub enum BigNumber {
     Int(BigInt),
-    Rat(BigRational),
+    Rat(BigRational, Spelling),
+}
+
+/// Value equality: the spelling is deliberately excluded (see [`Number`]).
+impl PartialEq for Number {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Number::Int(a), Number::Int(b)) => a == b,
+            (Number::Rat(a, b, _), Number::Rat(c, d, _)) => a == c && b == d,
+            (Number::Float(a), Number::Float(b)) => a == b,
+            (Number::Big(a), Number::Big(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+impl Eq for Number {}
+
+impl std::hash::Hash for Number {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Number::Int(i) => i.hash(state),
+            Number::Rat(n, d, _) => (n, d).hash(state),
+            Number::Float(f) => f.hash(state),
+            Number::Big(b) => b.hash(state),
+        }
+    }
+}
+
+impl PartialEq for BigNumber {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (BigNumber::Int(a), BigNumber::Int(b)) => a == b,
+            (BigNumber::Rat(a, _), BigNumber::Rat(b, _)) => a == b,
+            _ => false,
+        }
+    }
+}
+impl Eq for BigNumber {}
+
+impl std::hash::Hash for BigNumber {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            BigNumber::Int(i) => i.hash(state),
+            BigNumber::Rat(r, _) => r.hash(state),
+        }
+    }
 }
 
 impl Number {
@@ -57,10 +141,16 @@ impl Number {
         }
     }
 
-    /// Reduced rational from an i64 numerator/denominator. Enforces the `Rat`
-    /// invariants (den > 0, gcd == 1, den != 1) and demotes to `Int` when the
-    /// denominator reduces to 1. Panics on a zero denominator.
-    pub fn rat(mut num: i64, mut den: i64) -> Number {
+    /// Reduced rational from an i64 numerator/denominator, spelled as a
+    /// fraction. Enforces the `Rat` invariants (den > 0, gcd == 1, den != 1)
+    /// and demotes to `Int` when the denominator reduces to 1. Panics on a zero
+    /// denominator.
+    pub fn rat(num: i64, den: i64) -> Number {
+        Number::rat_spelled(num, den, Spelling::Fraction)
+    }
+
+    /// [`rat`](Number::rat) with an explicit [`Spelling`].
+    pub fn rat_spelled(mut num: i64, mut den: i64, spelling: Spelling) -> Number {
         assert!(den != 0, "rational with zero denominator");
         if den < 0 {
             num = -num;
@@ -74,7 +164,33 @@ impl Number {
         if den == 1 {
             Number::Int(num)
         } else {
-            Number::Rat(num, den)
+            Number::Rat(num, den, spelling)
+        }
+    }
+
+    /// How this value should be written back out. Integers and floats have only
+    /// one spelling, and answer `Fraction` — the identity for
+    /// [`Spelling::join`], so they never drag a sum or product either way.
+    pub fn spelling(&self) -> Spelling {
+        match self {
+            Number::Rat(_, _, s) => *s,
+            Number::Big(b) => match &**b {
+                BigNumber::Rat(_, s) => *s,
+                BigNumber::Int(_) => Spelling::Fraction,
+            },
+            Number::Int(_) | Number::Float(_) => Spelling::Fraction,
+        }
+    }
+
+    /// This value with its spelling replaced. A no-op on integers and floats.
+    pub fn with_spelling(&self, spelling: Spelling) -> Number {
+        match self {
+            Number::Rat(n, d, _) => Number::Rat(*n, *d, spelling),
+            Number::Big(b) => match &**b {
+                BigNumber::Rat(r, _) => Number::Big(Box::new(BigNumber::Rat(r.clone(), spelling))),
+                BigNumber::Int(_) => self.clone(),
+            },
+            _ => self.clone(),
         }
     }
 
@@ -86,18 +202,25 @@ impl Number {
         }
     }
 
-    /// Reduce and demote an arbitrary-precision rational: to `Int` when
-    /// integral and small, to `Rat` when numerator and denominator both fit
-    /// i64, otherwise `Big`. `BigRational` keeps itself in lowest terms.
+    /// Reduce and demote an arbitrary-precision rational, spelled as a
+    /// fraction: to `Int` when integral and small, to `Rat` when numerator and
+    /// denominator both fit i64, otherwise `Big`. `BigRational` keeps itself in
+    /// lowest terms.
     pub fn from_bigrational(v: BigRational) -> Number {
+        Number::from_bigrational_spelled(v, Spelling::Fraction)
+    }
+
+    /// [`from_bigrational`](Number::from_bigrational) with an explicit
+    /// [`Spelling`].
+    pub fn from_bigrational_spelled(v: BigRational, spelling: Spelling) -> Number {
         if v.is_integer() {
             return Number::from_bigint(v.to_integer());
         }
         if let (Some(n), Some(d)) = (v.numer().to_i64(), v.denom().to_i64()) {
             // Already reduced and non-integral, so den != 1 and den > 0.
-            Number::Rat(n, d)
+            Number::Rat(n, d, spelling)
         } else {
-            Number::Big(Box::new(BigNumber::Rat(v)))
+            Number::Big(Box::new(BigNumber::Rat(v, spelling)))
         }
     }
 
@@ -144,7 +267,10 @@ impl Number {
                     BigRational::new(BigInt::one(), pow10)
                 };
                 let rounded = (&r * &scale).round(); // half away from zero
-                Number::from_bigrational(rounded / scale)
+                // Rounding *to decimal places* produces a decimal, whatever
+                // went in: `round_numbers_to_decimals(1/3, 2)` is `0.33`, not
+                // `33/100`.
+                Number::from_bigrational_spelled(rounded / scale, Spelling::Decimal)
             }
             None => {
                 let f = 10f64.powi(d);
@@ -174,7 +300,7 @@ impl Number {
         let (num_bits, den_bits) = match self {
             Number::Big(b) => match &**b {
                 BigNumber::Int(i) => (i.bits() as i64, 0i64),
-                BigNumber::Rat(r) => (r.numer().bits() as i64, r.denom().bits() as i64),
+                BigNumber::Rat(r, _) => (r.numer().bits() as i64, r.denom().bits() as i64),
             },
             // Small variants always fit f64; unreachable in practice.
             _ => return None,
@@ -185,11 +311,11 @@ impl Number {
     pub fn to_f64(&self) -> f64 {
         match self {
             Number::Int(i) => *i as f64,
-            Number::Rat(n, d) => *n as f64 / *d as f64,
+            Number::Rat(n, d, _) => *n as f64 / *d as f64,
             Number::Float(f) => f.get(),
             Number::Big(b) => match &**b {
                 BigNumber::Int(i) => i.to_f64().unwrap_or(f64::NAN),
-                BigNumber::Rat(r) => r.to_f64().unwrap_or(f64::NAN),
+                BigNumber::Rat(r, _) => r.to_f64().unwrap_or(f64::NAN),
             },
         }
     }
@@ -197,11 +323,11 @@ impl Number {
     pub fn is_positive(&self) -> bool {
         match self {
             Number::Int(i) => *i > 0,
-            Number::Rat(n, _) => *n > 0,
+            Number::Rat(n, ..) => *n > 0,
             Number::Float(f) => f.get() > 0.0,
             Number::Big(b) => match &**b {
                 BigNumber::Int(i) => i.is_positive(),
-                BigNumber::Rat(r) => r.is_positive(),
+                BigNumber::Rat(r, _) => r.is_positive(),
             },
         }
     }
@@ -209,11 +335,11 @@ impl Number {
     pub fn is_negative(&self) -> bool {
         match self {
             Number::Int(i) => *i < 0,
-            Number::Rat(n, _) => *n < 0,
+            Number::Rat(n, ..) => *n < 0,
             Number::Float(f) => f.get() < 0.0,
             Number::Big(b) => match &**b {
                 BigNumber::Int(i) => i.is_negative(),
-                BigNumber::Rat(r) => r.is_negative(),
+                BigNumber::Rat(r, _) => r.is_negative(),
             },
         }
     }
@@ -224,9 +350,9 @@ impl Number {
     /// fraction does not terminate as a decimal.
     pub fn rational_parts(&self) -> Option<(String, String)> {
         match self {
-            Number::Rat(n, d) => Some((n.to_string(), d.to_string())),
+            Number::Rat(n, d, _) => Some((n.to_string(), d.to_string())),
             Number::Big(b) => match &**b {
-                BigNumber::Rat(r) => Some((r.numer().to_string(), r.denom().to_string())),
+                BigNumber::Rat(r, _) => Some((r.numer().to_string(), r.denom().to_string())),
                 BigNumber::Int(_) => None,
             },
             _ => None,
@@ -236,11 +362,11 @@ impl Number {
     pub fn neg(&self) -> Number {
         match self {
             Number::Int(i) => Number::Int(-i),
-            Number::Rat(n, d) => Number::Rat(-n, *d),
+            Number::Rat(n, d, s) => Number::Rat(-n, *d, *s),
             Number::Float(f) => Number::Float(F64::new(-f.get())),
             Number::Big(b) => match &**b {
                 BigNumber::Int(i) => Number::from_bigint(-i),
-                BigNumber::Rat(r) => Number::from_bigrational(-r),
+                BigNumber::Rat(r, s) => Number::from_bigrational_spelled(-r, *s),
             },
         }
     }
@@ -255,11 +381,11 @@ impl Number {
     pub fn is_zero(&self) -> bool {
         match self {
             Number::Int(i) => *i == 0,
-            Number::Rat(n, _) => *n == 0,
+            Number::Rat(n, ..) => *n == 0,
             Number::Float(f) => f.get() == 0.0,
             Number::Big(b) => match &**b {
                 BigNumber::Int(i) => i.is_zero(),
-                BigNumber::Rat(r) => r.is_zero(),
+                BigNumber::Rat(r, _) => r.is_zero(),
             },
         }
     }
@@ -281,10 +407,10 @@ impl Number {
     pub(crate) fn to_bigrational(&self) -> Option<BigRational> {
         match self {
             Number::Int(i) => Some(BigRational::from_integer(BigInt::from(*i))),
-            Number::Rat(n, d) => Some(BigRational::new(BigInt::from(*n), BigInt::from(*d))),
+            Number::Rat(n, d, _) => Some(BigRational::new(BigInt::from(*n), BigInt::from(*d))),
             Number::Big(b) => Some(match &**b {
                 BigNumber::Int(i) => BigRational::from_integer(i.clone()),
-                BigNumber::Rat(r) => r.clone(),
+                BigNumber::Rat(r, _) => r.clone(),
             }),
             Number::Float(_) => None,
         }
@@ -312,10 +438,15 @@ impl Number {
         if self.is_float() || other.is_float() {
             return Number::Float(F64::new(float(self.to_f64(), other.to_f64())));
         }
-        Number::from_bigrational(exact(
-            self.to_bigrational().unwrap(),
-            other.to_bigrational().unwrap(),
-        ))
+        Number::from_bigrational_spelled(
+            exact(
+                self.to_bigrational().unwrap(),
+                other.to_bigrational().unwrap(),
+            ),
+            // Decimal is contagious, so `0.5 + 1/4` reads back as `0.75` while
+            // `1/2 + 1/4` reads back as `3/4`. See `Spelling`.
+            self.spelling().join(other.spelling()),
+        )
     }
 
     pub fn add(&self, other: &Number) -> Number {
@@ -371,7 +502,11 @@ impl Number {
         }
         let mag = bigrat_powu(base, exp.unsigned_abs());
         let result = if exp < 0 { mag.recip() } else { mag };
-        Some(Number::from_bigrational(result))
+        // A power of a decimal is a decimal (`0.5^2` is `0.25`); a power of an
+        // integer or a fraction is a fraction (`2^(-2)` is `1/4`). That second
+        // case is the one origin of a fraction spelling that is not a literal
+        // `a/b`: canonicalization turns every division into a negative power.
+        Some(Number::from_bigrational_spelled(result, self.spelling()))
     }
 
 }

@@ -24,7 +24,7 @@
 //! [`FnDef::fold_exact`]: crate::special_functions::FnDef::fold_exact
 
 use crate::expr::{Expr, map_children};
-use crate::num::Number;
+use crate::num::{Number, Spelling};
 use crate::special_functions::fold_exact;
 use num_rational::BigRational;
 
@@ -60,6 +60,14 @@ fn fold_nodes(e: &Expr) -> Expr {
     fold_application(head, args).map_or(e, Expr::Num)
 }
 
+/// Whether [`fold_numeric_applications`] would replace this application with a
+/// literal. Read by the change-of-base rewrite in
+/// [`special_values`](super::special_values), which runs *earlier* in the
+/// `full_simplify` round and must not pre-empt an exact fold.
+pub(super) fn folds_to_a_number(head: &Expr, args: &[Expr]) -> bool {
+    fold_application(head, args).is_some()
+}
+
 fn fold_application(head: &Expr, args: &[Expr]) -> Option<Number> {
     // Nothing folds unless every argument is already a number.
     let numbers: Vec<&Number> = args
@@ -70,11 +78,19 @@ fn fold_application(head: &Expr, args: &[Expr]) -> Option<Number> {
         })
         .collect::<Option<_>>()?;
 
+    // How the result should read back: a function of decimals produces a
+    // decimal (`abs(-3.5)` is `3.5`, not `7/2`), a function of integers or
+    // fractions produces a fraction (`mean(1,2,3,4)` is `5/2`). Computed here
+    // because `fold_exact` works in `BigRational`, which carries no spelling.
+    let spelling = numbers
+        .iter()
+        .fold(Spelling::Fraction, |acc, n| acc.join(n.spelling()));
+
     // `to_bigrational` is the exactness gate: it returns `None` for
     // `Number::Float`. When every argument clears it we are in exact
     // territory and only an exact result is acceptable.
     match numbers.iter().map(|n| n.to_bigrational()).collect() {
-        Some(rationals) => fold_exactly(head, rationals),
+        Some(rationals) => Some(fold_exactly(head, rationals)?.with_spelling(spelling)),
         // An argument that is *already* a float — `floor(55.33)` arriving
         // through the JSON tree, where a non-integer literal is an f64. The
         // value is inexact before we touch it, so folding cannot lose
@@ -184,10 +200,10 @@ mod tests {
         assert_eq!(run_js(r#"["apply","prod",["tuple",2,3,4]]"#), "24");
         assert_eq!(run_js(r#"["apply","mean",["tuple",1,2,3]]"#), "2");
         assert_eq!(run_js(r#"["apply","mean",["tuple",1,2,4]]"#), r#"["/",7,3]"#);
-        // `5/2` prints as the terminating decimal `2.5` — the engine-wide
-        // convention (legacy spells it `["/",5,2]`), not a property of this
-        // fold. `7/3` above stays a fraction because it has no finite decimal.
-        assert_eq!(run_js(r#"["apply","median",["tuple",1,2,3,4]]"#), "2.5");
+        // A fraction of integers reads back as a fraction whether or not its
+        // decimal expansion terminates — `5/2` is not `2.5` here, because
+        // nothing decimal went into it (`num::Spelling`).
+        assert_eq!(run_js(r#"["apply","median",["tuple",1,2,3,4]]"#), r#"["/",5,2]"#);
         assert_eq!(run_js(r#"["apply","variance",["tuple",1,2,3]]"#), "1");
         assert_eq!(run_js(r#"["apply","std",["tuple",1,2,3]]"#), "1");
         assert_eq!(run_js(r#"["apply","count",["tuple",1,2,3]]"#), "3");

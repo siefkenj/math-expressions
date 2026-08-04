@@ -231,9 +231,11 @@ impl Writer<'_> {
     }
 
     fn render_number(&self, n: &Number) -> (String, u8) {
-        // Terminating decimals (all integers, and every parse-produced
-        // rational — denominator 2^a·5^b) render positionally, as atoms.
-        if let Some(dec) = n.terminating_decimal() {
+        // Integers, and decimal-spelled rationals whose expansion terminates,
+        // render positionally, as atoms. A *fraction*-spelled rational falls
+        // through to the `a/b` branch below even when it terminates, so `3/6`
+        // prints `1/2` rather than `0.5` (`Number::decimal_spelling`).
+        if let Some(dec) = n.decimal_spelling() {
             let p = if dec.starts_with('-') {
                 prec::NEG
             } else {
@@ -241,9 +243,8 @@ impl Writer<'_> {
             };
             return (self.decimal(self.pad(dec)), p);
         }
-        // A non-terminating fraction (only from later normalization) renders
-        // as `a/b`, binding like the division it re-parses to. Padding is a
-        // decimal-display option and does not apply to the fraction spelling.
+        // A fraction renders as `a/b`, binding like the division it re-parses
+        // to. Padding is a decimal-display option and does not apply here.
         if let Some((num, den)) = n.rational_parts() {
             let p = if num.starts_with('-') {
                 prec::NEG

@@ -156,15 +156,14 @@ impl Writer<'_> {
 
     fn render_number(&self, n: &Number) -> (String, u8) {
         use prec::{ATOM, NEG};
-        // Terminating decimals (all integers, and every parse-produced
-        // rational) render positionally, so `0.5` round-trips as `Rat(1,2)`
-        // — rendering `\frac{1}{2}` would re-parse to a `Div`.
-        if let Some(dec) = n.terminating_decimal() {
+        // Integers, and decimal-spelled rationals whose expansion terminates,
+        // render positionally, so a typed `0.5` round-trips as `0.5` — emitting
+        // `\frac{1}{2}` there would re-parse to a `Div`.
+        if let Some(dec) = n.decimal_spelling() {
             let p = if dec.starts_with('-') { NEG } else { ATOM };
             return (self.decimal(self.pad(dec)), p);
         }
-        // A non-terminating fraction renders as `\frac` (self-delimiting, so
-        // an atom); only reachable from later normalization, not the parser.
+        // A fraction renders as `\frac` (self-delimiting, so an atom).
         // Padding is a decimal-display option and does not apply here.
         if let Some((num, den)) = n.rational_parts() {
             return match num.strip_prefix('-') {

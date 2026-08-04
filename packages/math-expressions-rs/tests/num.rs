@@ -90,10 +90,10 @@ fn overlong_literal_promotes_to_big_but_exact() {
 
 #[test]
 fn rat_constructor_reduces_and_demotes() {
-    assert_eq!(Number::rat(6, 10), Number::Rat(3, 5));
+    assert_eq!(Number::rat(6, 10), Number::rat(3, 5));
     assert_eq!(Number::rat(4, 2), Number::Int(2)); // demotes to Int
-    assert_eq!(Number::rat(-1, -2), Number::Rat(1, 2)); // sign normalised
-    assert_eq!(Number::rat(1, -2), Number::Rat(-1, 2)); // sign to numerator
+    assert_eq!(Number::rat(-1, -2), Number::rat(1, 2)); // sign normalised
+    assert_eq!(Number::rat(1, -2), Number::rat(-1, 2)); // sign to numerator
     assert_eq!(Number::rat(0, 5), Number::Int(0));
 }
 
@@ -259,7 +259,7 @@ proptest! {
     #[test]
     fn tier_invariants(a in small_rat()) {
         match a {
-            Number::Rat(n, d) => {
+            Number::Rat(n, d, _) => {
                 prop_assert!(d > 1);
                 prop_assert_eq!(gcd(n.unsigned_abs(), d as u64), 1);
             }

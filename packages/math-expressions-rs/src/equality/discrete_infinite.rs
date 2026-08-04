@@ -240,7 +240,7 @@ fn ratio(e: &Expr, period: &Expr) -> Expr {
 fn frac_parts(n: &Number) -> Option<(i64, i64)> {
     match n {
         Number::Int(i) => Some((i.abs(), 1)),
-        Number::Rat(num, den) => Some((num.abs(), *den)),
+        Number::Rat(num, den, _) => Some((num.abs(), *den)),
         _ => None, // Big/Float periods: conservatively unsupported
     }
 }

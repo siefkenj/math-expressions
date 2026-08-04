@@ -150,10 +150,22 @@ fn exact_logarithms_are_fast_on_huge_powers() {
     assert_eq!(tree(&simplify(&p("log_7(343)"))), "3");
     assert_eq!(tree(&simplify(&p("log_2(1)"))), "0");
     assert_eq!(tree(&simplify(&js(r#"["apply","log2",["/",1,8]]"#))), "-3");
-    for s in ["log_2(9)", "log10(3)", "log_2(2^200000+1)"] {
+    // Not an exact power: the value must stay symbolic rather than turn into a
+    // float. `log10(3)` keeps its application; the *based* spellings hand off to
+    // the change-of-base rewrite instead, which is still symbolic — and is what
+    // decides that the based and unbased spellings are the same number.
+    assert!(matches!(simplify(&p("log10(3)")), Expr::Apply(..)));
+    for s in ["log_2(9)", "log_2(2^200000+1)"] {
+        let simplified = simplify(&p(s));
         assert!(
-            matches!(simplify(&p(s)), Expr::Apply(..)),
-            "{s:?} is not an exact power and must stay symbolic"
+            !matches!(simplified, Expr::Num(_)),
+            "{s:?} is not an exact power and must not fold to a number"
+        );
+        let arg = s.trim_start_matches("log_2(").trim_end_matches(')');
+        assert_eq!(
+            simplified,
+            simplify(&p(&format!("log({arg})/log(2)"))),
+            "{s:?} should reduce by change of base"
         );
     }
 }

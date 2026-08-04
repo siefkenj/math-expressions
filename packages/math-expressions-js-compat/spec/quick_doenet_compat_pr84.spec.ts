@@ -259,7 +259,12 @@ describe("§3 — simplify folds numeric function applications", () => {
     // The exactness gate: folding must never turn an exact value into a float.
     expect(s(["apply", "sqrt", 2])).toEqual(["apply", "sqrt", 2]);
     expect(s(["apply", "log10", 3])).toEqual(["apply", "log10", 3]);
-    expect(s(["apply", "asin", 1])).toEqual(["apply", "asin", 1]);
+    // `asin(1)` used to be the example here, but it is π/2 — an *exact* value,
+    // so it now folds (DOENET_INTEGRATION §3) without violating the gate this
+    // test is about. `asin(2)` is off the lattice entirely; `atan(1/3)` is on
+    // the principal branch but is not a rational multiple of π.
+    expect(s(["apply", "asin", 2])).toEqual(["apply", "asin", 2]);
+    expect(s(["apply", "atan", ["/", 1, 3]])).toEqual(["apply", "atan", ["/", 1, 3]]);
     expect(s(["apply", "std", ["tuple", 1, 2, 4]])).toEqual(["apply", "std", ["tuple", 1, 2, 4]]);
     expect(s(["apply", "sum", ["tuple", "x", "y"]])).toEqual(["apply", "sum", ["tuple", "x", "y"]]);
   });

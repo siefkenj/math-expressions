@@ -31,6 +31,7 @@ use crate::expr::{Expr, MathConst};
 use crate::expr::map_children;
 
 const TRIG: &[&str] = &["sin", "cos", "tan", "cot", "sec", "csc"];
+const INVERSE_TRIG: &[&str] = &["asin", "acos", "atan", "asec", "acsc", "acot"];
 
 /// Fold trig/exp/log special values and normalize parity, to a bounded
 /// fixpoint. The input and output are canonical.
@@ -59,10 +60,21 @@ fn fold_node(e: &Expr) -> Expr {
                 if TRIG.contains(&name.as_str()) {
                     return fold_trig(&name, arg).unwrap_or_else(|| e.clone());
                 }
+                if INVERSE_TRIG.contains(&name.as_str()) {
+                    return crate::eval_exact::inverse_trig_special_value(&name, arg)
+                        .unwrap_or_else(|| e.clone());
+                }
                 match name.as_str() {
                     "exp" => return fold_exp(arg).unwrap_or_else(|| e.clone()),
                     "log" | "ln" => return fold_log(arg).unwrap_or_else(|| e.clone()),
                     _ => {}
+                }
+            }
+            // `log_b(a)` — both parsers spell a based logarithm as an `Index`
+            // head, not a two-argument apply.
+            if let (Expr::Index(f, base), [arg]) = (&**head, args.as_slice()) {
+                if matches!(&**f, Expr::Sym(s) if s.name() == "log") {
+                    return change_of_base(arg, base).unwrap_or_else(|| e.clone());
                 }
             }
             e.clone()
@@ -155,6 +167,27 @@ fn pi_multiple(e: &Expr) -> Option<BigRational> {
         }
     }
     saw_pi.then_some(coeff)
+}
+
+/// `log_b(a) → log(a)/log(b)`, so a based logarithm reduces to the one form the
+/// rest of the engine knows how to work with. Without it `log_b(a)` was inert:
+/// it never combined with anything, and `log_b(a) − log(a)/log(b)` did not
+/// simplify to zero.
+///
+/// Declines when the numeric pass would produce an exact value instead
+/// (`log_2(8)` is `3`, not `log 8 / log 2`). That pass runs *after* this one in
+/// the `full_simplify` round, so the check has to happen here rather than being
+/// left to ordering. Once rewritten the node is no longer an `Index`-headed
+/// apply, so the surrounding fixpoint cannot re-enter it.
+fn change_of_base(arg: &Expr, base: &Expr) -> Option<Expr> {
+    let head = Expr::Index(Box::new(Expr::sym("log")), Box::new(base.clone()));
+    if super::fold_apply::folds_to_a_number(&head, std::slice::from_ref(arg)) {
+        return None;
+    }
+    Some(canon(&crate::normalize::mul(vec![
+        apply("log", arg.clone()),
+        crate::normalize::pow(apply("log", base.clone()), Expr::int(-1)),
+    ])))
 }
 
 // ---------------- exp / log ----------------

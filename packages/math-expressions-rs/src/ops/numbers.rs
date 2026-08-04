@@ -6,15 +6,24 @@
 use crate::expr::Expr;
 use crate::expr::map_children;
 use crate::normalize::{canonicalize, present};
-use crate::num::Number;
+use crate::num::{Number, Spelling};
 use std::collections::BTreeSet;
 
 /// Fold numeric subexpressions (`4 + x − 2` → `x + 2`) — the port of
 /// `me.evaluate_numbers`. Ours is the exact canonical fold: rationals stay
-/// exact where the JS produces floats; the combined/ordered shape is the
-/// canonical one.
+/// exact where the JS produces floats; the ordering is the canonical one.
+///
+/// **Numeric only.** The canonical layer also collects like terms, and running
+/// it unmodified here made `x² + 3x²` come back as `4x²` — a correct
+/// simplification, but not a *numeric* one. It is the whole content of
+/// DoenetML's `simplify="numbers"`, which is specified as "fold numeric
+/// constants, leave the symbolic structure alone"; with like terms collected
+/// that attribute was indistinguishable from `simplify="full"`. So the sum
+/// constructor runs with collection switched off — see
+/// [`without_like_term_collection`](crate::normalize::without_like_term_collection)
+/// for exactly what that does and does not suppress.
 pub fn evaluate_numbers(e: &Expr) -> Expr {
-    present(&canonicalize(e))
+    crate::normalize::without_like_term_collection(|| present(&canonicalize(e)))
 }
 
 /// Cancel common polynomial factors in fractions — the port of
@@ -29,9 +38,31 @@ pub fn reduce_rational(e: &Expr) -> Expr {
     present(&canonicalize(&reduce_node(&canon)))
 }
 
+/// The spelling a value computed from `e` should read back with: `Decimal` as
+/// soon as any number in `e` is decimal, `Fraction` otherwise. The polynomial
+/// layer works in `BigRational`, which carries no spelling, so a pass that
+/// round-trips through it has to restore one — otherwise
+/// `(1.5x + 1.5)/(x + 1)` reduces to `3/2` instead of `1.5`.
+fn spelling_of(e: &Expr) -> Spelling {
+    match e {
+        Expr::Num(n) => n.spelling(),
+        _ => e
+            .children()
+            .into_iter()
+            .fold(Spelling::Fraction, |acc, c| acc.join(spelling_of(c))),
+    }
+}
+
+/// `e` with every number re-spelled. Sound only alongside [`spelling_of`],
+/// which is why the two are used as a pair.
+fn respell(e: &Expr, spelling: Spelling) -> Expr {
+    map_numbers(e, &|n| n.with_spelling(spelling))
+}
+
 fn reduce_node(e: &Expr) -> Expr {
     let e = map_children(e, reduce_node);
     let Expr::Mul(factors) = &e else { return e };
+    let spelling = spelling_of(&e);
 
     // Split canonical `Mul` factors into numerator parts and denominator
     // bases: a factor `Pow(b, −k)` (integer k>0) contributes `b^k` below.
@@ -89,9 +120,12 @@ fn reduce_node(e: &Expr) -> Expr {
     // numerator, so `(2x+4)/2` comes out as `x+2` rather than `½·(2x+4)`.
     let (cn, qn) = crate::polynomials::strip_rational_content(&qn);
     let (cd, qd) = crate::polynomials::strip_rational_content(&qd);
-    let scalar = Expr::Num(Number::from_bigrational(cn / cd));
-    let new_num = crate::normalize::mul(vec![scalar, crate::polynomials::poly_to_expr(&qn, &vars)]);
-    let new_den = crate::polynomials::poly_to_expr(&qd, &vars);
+    let scalar = Expr::Num(Number::from_bigrational_spelled(cn / cd, spelling));
+    let new_num = crate::normalize::mul(vec![
+        scalar,
+        respell(&crate::polynomials::poly_to_expr(&qn, &vars), spelling),
+    ]);
+    let new_den = respell(&crate::polynomials::poly_to_expr(&qd, &vars), spelling);
     canonicalize(&Expr::Div(Box::new(new_num), Box::new(new_den)))
 }
 

@@ -309,12 +309,10 @@ mod tests {
         assert_eq!(run("2^3+x"), r#"["+",8,"x"]"#);
         assert_eq!(run("2^(1/2)+x"), r#"["+",["^",2,["/",1,2]],"x"]"#);
         assert_eq!(run("x/2/3"), r#"["/",["/","x",2],3]"#);
-        // Outside an exponent an exact rational stays a plain number, so this
-        // is `0.5` where legacy spells `["/",1,2]`. That is the engine-wide
-        // convention, not something this pass chooses: the canonical
-        // `evaluate_numbers` gives `["+","x",0.5]` for the same input, and only
-        // the operand *order* differs between the two passes.
-        assert_eq!(run("2/4+x"), r#"["+",0.5,"x"]"#);
+        // A fraction of integers reads back as a fraction, matching legacy —
+        // the spelling is carried on the value (`num::Spelling`), so it
+        // survives the fold rather than depending on which pass produced it.
+        assert_eq!(run("2/4+x"), r#"["+",["/",1,2],"x"]"#);
         assert_eq!(run("x+1/2+1/2"), r#"["+","x",1]"#);
         assert_eq!(run("2*3+4*5"), "26");
         assert_eq!(run("1+2*3+4"), "11");

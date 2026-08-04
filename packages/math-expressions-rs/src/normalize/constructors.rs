@@ -5,6 +5,45 @@
 use super::{cmp, identity_matrix, is_matrix_valued, matmul_literal};
 use crate::expr::Expr;
 use crate::num::Number;
+use std::cell::Cell;
+
+thread_local! {
+    /// See [`without_like_term_collection`]. Ambient rather than a parameter
+    /// because `add` is reached from every level of `canonicalize`'s recursion
+    /// and from `mul`/`pow`; the same reasoning (and the same `Cell`/restore
+    /// shape) as [`crate::resource_limits`].
+    static COLLECT_LIKE_TERMS: Cell<bool> = const { Cell::new(true) };
+}
+
+/// Run `f` with like-*term* collection in [`add`] switched off, so `x + 3x`
+/// stays two summands instead of becoming `4x`.
+///
+/// This exists for one caller: [`evaluate_numbers`], which backs DoenetML's
+/// `simplify="numbers"` — specified as "fold numeric constants, leave the
+/// symbolic structure alone". Collecting like terms is a correct
+/// simplification but not a *numeric* one, and doing it here made
+/// `simplify="numbers"` indistinguishable from `simplify="full"`.
+///
+/// Only sums are affected. Like *powers* in [`mul`] still combine, because the
+/// legacy oracle requires it: `i·i` must fold to `−1`, which is that same
+/// merge (`i^1 · i^1 → i^2 → −1`).
+///
+/// Terms that cancel to zero still collapse even when this is off — `3x − 3x`
+/// is `0`, not two surviving summands. That is the additive-inverse identity
+/// rather than a shortening rewrite, and dropping it would make
+/// `evaluate_numbers` unable to see a zero it is asked about (`(3x−3x)^0`).
+///
+/// [`evaluate_numbers`]: crate::evaluate_numbers
+pub(crate) fn without_like_term_collection<R>(f: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            COLLECT_LIKE_TERMS.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(COLLECT_LIKE_TERMS.with(|c| c.replace(false)));
+    f()
+}
 
 /// Build a canonical sum from canonical terms: flatten, fold the numeric part
 /// exactly, combine like terms (`3x + 2x → 5x`), drop zeros, sort. Literal
@@ -20,8 +59,11 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
     }
 
     let mut constant = Number::zero();
-    // (rest, coefficient) for each distinct non-constant term.
-    let mut parts: Vec<(Expr, Number)> = Vec::new();
+    // (rest, summed coefficient, the coefficients as written) for each distinct
+    // non-constant term. The third field only matters under
+    // `without_like_term_collection`, which re-emits the summands separately
+    // unless they cancel — see there for why the sum is still tracked.
+    let mut parts: Vec<(Expr, Number, Vec<Number>)> = Vec::new();
     // Entrywise accumulation per matrix dimension: (rows, cols, per-entry terms).
     let mut mats: Vec<(u32, u32, Vec<Vec<Expr>>)> = Vec::new();
     for t in flat {
@@ -48,10 +90,15 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
             // `±x + ±x` has value set {2x, 0, −2x} whereas `2·±x` has {2x, −2x},
             // so coalescing like terms would tie the two sign choices together.
             // Keep every pm-bearing term as its own summand (JS `noPmBase`).
-            Some(r) if crate::ops::pm::contains_pm(&r) => parts.push((r, coeff)),
-            Some(r) => match parts.iter_mut().find(|(k, _)| *k == r) {
-                Some(slot) => slot.1 = slot.1.add(&coeff),
-                None => parts.push((r, coeff)),
+            Some(r) if crate::ops::pm::contains_pm(&r) => {
+                parts.push((r, coeff.clone(), vec![coeff]))
+            }
+            Some(r) => match parts.iter_mut().find(|(k, _, _)| *k == r) {
+                Some(slot) => {
+                    slot.1 = slot.1.add(&coeff);
+                    slot.2.push(coeff);
+                }
+                None => parts.push((r, coeff.clone(), vec![coeff])),
             },
         }
     }
@@ -67,11 +114,22 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
     if !constant.is_zero() {
         out.push(Expr::Num(constant));
     }
-    for (rest, coeff) in parts {
-        if coeff.is_zero() {
+    let collect = COLLECT_LIKE_TERMS.with(Cell::get);
+    for (rest, total, coeffs) in parts {
+        // A term whose coefficients cancel disappears either way.
+        if total.is_zero() {
             continue;
         }
-        out.push(mul(vec![Expr::Num(coeff), rest]));
+        if collect || coeffs.len() == 1 {
+            out.push(mul(vec![Expr::Num(total), rest]));
+            continue;
+        }
+        for c in coeffs {
+            if c.is_zero() {
+                continue; // `0·x²` was written but contributes nothing to read
+            }
+            out.push(mul(vec![Expr::Num(c), rest.clone()]));
+        }
     }
     out.sort_by(cmp);
     match out.len() {

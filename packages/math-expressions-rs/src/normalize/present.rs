@@ -34,11 +34,9 @@ pub(crate) fn present(e: &Expr) -> Expr {
     }
 }
 
-/// Present an exponent. A non-integer exact rational exponent displays as a
-/// fraction — `x^(3/2)`, not the renderer's terminating-decimal `x^1.5`.
-/// Only exponents get this: elsewhere a rational either joins a fraction bar
-/// (`present_mul`) or stays a plain number so exact decimal folds still
-/// render as decimals (`0.1 + 0.2 → 0.3`).
+/// Present an exponent. A fraction-spelled non-integer exponent displays as a
+/// fraction — `x^(3/2)` — while a decimal-spelled one stays a plain number,
+/// `x^1.5`. `split_number` applies that gate for every caller here.
 fn present_exponent(x: &Expr) -> Expr {
     if let Expr::Num(n) = x {
         let (neg, num, den) = split_number(n);
@@ -168,15 +166,25 @@ fn assemble(coeff: Number, factors: Vec<Expr>) -> Expr {
     }
 }
 
-/// `n` as (is_negative, |numerator|, denominator). Floats and integers have
-/// denominator 1; exact rationals split across the fraction bar.
+/// `n` as (is_negative, |numerator|, denominator). Denominator 1 means "do not
+/// put this under a fraction bar": floats, integers, and — the reason the
+/// spelling is tracked at all — any rational that *displays* as a decimal.
+///
+/// Without that last case a decimal coefficient was silently rewritten into a
+/// fraction: `0.5·x` presented as `Div(x, 2)`, which both read wrong and, once
+/// the tree was re-canonicalized, left two plain integers behind with the
+/// decimal origin gone for good. `0.5^2` came back as `1/4` for exactly that
+/// reason, several passes downstream of anything that looked responsible.
 pub(crate) fn split_number(n: &Number) -> (bool, Number, Number) {
     let neg = n.is_negative();
     let a = n.abs();
+    if a.decimal_spelling().is_some() {
+        return (neg, a, Number::Int(1));
+    }
     match &a {
-        Number::Rat(p, q) => (neg, Number::Int(*p), Number::Int(*q)),
+        Number::Rat(p, q, _) => (neg, Number::Int(*p), Number::Int(*q)),
         Number::Big(b) => match &**b {
-            BigNumber::Rat(r) => (
+            BigNumber::Rat(r, _) => (
                 neg,
                 Number::from_bigint(r.numer().clone()),
                 Number::from_bigint(r.denom().clone()),

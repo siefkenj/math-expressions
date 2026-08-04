@@ -47,7 +47,7 @@ fn root_of(e: &Expr) -> Option<Root<'_>> {
 fn unit_root_exponent(exp: &Expr) -> Option<(u32, bool)> {
     match exp {
         Expr::Neg(x) => unit_root_exponent(x).map(|(m, neg)| (m, !neg)),
-        Expr::Num(crate::num::Number::Rat(n, d)) => unit_from(*n, *d),
+        Expr::Num(crate::num::Number::Rat(n, d, _)) => unit_from(*n, *d),
         Expr::Div(a, b) => unit_from(as_int(a)?, as_int(b)?),
         _ => None,
     }

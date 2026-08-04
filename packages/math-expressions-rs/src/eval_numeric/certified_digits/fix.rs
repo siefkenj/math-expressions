@@ -117,10 +117,10 @@ impl MpFix {
     pub fn from_number(n: &Number, scale: i32) -> Option<MpFix> {
         let (p, q): (BigInt, BigInt) = match n {
             Number::Int(i) => (BigInt::from(*i), BigInt::from(1)),
-            Number::Rat(a, b) => (BigInt::from(*a), BigInt::from(*b)),
+            Number::Rat(a, b, _) => (BigInt::from(*a), BigInt::from(*b)),
             Number::Big(b) => match &**b {
                 BigNumber::Int(i) => (i.clone(), BigInt::from(1)),
-                BigNumber::Rat(r) => (r.numer().clone(), r.denom().clone()),
+                BigNumber::Rat(r, _) => (r.numer().clone(), r.denom().clone()),
             },
             Number::Float(f) => {
                 let v = f.get();
