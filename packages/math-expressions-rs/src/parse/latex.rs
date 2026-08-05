@@ -616,13 +616,27 @@ impl LatexToAst {
                 result = Expr::Apply(Box::new(result), vec![Expr::Blank]);
             }
         } else {
+            // Prime/caret runs on a function symbol (`\sin''`, `\sin^2^2…`)
+            // each wrap `result` one level deeper. Like the shared postfix
+            // loop, charge that growth against `MAX_PARSE_DEPTH` so a long run
+            // errors cleanly rather than building a spine that overflows a
+            // later recursive pass (and traps the wasm instance).
+            let mut nesting = 0usize;
             while self.token.ttype == Tok::Prime {
                 self.tick()?;
+                nesting += 1;
+                if self.depth + nesting > MAX_PARSE_DEPTH {
+                    return Err(self.err("Expression too deeply nested"));
+                }
                 result = Expr::Prime(Box::new(result));
                 self.advance()?;
             }
             while self.token.ttype == Tok::Caret {
                 self.tick()?;
+                nesting += 1;
+                if self.depth + nesting > MAX_PARSE_DEPTH {
+                    return Err(self.err("Expression too deeply nested"));
+                }
                 self.advance()?;
                 let superscript = self.get_subsuperscript(P {
                     parse_absolute_value: p.parse_absolute_value,

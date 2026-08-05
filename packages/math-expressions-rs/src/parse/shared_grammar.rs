@@ -480,9 +480,22 @@ macro_rules! shared_grammar_methods {
         fn non_minus_factor(&mut self, p: P) -> R<Option<Expr>> {
             let mut result = self.base_factor(p)?;
 
-            // allow arbitrary sequence of exponents, factorials, primes
+            // allow arbitrary sequence of exponents, factorials, primes.
+            // Each iteration wraps `result` one level deeper (`x^a^b`, `x!!!`,
+            // `x'''`), so — unlike a flat list-building loop — it grows AST
+            // depth. `tick()` alone (a 5M step budget) would let it build a
+            // spine thousands deep that a later recursive pass (Drop, output)
+            // overflows on wasm. Charge each level against the same
+            // `MAX_PARSE_DEPTH` budget the recursive descent uses, so a caret/
+            // factorial/prime run errors cleanly instead of trapping the wasm
+            // instance. `self.depth` already reflects the enclosing recursion.
+            let mut nesting = 0usize;
             while matches!(self.token.ttype, Tok::Caret | Tok::Bang | Tok::Prime) {
                 self.tick()?;
+                nesting += 1;
+                if self.depth + nesting > MAX_PARSE_DEPTH {
+                    return Err(self.err("Expression too deeply nested"));
+                }
                 let r = result.take().unwrap_or(Expr::Blank);
                 result = Some(match self.token.ttype {
                     Tok::Caret => {
