@@ -53,6 +53,9 @@ pub fn evaluate_to_constant(e: &Expr) -> Option<Complex64> {
     if let Some(v) = signed_infinity(&simplified) {
         return Some(Complex64::new(v, 0.0));
     }
+    if is_nan_constant(&simplified) {
+        return Some(Complex64::new(f64::NAN, 0.0));
+    }
     finite(eval_complex(&simplified, &Env::new())?)
 }
 
@@ -70,6 +73,27 @@ fn signed_infinity(e: &Expr) -> Option<f64> {
         Expr::Const(crate::expr::MathConst::NegInf) => Some(f64::NEG_INFINITY),
         Expr::Neg(x) => signed_infinity(x).map(|v| -v),
         _ => None,
+    }
+}
+
+/// Whether simplification *proved* the value is NaN (`0/0`, `∞ − ∞`).
+///
+/// This is a value, not a failure to decide, and is reported as one for the
+/// same reason [`signed_infinity`] is: `None` crosses to JS as `null`, and
+/// `Math.abs(null)` is `0`, so an undefined intercept would read as the origin
+/// — a real point — instead of as no value at all.
+///
+/// Read from the *simplified tree*, deliberately, and not by relaxing
+/// [`finite`]. A NaN that simplification derived is a conclusion; a NaN that
+/// falls out of [`eval_complex`] may only mean the sampler could not evaluate
+/// there, and returning that as a value would turn "cannot decide" into a
+/// confident wrong answer. The undecidable cases — free variables, and the
+/// holes rejected by [`has_undefined_leaf`] — still return `None`.
+fn is_nan_constant(e: &Expr) -> bool {
+    match e {
+        Expr::Const(crate::expr::MathConst::NaN) => true,
+        Expr::Neg(x) => is_nan_constant(x),
+        _ => false,
     }
 }
 
@@ -131,12 +155,39 @@ mod tests {
         assert_eq!(evaluate_to_constant(&p("1/Infinity")).unwrap().re, 0.0);
     }
 
-    /// What stays `None` is what is genuinely undecided — an indeterminate
-    /// form is not a number, and must not come back as one.
+    /// An indeterminate form *evaluates* — to NaN — and is reported as that
+    /// value, for the same reason `±∞` is: `None` crosses to JS as `null`, and
+    /// `Math.abs(null)` is `0`, so an undefined result would read as a real
+    /// point at the origin rather than as no value.
     #[test]
-    fn indeterminate_forms_still_decline() {
-        assert_eq!(evaluate_to_constant(&p("Infinity-Infinity")), None);
-        assert_eq!(evaluate_to_constant(&p("0/0")), None);
-        assert_eq!(evaluate_to_constant(&p("NaN")), None);
+    fn indeterminate_forms_evaluate_to_nan() {
+        // No text spelling for NaN — `"NaN"` parses as the product `N·a·N` —
+        // so these are reached through the arithmetic, which is how DoenetML
+        // reaches them too.
+        for s in [
+            "0/0",
+            "Infinity-Infinity",
+            "-Infinity+Infinity",
+            "0*Infinity",
+            "Infinity/Infinity",
+            "0^0",
+            "Infinity^0",
+            "1^Infinity",
+        ] {
+            assert!(
+                evaluate_to_constant(&p(s)).is_some_and(|c| c.re.is_nan()),
+                "{s} should evaluate to NaN, got {:?}",
+                evaluate_to_constant(&p(s)).map(|c| c.re)
+            );
+        }
+    }
+
+    /// What stays `None` is what is genuinely *undecided* rather than computed:
+    /// a free variable, and the holes `has_undefined_leaf` rejects. This is the
+    /// line [`is_nan_constant`] must not cross.
+    #[test]
+    fn undecidable_values_still_decline() {
+        assert_eq!(evaluate_to_constant(&p("x")), None);
+        assert_eq!(evaluate_to_constant(&p("x-x+1")), None);
     }
 }

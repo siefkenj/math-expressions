@@ -111,3 +111,119 @@ pub fn desugar_units(e: &Expr) -> Expr {
     }
     crate::expr::map_children(e, desugar_units)
 }
+
+/// The `["unit", …]` node for `value` in `unit`, in the operand order the
+/// parsers use: `$` is a prefix (`["unit","$",v]`), `%`/`deg` are postfix
+/// (`["unit",v,"%"]`). Round-trips [`unit_parts`], which reads either order.
+fn make_unit(unit: &Expr, value: Expr) -> Expr {
+    let args = if matches!(unit, Expr::Sym(s) if s.name() == "$") {
+        vec![unit.clone(), value]
+    } else {
+        vec![value, unit.clone()]
+    };
+    Expr::OtherOp(crate::Sym::new("unit"), args)
+}
+
+/// Read a term as a scaling-unit quantity: `(unit symbol, value)`.
+///
+/// Sees through the two shapes canonicalization produces around a unit — a
+/// negation (`−(270 deg)`) and a product with scalar factors (`50% · 5`,
+/// `$12/4`, which is `$12 · 4⁻¹`) — folding those factors into the value. A
+/// product with *two* unit factors is not a scaling quantity (`$2 · $3` has no
+/// meaning here) and returns `None`.
+fn as_unit_quantity(e: &Expr) -> Option<(Expr, Expr)> {
+    match e {
+        Expr::OtherOp(name, args) if name.name() == "unit" => {
+            let (unit, value) = unit_parts(args)?;
+            Some((unit.clone(), value.clone()))
+        }
+        Expr::Neg(x) => {
+            let (unit, value) = as_unit_quantity(x)?;
+            Some((unit, Expr::Neg(Box::new(value))))
+        }
+        Expr::Mul(factors) => {
+            let mut found: Option<(Expr, Expr)> = None;
+            let mut rest = Vec::new();
+            for f in factors {
+                match (as_unit_quantity(f), &found) {
+                    // A second unit factor: not a single scaling quantity.
+                    (Some(_), Some(_)) => return None,
+                    (Some(uv), None) => found = Some(uv),
+                    (None, _) => rest.push(f.clone()),
+                }
+            }
+            let (unit, value) = found?;
+            if rest.is_empty() {
+                return Some((unit, value));
+            }
+            rest.push(value);
+            Some((unit, Expr::Mul(rest)))
+        }
+        _ => None,
+    }
+}
+
+/// Combine like scaling units and absorb scalar factors into a unit, so
+/// `simplify` folds unit arithmetic the way `equals` already evaluates it:
+/// `$3 + $2 → $5`, `50% · 5 → 250%`, `$12/4 → $3`, `360 deg − 270 deg → 90 deg`.
+///
+/// Two boundaries are deliberate, because crossing either would assert
+/// something false:
+/// - **unlike units never combine** (`$3 + 2 deg` is left alone) — there is no
+///   conversion between these, only the shared *scaling* shape;
+/// - **a unit never combines with a bare scalar** (`$3 + 2`), which is why the
+///   grouping requires two terms of the *same* unit before it rewrites
+///   anything.
+///
+/// Only `+` and `·` are folded. The result is canonical because every value it
+/// builds goes back through the smart constructors.
+pub(crate) fn fold_units(e: &Expr) -> Expr {
+    let e = crate::expr::map_children(e, fold_units);
+    match &e {
+        Expr::Add(terms) => {
+            // Group by unit symbol, preserving first-seen order.
+            let mut groups: Vec<(Expr, Vec<Expr>)> = Vec::new();
+            let mut others: Vec<Expr> = Vec::new();
+            for t in terms {
+                match as_unit_quantity(t) {
+                    Some((unit, value)) => {
+                        match groups.iter_mut().find(|(u, _)| *u == unit) {
+                            Some((_, vs)) => vs.push(value),
+                            None => groups.push((unit, vec![value])),
+                        }
+                    }
+                    None => others.push(t.clone()),
+                }
+            }
+            // Nothing to combine: return the node untouched rather than a
+            // rebuilt-but-equal one, so a lone unit keeps its original form.
+            if !groups.iter().any(|(_, vs)| vs.len() > 1) {
+                return e;
+            }
+            let mut out = others;
+            for (unit, values) in groups {
+                let value = if values.len() == 1 {
+                    values.into_iter().next().expect("len checked")
+                } else {
+                    super::add(values)
+                };
+                out.push(make_unit(&unit, value));
+            }
+            super::add(out)
+        }
+        Expr::Mul(_) => match as_unit_quantity(&e) {
+            // `as_unit_quantity` already folded the scalar factors into the
+            // value; rebuild only when it actually absorbed something.
+            Some((unit, value)) => {
+                let folded = make_unit(&unit, super::canonicalize(&value));
+                if folded == e {
+                    e
+                } else {
+                    folded
+                }
+            }
+            None => e,
+        },
+        _ => e,
+    }
+}

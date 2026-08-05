@@ -58,6 +58,78 @@ pub fn match_template(tree_json: &str, pattern_json: &str) -> Option<String> {
         .map(|m| serde_json::Value::Object(m).to_string())
 }
 
+/// [`match_template`] with the JS `match` options honored.
+///
+/// `options_json` keys, all optional:
+/// - `variables`: object mapping each declared parameter to its kind —
+///   `true`/`"any"`, `"number"`, or `"variable"`. **Present and empty means no
+///   parameters**, so nothing binds; absent keeps the legacy default where
+///   every string leaf in the pattern is a wildcard.
+/// - `allow_permutations`: match `+`/`*` operands in any order.
+/// - `allow_implicit_identities`: array of parameter names that may take the
+///   operator's identity when the tree has no operand for them.
+///
+/// Malformed JSON is an error rather than a silent fall-back to the defaults,
+/// for the same reason it is on the equality entry points: a match that
+/// silently ignored its parameter list produced confidently wrong bindings.
+#[wasm_bindgen]
+pub fn match_template_with_options(
+    tree_json: &str,
+    pattern_json: &str,
+    options_json: &str,
+) -> Result<Option<String>, JsError> {
+    let tree: serde_json::Value =
+        serde_json::from_str(tree_json).map_err(|e| JsError::new(&e.to_string()))?;
+    let pattern: serde_json::Value =
+        serde_json::from_str(pattern_json).map_err(|e| JsError::new(&e.to_string()))?;
+    let v: serde_json::Value =
+        serde_json::from_str(options_json).map_err(|e| JsError::new(&e.to_string()))?;
+
+    let mut opts = crate::js_match::MatchOptions::default();
+    if let Some(vars) = v.get("variables").and_then(|x| x.as_object()) {
+        let mut declared = std::collections::HashMap::new();
+        for (name, kind) in vars {
+            let kind = match kind {
+                serde_json::Value::String(s) => match s.as_str() {
+                    "number" => crate::js_match::VarKind::Number,
+                    "variable" => crate::js_match::VarKind::Variable,
+                    "any" => crate::js_match::VarKind::Any,
+                    other => {
+                        return Err(JsError::new(&format!(
+                            "match: unknown parameter kind {other:?} for {name:?} \
+                             (expected \"number\", \"variable\", \"any\", or true)"
+                        )))
+                    }
+                },
+                // `true` is the legacy "any subtree"; `false` declares the name
+                // and then admits nothing, which is never what a caller means.
+                serde_json::Value::Bool(true) => crate::js_match::VarKind::Any,
+                other => {
+                    return Err(JsError::new(&format!(
+                        "match: invalid parameter kind {other} for {name:?}"
+                    )))
+                }
+            };
+            declared.insert(name.clone(), kind);
+        }
+        opts.variables = Some(declared);
+    }
+    if let Some(b) = v.get("allow_permutations").and_then(|x| x.as_bool()) {
+        opts.allow_permutations = b;
+    }
+    if let Some(names) = v.get("allow_implicit_identities").and_then(|x| x.as_array()) {
+        opts.implicit_identities = names
+            .iter()
+            .filter_map(|n| n.as_str().map(str::to_string))
+            .collect();
+    }
+
+    Ok(
+        crate::js_match::match_template_with_options(&tree, &pattern, &opts)
+            .map(|m| serde_json::Value::Object(m).to_string()),
+    )
+}
+
 /// `me.utils.flatten` on a JS-tree AST (JSON in, JSON out).
 #[wasm_bindgen]
 pub fn flatten_ast(tree_json: &str) -> Option<String> {

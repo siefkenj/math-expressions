@@ -49,4 +49,4 @@ pub(crate) use constructors::{add, mul, pow, split_coeff, without_like_term_coll
 pub(crate) use full::full_simplify;
 pub(crate) use matrix_ops::{identity_matrix, is_matrix_valued, matmul_literal};
 pub use units::desugar_units;
-pub(crate) use units::unit_body;
+pub(crate) use units::{fold_units, unit_body};

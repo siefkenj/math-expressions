@@ -26,6 +26,23 @@ pub fn evaluate_numbers(e: &Expr) -> Expr {
     crate::normalize::without_like_term_collection(|| present(&canonicalize(e)))
 }
 
+/// [`evaluate_numbers`] plus the special-value folds, so a function applied to
+/// a numeric argument evaluates: `sin(0) + 2` → `2`. This is the
+/// `evaluate_functions` option of the JS `evaluate_numbers`, and what
+/// DoenetML's `simplify="full"` needs.
+///
+/// Only [`fold_special_values`](crate::normalize::fold_special_values) is
+/// added, so every fold here is an exact identity — no float fallback, and
+/// nothing folds that was not already true. Like-term collection stays
+/// suppressed for the same reason [`evaluate_numbers`] suppresses it: the
+/// difference between this and plain `evaluate_numbers` should be function
+/// evaluation and nothing else.
+pub fn evaluate_numbers_evaluate_functions(e: &Expr) -> Expr {
+    crate::normalize::without_like_term_collection(|| {
+        present(&crate::normalize::fold_special_values(e))
+    })
+}
+
 /// Cancel common polynomial factors in fractions — the port of
 /// `me.reduce_rational` (`(x²−1)/(x−1)` → `x+1`, `(x²−5x+6)/(x²−4)` →
 /// `(x−3)/(x+2)`, multivariate included). Applied bottom-up at every node;

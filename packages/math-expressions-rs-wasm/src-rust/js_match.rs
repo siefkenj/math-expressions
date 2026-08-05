@@ -1,6 +1,9 @@
 //! Template matching on JS trees — the port of `me.utils.match`
-//! (`lib/trees/basic.js` `match`) in its **default mode**, which is the only
-//! mode Doenet uses (`match(tree, template)` with no params):
+//! (`lib/trees/basic.js` `match`). [`match_template`] is the **default mode**
+//! (`match(tree, template)` with no params); [`match_template_with_options`]
+//! adds the params Doenet passes.
+//!
+//! Default mode:
 //!
 //! - operators and numbers must match exactly;
 //! - every variable (string leaf) appearing in the pattern is a wildcard
@@ -13,19 +16,23 @@
 //! - a unary minus of a product matches a `*` pattern with the minus moved
 //!   onto the first factor (the JS special case).
 //!
-//! Not ported (never used by Doenet, all opt-in params in JS):
-//! `allow_permutations`, `allow_extended_match`, `allow_implicit_identities`,
-//! regex/function wildcard conditions. Binding consistency uses structural
-//! JSON equality where the JS uses its syntactic `equal` — stricter in
-//! corner cases (e.g. `1` vs `1.0` differ only in JS number spelling, which
-//! JSON round-tripping already collapses).
+//! [`MatchOptions`] adds the three params Doenet does use: `variables` (which
+//! names are placeholders, and what each may bind), `allow_permutations`, and
+//! `allow_implicit_identities`. `variables` is declarative rather than the JS
+//! predicate functions, which cannot cross the wasm boundary — see
+//! [`VarKind`].
+//!
+//! Still not ported: `allow_extended_match`, and regex wildcard conditions.
+//! Binding consistency uses structural JSON equality where the JS uses its
+//! syntactic `equal` — stricter in corner cases (e.g. `1` vs `1.0` differ only
+//! in JS number spelling, which JSON round-tripping already collapses).
 //!
 //! Operates on `serde_json::Value` JS trees (not `Expr`): Doenet passes raw
 //! ASTs and consumes raw subtree bindings, and converting through the
 //! canonical layer would change the trees being matched.
 
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Is this operator associative in the JS tree sense (`flatten.is_associative`)?
 fn is_associative(op: &str) -> bool {
@@ -80,24 +87,120 @@ fn pattern_variables(pattern: &Value, out: &mut HashSet<String>) {
     }
 }
 
+/// What a declared parameter is allowed to bind.
+///
+/// The JS API passes predicates (`m => typeof m === "number"`), which cannot
+/// cross the wasm boundary; these are the three DoenetML actually uses,
+/// declared instead of computed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum VarKind {
+    /// Any subtree (JS `true`).
+    #[default]
+    Any,
+    /// Must evaluate to a real numeric constant — DoenetML's
+    /// `requireNumericMatches`. `π` and `√3` qualify; `a` and `x+1` do not.
+    Number,
+    /// Must be a bare variable, i.e. a string leaf — DoenetML's
+    /// `requireVariableMatches`. `x` qualifies; `x+x` does not.
+    Variable,
+}
+
+/// Options for [`match_template_with_options`].
+#[derive(Clone, Debug, Default)]
+pub struct MatchOptions {
+    /// Declared parameters and their kinds. `None` keeps the legacy default,
+    /// where *every* string leaf in the pattern is a wildcard. `Some(map)`
+    /// means only these names bind and every other leaf is a literal — so an
+    /// empty map declares no placeholders and only an exact match succeeds.
+    pub variables: Option<HashMap<String, VarKind>>,
+    /// Match operands of `+` and `*` in any order.
+    pub allow_permutations: bool,
+    /// Parameters that may bind the operator's identity (`0` for `+`, `1` for
+    /// `*`) when the tree has no operand for them, so `a x + b` matches `x`
+    /// with `a = 1`, `b = 0`.
+    pub implicit_identities: HashSet<String>,
+}
+
+/// Everything the recursion needs: the declared wildcards and the two flags.
+struct Ctx {
+    wildcards: HashMap<String, VarKind>,
+    allow_permutations: bool,
+    implicit_identities: HashSet<String>,
+}
+
+impl Ctx {
+    fn kind_of(&self, name: &str) -> Option<VarKind> {
+        self.wildcards.get(name).copied()
+    }
+    fn is_implicit(&self, pattern: &Value) -> bool {
+        matches!(pattern, Value::String(s)
+            if self.implicit_identities.contains(s) && self.wildcards.contains_key(s))
+    }
+}
+
 /// Attempt to match `tree` against `pattern` (default mode — see module
 /// docs). `Some(bindings)` maps each pattern wildcard to the subtree it
 /// bound; `None` means no match. An exact variable-free match yields an
 /// empty map.
 pub fn match_template(tree: &Value, pattern: &Value) -> Option<Map<String, Value>> {
-    let mut wildcards = HashSet::new();
-    pattern_variables(pattern, &mut wildcards);
-    match_inner(tree, pattern, &wildcards)
+    match_template_with_options(tree, pattern, &MatchOptions::default())
 }
 
-fn match_inner(
+/// [`match_template`] with the JS `match` options honored rather than dropped.
+pub fn match_template_with_options(
     tree: &Value,
     pattern: &Value,
-    wildcards: &HashSet<String>,
+    opts: &MatchOptions,
 ) -> Option<Map<String, Value>> {
-    // A wildcard binds the whole tree.
+    let wildcards = match &opts.variables {
+        Some(declared) => declared.clone(),
+        None => {
+            let mut names = HashSet::new();
+            pattern_variables(pattern, &mut names);
+            names.into_iter().map(|n| (n, VarKind::Any)).collect()
+        }
+    };
+    let ctx = Ctx {
+        wildcards,
+        allow_permutations: opts.allow_permutations,
+        implicit_identities: opts.implicit_identities.clone(),
+    };
+    match_inner(tree, pattern, &ctx)
+}
+
+/// Does `tree` satisfy the declared kind for a parameter?
+fn kind_admits(kind: VarKind, tree: &Value) -> bool {
+    match kind {
+        VarKind::Any => true,
+        VarKind::Variable => tree.is_string(),
+        // Mirrors DoenetML's `isNumericConstant(fromAst(m).evaluate_to_constant())`:
+        // a real constant that is not NaN. `evaluate_to_constant` reports a
+        // *proven* NaN as a value, so NaN is excluded explicitly rather than by
+        // the `None` case.
+        VarKind::Number => math_expressions::expr::serde::try_from_js(tree)
+            .ok()
+            .and_then(|e| math_expressions::evaluate_to_constant(&e))
+            .is_some_and(|c| !c.re.is_nan() && c.im == 0.0),
+    }
+}
+
+/// The identity element of an associative operator, for implicit-identity
+/// binding: `0` for `+`, `1` for `*`.
+fn identity_of(op: &str) -> Option<Value> {
+    match op {
+        "+" => Some(Value::Number(0.into())),
+        "*" => Some(Value::Number(1.into())),
+        _ => None,
+    }
+}
+
+fn match_inner(tree: &Value, pattern: &Value, ctx: &Ctx) -> Option<Map<String, Value>> {
+    // A wildcard binds the whole tree, provided its declared kind admits it.
     if let Value::String(name) = pattern {
-        if wildcards.contains(name) {
+        if let Some(kind) = ctx.kind_of(name) {
+            if !kind_admits(kind, tree) {
+                return None;
+            }
             let mut m = Map::new();
             m.insert(name.clone(), tree.clone());
             return Some(m);
@@ -141,42 +244,100 @@ fn match_inner(
             }
         }
     }
-    if neg_first.is_none() && (!matches_shape || tree_operands.len() < pattern_operands.len()) {
-        return None;
+    // With implicit identities on, a pattern operand may take the operator's
+    // identity instead of a tree operand. That makes a tree which is not a
+    // `+`/`*` at all still matchable — `x` against `a x + b` is the whole tree
+    // as the single summand, with `b` taking the `0` — so the arity checks
+    // below have to let those through rather than bail early.
+    let can_implicit =
+        identity_of(op).is_some() && pattern_operands.iter().any(|p| ctx.is_implicit(p));
+    if neg_first.is_none() {
+        if !matches_shape {
+            if !can_implicit {
+                return None;
+            }
+            tree_operands.push(tree);
+        }
+        if tree_operands.len() < pattern_operands.len() && !can_implicit {
+            return None;
+        }
     }
+
+    // Materialize the operands once so a permutation can reorder them.
     let owned_first = neg_first;
-    let operand_at = |i: usize| -> &Value {
-        match (&owned_first, i) {
+    let operands: Vec<&Value> = (0..tree_operands.len())
+        .map(|i| match (&owned_first, i) {
             (Some(v), 0) => v,
             _ => tree_operands[i],
-        }
-    };
+        })
+        .collect();
 
-    match_operands(op, &tree_operands, operand_at, pattern_operands, wildcards)
+    // Permutations are for the commutative operators only. The count is the
+    // *tree's* operand count, so it is bounded before it is enumerated;
+    // above the cap the in-order match stands rather than the match silently
+    // becoming a very slow one.
+    if ctx.allow_permutations
+        && matches!(op, "+" | "*")
+        && (2..=MAX_PERMUTED_OPERANDS).contains(&operands.len())
+    {
+        for order in permutations(operands.len()) {
+            let permuted: Vec<&Value> = order.iter().map(|&i| operands[i]).collect();
+            if let Some(m) = match_operands(op, &permuted, pattern_operands, ctx) {
+                return Some(m);
+            }
+        }
+        return None;
+    }
+
+    match_operands(op, &operands, pattern_operands, ctx)
+}
+
+/// Cap on how many tree operands will be permuted. `8! = 40_320` orderings is
+/// the most we will enumerate for one node; DoenetML's patterns are two or
+/// three operands wide, so this is far above real use and only bounds the
+/// pathological case.
+const MAX_PERMUTED_OPERANDS: usize = 8;
+
+/// All orderings of `0..n`, in lexicographic order.
+fn permutations(n: usize) -> Vec<Vec<usize>> {
+    let mut out = Vec::new();
+    let mut cur: Vec<usize> = (0..n).collect();
+    let mut used = vec![false; n];
+    fn go(n: usize, used: &mut Vec<bool>, cur: &mut Vec<usize>, depth: usize, out: &mut Vec<Vec<usize>>) {
+        if depth == n {
+            out.push(cur.clone());
+            return;
+        }
+        for i in 0..n {
+            if used[i] {
+                continue;
+            }
+            used[i] = true;
+            cur[depth] = i;
+            go(n, used, cur, depth + 1, out);
+            used[i] = false;
+        }
+    }
+    go(n, &mut used, &mut cur, 0, &mut out);
+    out
 }
 
 /// Sequential operand matching with grouping (the JS default path of
 /// `matchOperands`): pattern operand `i` tries absorbing 1..=max_group
 /// consecutive tree operands (max_group > 1 only for group-allowing
 /// operators); the last pattern operand must absorb the remainder exactly.
-fn match_operands<'a>(
+fn match_operands(
     op: &str,
-    tree_operands: &[&'a Value],
-    operand_at: impl Fn(usize) -> &'a Value + Copy,
+    tree_operands: &[&Value],
     pattern_operands: &[Value],
-    wildcards: &HashSet<String>,
+    ctx: &Ctx,
 ) -> Option<Map<String, Value>> {
-    fn chunk<'a>(
-        op: &str,
-        operand_at: impl Fn(usize) -> &'a Value,
-        start: usize,
-        len: usize,
-    ) -> Value {
+    fn chunk(op: &str, operands: &[&Value], start: usize, len: usize) -> Value {
         if len == 1 {
-            operand_at(start).clone()
+            operands[start].clone()
         } else {
             let mut arr = vec![Value::String(op.to_string())];
-            arr.extend((start..start + len).map(|i| operand_at(i).clone()));
+            arr.extend(operands[start..start + len].iter().map(|v| (*v).clone()));
             Value::Array(arr)
         }
     }
@@ -185,31 +346,37 @@ fn match_operands<'a>(
         a.iter().all(|(k, v)| b.get(k).is_none_or(|w| v == w))
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn go<'a>(
+    fn go(
         op: &str,
-        n_tree: usize,
-        operand_at: impl Fn(usize) -> &'a Value + Copy,
+        operands: &[&Value],
         pattern_operands: &[Value],
-        wildcards: &HashSet<String>,
+        ctx: &Ctx,
         start: usize,
         pat_ind: usize,
         acc: &Map<String, Value>,
     ) -> Option<Map<String, Value>> {
         let n_pats = pattern_operands.len();
-        let remaining = n_tree - start;
+        let remaining = operands.len() - start;
         if pat_ind == n_pats {
             return (remaining == 0).then(|| acc.clone());
         }
         let last = pat_ind == n_pats - 1;
+        // How many operands the *later* pattern operands still need. Normally
+        // one each, but an implicit-identity parameter can take none, so it
+        // must not reserve an operand this group could have absorbed —
+        // otherwise `a x + b` against `x` leaves nothing for `a x`.
+        let later_required = pattern_operands[pat_ind + 1..]
+            .iter()
+            .filter(|p| !ctx.is_implicit(p))
+            .count();
         let max_group = if allows_groups(op) {
-            remaining.saturating_sub(n_pats - pat_ind - 1)
+            remaining.saturating_sub(later_required)
         } else {
             1
         };
         // The last pattern operand must absorb everything left (JS: no
         // extended match). For non-group operators that means exactly one.
-        let sizes: Vec<usize> = if last {
+        let mut sizes: Vec<usize> = if last {
             (remaining == max_group.max(1) && remaining >= 1)
                 .then_some(remaining)
                 .into_iter()
@@ -217,11 +384,21 @@ fn match_operands<'a>(
         } else {
             (1..=max_group).collect()
         };
+        // A declared implicit-identity parameter may absorb *nothing* and take
+        // the operator's identity instead. Tried last, so a real operand always
+        // wins over an invented one: `a x + b` against `2x+y` binds `b = y`
+        // rather than `b = 0` with `y` left over.
+        if ctx.is_implicit(&pattern_operands[pat_ind]) && !sizes.contains(&0) {
+            sizes.push(0);
+        }
         for size in sizes {
-            let piece = chunk(op, operand_at, start, size);
-            let Some(m) = match_inner(&piece, &pattern_operands[pat_ind], wildcards) else {
-                continue;
+            let m = if size == 0 {
+                let identity = identity_of(op)?;
+                match_inner(&identity, &pattern_operands[pat_ind], ctx)
+            } else {
+                match_inner(&chunk(op, operands, start, size), &pattern_operands[pat_ind], ctx)
             };
+            let Some(m) = m else { continue };
             if !consistent(&m, acc) {
                 continue;
             }
@@ -229,10 +406,9 @@ fn match_operands<'a>(
             combined.extend(m);
             if let Some(result) = go(
                 op,
-                n_tree,
-                operand_at,
+                operands,
                 pattern_operands,
-                wildcards,
+                ctx,
                 start + size,
                 pat_ind + 1,
                 &combined,
@@ -243,16 +419,7 @@ fn match_operands<'a>(
         None
     }
 
-    go(
-        op,
-        tree_operands.len(),
-        operand_at,
-        pattern_operands,
-        wildcards,
-        0,
-        0,
-        &Map::new(),
-    )
+    go(op, tree_operands, pattern_operands, ctx, 0, 0, &Map::new())
 }
 
 /// Leaf equality: strings by identity, numbers by numeric value, booleans by
@@ -330,9 +497,10 @@ mod tests {
     //! template `match`, `flatten`/`unflatten{Left,Right}` (all `js_match`),
     //! plus `expr::serde::to_js` structural equality and the crate `substitute`
     //! (core-crate items, exercised here through the same JS-tree surface).
-    //! Ported from `spec/quick_trees.spec.js`; only the **default** match mode
-    //! is ported (opt-in JS params are deliberately unported — see this file's
-    //! module docs and JS_TEST_COVERAGE_AUDIT.md).
+    //! Ported from `spec/quick_trees.spec.js`, plus the option surface
+    //! (`variables` kinds, `allow_permutations`, `allow_implicit_identities`)
+    //! that `match_template_with_options` adds — see this file's module docs
+    //! and JS_TEST_COVERAGE_AUDIT.md.
     use super::{flatten_tree, match_template, unflatten_left, unflatten_right};
     use math_expressions::expr::serde::to_js;
     use math_expressions::{equals, substitute, EqOptions, Expr, TextToAst, TextToAstOptions};
@@ -572,5 +740,86 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ---- the option surface -------------------------------------------
+
+    use super::{match_template_with_options, MatchOptions, VarKind};
+
+    fn pattern_of(s: &str) -> Value {
+        to_js(&TextToAst::new(TextToAstOptions::default()).convert(s).unwrap())
+    }
+
+    fn matched(tree: &str, pattern: &str, opts: &MatchOptions) -> String {
+        match match_template_with_options(&pattern_of(tree), &pattern_of(pattern), opts) {
+            Some(m) => Value::Object(m).to_string(),
+            None => "false".to_string(),
+        }
+    }
+
+    fn declared(names: &[(&str, VarKind)]) -> MatchOptions {
+        MatchOptions {
+            variables: Some(names.iter().map(|(n, k)| (n.to_string(), *k)).collect()),
+            ..MatchOptions::default()
+        }
+    }
+
+    /// Declaring the parameter list is the whole point: an empty list declares
+    /// no placeholders, and a symbol that was never a parameter (`x`) is a
+    /// literal rather than a binding.
+    #[test]
+    fn only_declared_names_bind() {
+        assert_eq!(matched("3x+5", "a x + b", &declared(&[])), "false");
+        assert_eq!(
+            matched(
+                "3x+5",
+                "a x + b",
+                &declared(&[("a", VarKind::Any), ("b", VarKind::Any)])
+            ),
+            r#"{"a":3,"b":5}"#
+        );
+        // No options at all keeps the legacy default: every string leaf binds.
+        assert_eq!(
+            Value::Object(match_template(&pattern_of("3x+5"), &pattern_of("a x + b")).unwrap())
+                .to_string(),
+            r#"{"a":3,"b":5,"x":"x"}"#
+        );
+    }
+
+    #[test]
+    fn kinds_constrain_what_a_parameter_may_bind() {
+        let num = declared(&[("a", VarKind::Number), ("b", VarKind::Number)]);
+        assert_eq!(matched("3x+5", "a x + b", &num), r#"{"a":3,"b":5}"#);
+        // `y` is not a number, so there is no match at all.
+        assert_eq!(matched("yx+5", "a x + b", &num), "false");
+
+        let var = declared(&[("a", VarKind::Variable), ("b", VarKind::Variable)]);
+        assert_eq!(matched("ax+b", "a x + b", &var), r#"{"a":"a","b":"b"}"#);
+        // `b` would have to bind `x+x`, which is not a bare variable.
+        assert_eq!(matched("ax+x+x", "a x + b", &var), "false");
+    }
+
+    #[test]
+    fn permutations_are_opt_in() {
+        let mut opts = declared(&[("a", VarKind::Any), ("b", VarKind::Any)]);
+        assert_eq!(matched("5+3x", "a x + b", &opts), "false");
+        opts.allow_permutations = true;
+        assert_eq!(matched("5+3x", "a x + b", &opts), r#"{"a":3,"b":5}"#);
+        // Also inside the product: `x*2` against `a x`.
+        assert_eq!(matched("x*2+y", "a x + b", &opts), r#"{"a":2,"b":"y"}"#);
+    }
+
+    /// An implicit identity lets a parameter take `1` under `*` or `0` under
+    /// `+` when the tree has no operand for it, so `a x + b` matches a bare `x`.
+    #[test]
+    fn implicit_identities_are_opt_in() {
+        let mut opts = declared(&[("a", VarKind::Any), ("b", VarKind::Any)]);
+        opts.allow_permutations = true;
+        assert_eq!(matched("x", "a x + b", &opts), "false");
+        opts.implicit_identities = ["a", "b"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(matched("x", "a x + b", &opts), r#"{"a":1,"b":0}"#);
+        assert_eq!(matched("x+y", "a x + b", &opts), r#"{"a":1,"b":"y"}"#);
+        // A real operand still wins over an invented one.
+        assert_eq!(matched("2x+y", "a x + b", &opts), r#"{"a":2,"b":"y"}"#);
     }
 }

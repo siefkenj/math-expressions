@@ -27,8 +27,9 @@ pub use analytic::{is_analytic, AnalyticOpts};
 pub use components::{get_component, substitute_component};
 pub use evaluate::{evaluate, evaluate_to_constant};
 pub use numbers::{
-    constants_to_floats, evaluate_numbers, reduce_rational, round_numbers_to_decimals,
-    round_numbers_to_precision, round_numbers_to_precision_plus_decimals, set_small_zero,
+    constants_to_floats, evaluate_numbers, evaluate_numbers_evaluate_functions, reduce_rational,
+    round_numbers_to_decimals, round_numbers_to_precision,
+    round_numbers_to_precision_plus_decimals, set_small_zero,
 };
 pub use preserve_order::evaluate_numbers_preserve_order;
 pub use query::{functions, operators, variables};

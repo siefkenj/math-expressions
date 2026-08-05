@@ -53,6 +53,12 @@ pub(crate) fn full_simplify(e: &Expr, a: &Assumptions) -> Expr {
         // `log10(1000)`) fold here rather than in the base rounds, so `equals`
         // — which goes through `simplify_canonical` — stays byte-stable.
         let folded = crate::normalize::fold_numeric_applications(&folded);
+        // Scaling-unit arithmetic (`$3 + $2 → $5`). Here rather than in the
+        // base rounds for the same reason as the line above: `equals` goes
+        // through `simplify_canonical` and desugars units to plain arithmetic
+        // before it ever compares, so folding them there would only churn the
+        // byte-stable canonical form.
+        let folded = crate::normalize::fold_units(&folded);
         let reduced = crate::ops::reduce_rational(&folded);
         let next = crate::normalize::simplify_base_with(&reduced, a);
         if next == cur {

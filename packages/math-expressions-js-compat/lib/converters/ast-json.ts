@@ -19,3 +19,41 @@ export function tagNonFinite(value: unknown): unknown {
 export function astToJson(ast: unknown): string {
   return JSON.stringify(ast, (_key, value) => tagNonFinite(value));
 }
+
+/**
+ * The three tags that have a JS scalar, as a null-prototype lookup so a tag
+ * spelled `constructor` or `toString` cannot match an inherited property.
+ *
+ * `None` is deliberately absent: `{"$":"None"}` has no JS scalar to become, so
+ * it stays tagged in both directions. DoenetML emits it itself and reads it
+ * back unchanged.
+ */
+const UNTAGGED: Record<string, number> = Object.assign(Object.create(null), {
+  Inf: Infinity,
+  "-Inf": -Infinity,
+  NaN: NaN,
+});
+
+/**
+ * `JSON.parse` reviver that turns the non-finite tags back into JS scalars —
+ * the inverse of [`tagNonFinite`], and the reason `.tree` reads as `Infinity`
+ * rather than `{"$":"Inf"}`.
+ *
+ * The wire format has to stay tagged (JSON cannot hold `Infinity`), but the
+ * *value* a caller sees should be the scalar legacy handed back, because that
+ * is what `typeof x === "number"` and `x === -Infinity` consumers test. Going
+ * back in, `astReplacer` re-tags, so a tree survives a `.tree` → `fromAst`
+ * round trip unchanged.
+ */
+export function untagNonFinite(_key: string, value: unknown): unknown {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const tag = (value as { $?: unknown }).$;
+    if (typeof tag === "string" && tag in UNTAGGED) return UNTAGGED[tag];
+  }
+  return value;
+}
+
+/** `JSON.parse` of a wasm-produced AST, with non-finite tags decoded. */
+export function jsonToAst(json: string): unknown {
+  return JSON.parse(json, untagNonFinite);
+}

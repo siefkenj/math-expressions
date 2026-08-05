@@ -578,6 +578,49 @@ fn is_vectorlike(k: SeqKind) -> bool {
     )
 }
 
+/// Which vector-like kinds add together. Kinds in the same class denote the
+/// same object in different notation, so a sum of them folds.
+///
+/// `(a,b)`, `⟨a,b⟩` and the vector spelling are one class: DoenetML authors
+/// write a vector all three ways, and `⟨a,b⟩ + (c,d)` is reachable from
+/// ordinary markup. `Array` is its own class — `[a,b]` is a different
+/// container (`createIntervals` reads it as an interval), and `equals` keeps
+/// tuple↔array coercion a separate opt-in from tuple↔vector for the same
+/// reason. Length is still part of the key, so different arities never merge.
+fn vector_class(k: SeqKind) -> Option<u8> {
+    match k {
+        SeqKind::Tuple | SeqKind::Vector | SeqKind::AltVector => Some(0),
+        SeqKind::Array => Some(1),
+        _ => None,
+    }
+}
+
+/// The container a folded group carries: the members' own kind when they all
+/// agree, else the class's canonical one.
+///
+/// Deliberately *not* "the left operand's". `Add` is commutative and its
+/// operands are canonically sorted, so by the time this runs there is no left
+/// operand to read — keying off position would make `u + v` and `v + u`
+/// canonicalize to different trees, which is exactly what a canonical form
+/// must not do.
+fn folded_seq_kind(kinds: impl Iterator<Item = SeqKind>) -> SeqKind {
+    let mut kinds = kinds.peekable();
+    let first = *kinds.peek().expect("group is non-empty");
+    let mut all_same = true;
+    for k in kinds {
+        if k != first {
+            all_same = false;
+        }
+    }
+    if all_same {
+        return first;
+    }
+    match vector_class(first) {
+        Some(1) => SeqKind::Array,
+        _ => SeqKind::Tuple,
+    }
+}
+
 fn rule_seq_arith(e: &Expr) -> Option<Expr> {
     match e {
         Expr::Mul(factors) => distribute_mul_over_seq(factors),
@@ -625,12 +668,12 @@ fn distribute_mul_over_seq(factors: &[Expr]) -> Option<Expr> {
 /// lone sequences pass through untouched. Returns `None` when no group has ≥2
 /// members (nothing to combine — keeps the pass a strict fixpoint).
 fn combine_seqs_in_add(terms: &[Expr]) -> Option<Expr> {
-    // Groups keyed by (kind, len), in first-seen order; each holds term indices.
-    let mut groups: Vec<((SeqKind, usize), Vec<usize>)> = Vec::new();
+    // Groups keyed by (vector class, len), in first-seen order.
+    let mut groups: Vec<((u8, usize), Vec<usize>)> = Vec::new();
     for (i, t) in terms.iter().enumerate() {
         if let Expr::Seq(k, v) = t {
-            if is_vectorlike(*k) {
-                let key = (*k, v.len());
+            if let Some(class) = vector_class(*k) {
+                let key = (class, v.len());
                 match groups.iter_mut().find(|(gk, _)| *gk == key) {
                     Some((_, idxs)) => idxs.push(i),
                     None => groups.push((key, vec![i])),
@@ -646,10 +689,14 @@ fn combine_seqs_in_add(terms: &[Expr]) -> Option<Expr> {
     // Other members of such groups are dropped from the output.
     let mut skip = vec![false; terms.len()];
     let mut combined: Vec<(usize, Expr)> = Vec::new();
-    for ((kind, len), idxs) in &groups {
+    for ((_, len), idxs) in &groups {
         if idxs.len() < 2 {
             continue;
         }
+        let kind = &folded_seq_kind(idxs.iter().map(|&i| match &terms[i] {
+            Expr::Seq(k, _) => *k,
+            _ => unreachable!("group members are sequences"),
+        }));
         let sum = (0..*len)
             .map(|p| {
                 add(idxs

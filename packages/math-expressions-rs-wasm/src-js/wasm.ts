@@ -36,7 +36,11 @@ export interface WasmExpression {
    * unknown criterion yields `{"ok":false,"why":"unknown structural comparison"}`. */
   check_structural_comparison(comparisonJson: string): string;
   is_zero(): boolean | undefined;
-  is_analytic(allowAbs: boolean, allowArg: boolean, allowRelation: boolean): boolean;
+  is_analytic(
+    allowAbs: boolean,
+    allowArg: boolean,
+    allowRelation: boolean,
+  ): boolean;
 
   derivative(variable: string): WasmExpression;
   integrate(variable: string): WasmExpression | undefined;
@@ -79,7 +83,10 @@ export interface WasmExpression {
 
   round_numbers_to_precision(sigFigs: number): WasmExpression;
   round_numbers_to_decimals(decimals: number): WasmExpression;
-  round_numbers_to_precision_plus_decimals(digits: number, decimals: number): WasmExpression;
+  round_numbers_to_precision_plus_decimals(
+    digits: number,
+    decimals: number,
+  ): WasmExpression;
 
   evaluate_to_constant(): number | undefined;
   evaluate_to_complex(): Float64Array | undefined;
@@ -88,7 +95,10 @@ export interface WasmExpression {
 
   /** Operand path into the tree spelling, 0-based; `undefined` if out of range. */
   get_component(path: Uint32Array): WasmExpression | undefined;
-  substitute_component(path: Uint32Array, value: WasmExpression): WasmExpression | undefined;
+  substitute_component(
+    path: Uint32Array,
+    value: WasmExpression,
+  ): WasmExpression | undefined;
 
   add(other: WasmExpression): WasmExpression;
   subtract(other: WasmExpression): WasmExpression;
@@ -142,6 +152,11 @@ export interface WasmModule {
   from_ast(treeJson: string): WasmExpression;
   from_serialized(json: string): WasmExpression;
   match_template(treeJson: string, patternJson: string): string | undefined;
+  match_template_with_options(
+    treeJson: string,
+    patternJson: string,
+    optionsJson: string,
+  ): string | undefined;
   flatten_ast(treeJson: string): string | undefined;
   unflatten_left(treeJson: string): string | undefined;
   unflatten_right(treeJson: string): string | undefined;

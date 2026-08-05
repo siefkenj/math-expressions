@@ -94,12 +94,15 @@ fn evaluate_to_constant_cases() {
     assert!(evaluate_to_constant(&parse("x + 1")).is_none());
     // Non-finite, but *known*: `±∞` is reported as the value it is, so that a
     // caller can tell an unbounded endpoint from an undecidable one
-    // (DOENET_INTEGRATION item 1). An indeterminate form still declines.
+    // (DOENET_INTEGRATION item 1). An indeterminate form is *also* a computed
+    // value — NaN — for the same reason: `None` crosses to JS as `null`, which
+    // coerces to `0`, so declining would report an undefined result as a real
+    // point at the origin.
     // (Compared exactly rather than through `approx`, whose `|v − re|` is NaN
     // when both sides are infinite.)
     assert_eq!(
         evaluate_to_constant(&parse("1/0")).map(|v| v.re),
         Some(f64::INFINITY)
     );
-    assert!(evaluate_to_constant(&parse("0/0")).is_none());
+    assert!(evaluate_to_constant(&parse("0/0")).is_some_and(|v| v.re.is_nan()));
 }

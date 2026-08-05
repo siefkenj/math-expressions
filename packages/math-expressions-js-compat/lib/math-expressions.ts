@@ -8,7 +8,7 @@ import wasm, { setWasmModule } from "./_wasm";
 import math from "./mathjs";
 import { match, flatten, unflattenLeft, unflattenRight } from "./trees/flatten";
 import * as converters from "./converters/index";
-import { tagNonFinite } from "./converters/ast-json";
+import { jsonToAst, tagNonFinite } from "./converters/ast-json";
 import { compileRustExpr } from "math-expressions-rs-wasm";
 import type { WasmExpression } from "math-expressions-rs-wasm";
 import type { MathJsInstance } from "mathjs";
@@ -34,7 +34,11 @@ export function isTree(value: unknown): boolean {
   ) {
     return true;
   }
-  if (Array.isArray(value) && value.length > 0 && typeof value[0] === "string") {
+  if (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    typeof value[0] === "string"
+  ) {
     return value.slice(1).every((item) => isTree(item));
   }
   return false;
@@ -47,7 +51,10 @@ function notImplemented(name: string): (...args: unknown[]) => never {
 }
 
 /** Wrap a raw wasm Expression handle (or undefined) as a compat Expression. */
-function wrap(handle: WasmExpression | undefined, context: Ctx): Expression | undefined {
+function wrap(
+  handle: WasmExpression | undefined,
+  context: Ctx,
+): Expression | undefined {
   if (handle === undefined || handle === null) return undefined;
   return new Expression(handle, context);
 }
@@ -81,11 +88,14 @@ function componentPath(component: number | number[]): Uint32Array {
  * three values to the `{"$":…}` specials the Rust `from_ast` already reads back.
  * An already-special `{"$":"NaN"}` object passes through untouched.
  *
- * Note the boundary is deliberately *tagged in both directions*: `.tree` gives
- * back `{"$":"NaN"}`, not a JS `NaN`. DoenetML already emits `{"$":"None"}`
- * itself, so one tagged wire format — in and out, `fromAst(x).tree` a fixpoint —
- * beats a half-symmetric one where `NaN`/`±Infinity` untag but `None` (which has
- * no JS scalar) cannot. See DOENET_INTEGRATION.md §"Non-finite and absent values".
+ * The *wire* format is tagged in both directions, because JSON cannot hold
+ * these three values in either one. The *values a caller sees* are not: `.tree`
+ * untags them back to JS scalars (see `untagNonFinite`), because `Infinity` is
+ * what legacy handed back and what `typeof x === "number"` and `x === -Infinity`
+ * consumers test against. `fromAst(x).tree` is still a fixpoint — this replacer
+ * re-tags on the way in — it just holds at the value level rather than the wire
+ * level. `{"$":"None"}` is the exception in both directions: it has no JS scalar
+ * to untag to, and DoenetML emits and reads it in that form already.
  */
 function astReplacer(this: unknown, key: string, value: unknown): unknown {
   // An `Expression` standing where a tree is expected — `fromAst(expr)`, or an
@@ -98,12 +108,19 @@ function astReplacer(this: unknown, key: string, value: unknown): unknown {
   // Expression has already become its `{objectType:"math-expression",tree:…}`
   // envelope and `value instanceof Expression` is always false. That envelope is
   // precisely the "object with no `$` key" the Rust side used to reject.
+  //
+  // Both unwrapped trees go back through `tagNonFinite`: `.tree` hands out the
+  // *untagged* scalars, so an `Expression` holding `NaN` or `±Infinity` would
+  // otherwise be returned as a bare JS non-finite and `JSON.stringify` would
+  // write `null` for it — the "unexpected value null" the Rust side rejects.
+  // (Nested ones are covered by the fall-through below, which `stringify`
+  // reaches when it walks into the value returned here.)
   const held = (this as Record<string, unknown> | undefined)?.[key];
-  if (held instanceof Expression) return held.tree;
+  if (held instanceof Expression) return tagNonFinite(held.tree);
   // The same envelope arriving as plain data — a `JSON.parse` of a persisted
   // expression that never got run through `Context.reviver`. Keyed on the shape
   // `reviver` itself recognizes.
-  if (isSerializedExpression(value)) return value.tree;
+  if (isSerializedExpression(value)) return tagNonFinite(value.tree);
   // Shared with the standalone converters, so the two cannot tag `Infinity`
   // differently (see `converters/ast-json.ts`).
   return tagNonFinite(value);
@@ -170,8 +187,13 @@ class Expression {
   }
 
   // ---- inspection / rendering ----
+  /**
+   * The AST as plain JS data. `±Infinity` and `NaN` read back as the JS
+   * scalars legacy handed out, not as their `{"$":…}` wire tags — see
+   * `untagNonFinite`. `{"$":"None"}` stays tagged, having no scalar to become.
+   */
   get tree() {
-    return JSON.parse(this._w.tree_json());
+    return jsonToAst(this._w.tree_json());
   }
   // Rendering honors the legacy render options (padToDigits, padToDecimals,
   // showBlanks, explicitMultiplicationSymbols, notation/unicode) by forwarding
@@ -179,16 +201,24 @@ class Expression {
   // no-arg path stays on the cheap no-options render — `toString()` is what JS
   // coercion (`String(expr)`) calls.
   toString(opts?) {
-    return hasOptions(opts) ? this._w.to_text_with_options(JSON.stringify(opts)) : this._w.to_text();
+    return hasOptions(opts)
+      ? this._w.to_text_with_options(JSON.stringify(opts))
+      : this._w.to_text();
   }
   toText(opts?) {
-    return hasOptions(opts) ? this._w.to_text_with_options(JSON.stringify(opts)) : this._w.to_text();
+    return hasOptions(opts)
+      ? this._w.to_text_with_options(JSON.stringify(opts))
+      : this._w.to_text();
   }
   toLatex(opts?) {
-    return hasOptions(opts) ? this._w.to_latex_with_options(JSON.stringify(opts)) : this._w.to_latex();
+    return hasOptions(opts)
+      ? this._w.to_latex_with_options(JSON.stringify(opts))
+      : this._w.to_latex();
   }
   tex(opts?) {
-    return hasOptions(opts) ? this._w.to_latex_with_options(JSON.stringify(opts)) : this._w.to_latex();
+    return hasOptions(opts)
+      ? this._w.to_latex_with_options(JSON.stringify(opts))
+      : this._w.to_latex();
   }
   toJSON() {
     return JSON.parse(this._w.to_serialized());
@@ -204,7 +234,10 @@ class Expression {
   equals(other, options) {
     const o = toExpr(other, this.context);
     if (options && Object.keys(options).length > 0) {
-      return this._w.equals_with_options(o._w, JSON.stringify(mapEqOptions(options)));
+      return this._w.equals_with_options(
+        o._w,
+        JSON.stringify(mapEqOptions(options)),
+      );
     }
     return this._w.equals(o._w);
   }
@@ -219,15 +252,27 @@ class Expression {
   // through `structural_equality` with the `sameStructure` criterion, which
   // routes to Rust `equals_syntactic` (no sampling). This matches the original
   // `equalsViaSyntax` and never evaluates the expression at sample points.
-  equalsViaSyntax(other) {
-    return this._w.structural_equality(toExpr(other, this.context)._w, '"sameStructure"');
+  equalsViaSyntax(other, options?) {
+    const o = toExpr(other, this.context)._w;
+    if (hasOptions(options)) {
+      return this._w.structural_equality_with_options(
+        o,
+        '"sameStructure"',
+        JSON.stringify(mapEqOptions(options)),
+      );
+    }
+    return this._w.structural_equality(o, '"sameStructure"');
   }
   is_zero() {
     return this._w.is_zero();
   }
   isAnalytic(opts) {
     const o = opts || {};
-    return this._w.is_analytic(!!o.allow_abs, !!o.allow_arg, !!o.allow_relation);
+    return this._w.is_analytic(
+      !!o.allow_abs,
+      !!o.allow_arg,
+      !!o.allow_relation,
+    );
   }
 
   // ---- calculus ----
@@ -242,7 +287,11 @@ class Expression {
   // quadrature and returns `NaN` when the value cannot be certified — never a
   // silently-wrong number.
   integrateNumerically(v, lower, upper) {
-    const r = this._w.integrate_numerically(varName(v), Number(lower), Number(upper));
+    const r = this._w.integrate_numerically(
+      varName(v),
+      Number(lower),
+      Number(upper),
+    );
     return r === undefined ? NaN : r;
   }
 
@@ -270,8 +319,25 @@ class Expression {
     // throw here, which was worse than a missing feature — the Rust core calls
     // this mode and is built `panic = "abort"`, so the exception unwound into
     // it as a WASM trap and took the whole worker down.
+    // `max_digits` caps how many digits a folded value may occupy. The core
+    // folds exactly and never spends a digit budget, so `Infinity` — "no cap" —
+    // is genuinely satisfied and is accepted. A *finite* cap is a constraint we
+    // cannot meet, and silently ignoring it would round a student's value
+    // without saying so, which is the failure mode this whole audit is about.
+    if (opts && opts.max_digits !== undefined && opts.max_digits !== Infinity) {
+      throw new Error(
+        `evaluate_numbers: 'max_digits' is only supported as Infinity (got ${opts.max_digits}). ` +
+          "The core folds exactly, so a finite digit cap cannot be honored here — " +
+          "use round_numbers_to_precision to control displayed digits.",
+      );
+    }
     if (opts && opts.skip_ordering) {
       return wrap(this._w.evaluate_numbers_preserve_order(), this.context);
+    }
+    // `evaluate_functions` additionally folds a function applied to a numeric
+    // argument (`sin(0)+2` → `2`), which is what `simplify="full"` needs.
+    if (opts && opts.evaluate_functions) {
+      return wrap(this._w.evaluate_numbers_evaluate_functions(), this.context);
     }
     return wrap(this._w.evaluate_numbers(), this.context);
   }
@@ -353,7 +419,10 @@ class Expression {
   }
   substitute_component(component, value) {
     return wrap(
-      this._w.substitute_component(componentPath(component), toExpr(value, this.context)._w),
+      this._w.substitute_component(
+        componentPath(component),
+        toExpr(value, this.context)._w,
+      ),
       this.context,
     );
   }
@@ -380,7 +449,10 @@ class Expression {
     return wrap(this._w.add_unit(unit), this.context);
   }
   set_small_zero(tolerance) {
-    return wrap(this._w.set_small_zero(tolerance === undefined ? 1e-14 : tolerance), this.context);
+    return wrap(
+      this._w.set_small_zero(tolerance === undefined ? 1e-14 : tolerance),
+      this.context,
+    );
   }
 
   // ---- rounding ----
@@ -477,20 +549,79 @@ class Expression {
     return wrap(this._w.dot_prod(toExpr(other, this.context)._w), this.context);
   }
   cross_prod(other) {
-    return wrap(this._w.cross_prod(toExpr(other, this.context)._w), this.context);
+    return wrap(
+      this._w.cross_prod(toExpr(other, this.context)._w),
+      this.context,
+    );
   }
   vector_add(other) {
-    return wrap(this._w.vector_add(toExpr(other, this.context)._w), this.context);
+    return wrap(
+      this._w.vector_add(toExpr(other, this.context)._w),
+      this.context,
+    );
   }
   vector_sub(other) {
-    return wrap(this._w.vector_sub(toExpr(other, this.context)._w), this.context);
+    return wrap(
+      this._w.vector_sub(toExpr(other, this.context)._w),
+      this.context,
+    );
   }
 
   // ---- pattern matching (default mode only) ----
-  match(pattern, _options) {
-    const res = wasm.match_template(
-      this._w.tree_json(),
-      toExpr(pattern, this.context)._w.tree_json(),
+  /**
+   * Template match against `pattern`. Options:
+   *
+   * - `variables` — the declared parameters, as `{name: kind}` where kind is
+   *   `true`/`"any"`, `"number"` or `"variable"`. Present-and-empty declares
+   *   *no* parameters, so only an exact match succeeds; omitting the option
+   *   keeps the legacy default where every string leaf in the pattern binds.
+   * - `allow_permutations` — match `+`/`*` operands in any order.
+   * - `allow_implicit_identities` — array of parameter names that may take the
+   *   operator's identity, so `a x + b` matches `x` with `a = 1`, `b = 0`.
+   *
+   * The kinds replace the JS predicates the legacy API took: a function cannot
+   * cross the wasm boundary, and these three are what the predicates expressed.
+   * A predicate is therefore rejected rather than ignored — silently treating
+   * one as "any" is what made `requireNumericMatches` a no-op.
+   */
+  match(pattern, options?) {
+    const tree = this._w.tree_json();
+    const pat = toExpr(pattern, this.context)._w.tree_json();
+    if (!hasOptions(options)) {
+      const res = wasm.match_template(tree, pat);
+      return res === undefined ? false : JSON.parse(res);
+    }
+    const opts: Record<string, unknown> = {};
+    if (options.variables !== undefined) {
+      const vars: Record<string, unknown> = {};
+      for (const [name, kind] of Object.entries(options.variables)) {
+        if (typeof kind === "function") {
+          throw new Error(
+            `match: 'variables.${name}' is a predicate function, which cannot cross ` +
+              'the wasm boundary. Declare a kind instead: "number", "variable", ' +
+              '"any" (or true).',
+          );
+        }
+        vars[name] = kind;
+      }
+      opts.variables = vars;
+    }
+    if (options.allow_permutations !== undefined) {
+      opts.allow_permutations = !!options.allow_permutations;
+    }
+    if (options.allow_implicit_identities !== undefined) {
+      const ii = options.allow_implicit_identities;
+      // Legacy accepts either a list of names or `true` for "all declared".
+      opts.allow_implicit_identities = Array.isArray(ii)
+        ? ii
+        : ii
+          ? Object.keys((opts.variables as Record<string, unknown>) ?? {})
+          : [];
+    }
+    const res = wasm.match_template_with_options(
+      tree,
+      pat,
+      JSON.stringify(opts),
     );
     return res === undefined ? false : JSON.parse(res);
   }
@@ -503,10 +634,11 @@ class Expression {
 // would never run. Feature-detecting keeps `using expr = me.fromText(…)` working
 // where it is supported and simply unavailable where it is not.
 if (typeof Symbol.dispose === "symbol") {
-  (Expression.prototype as Record<symbol, unknown>)[Symbol.dispose] =
-    function (this: Expression) {
-      this.free();
-    };
+  (Expression.prototype as Record<symbol, unknown>)[Symbol.dispose] = function (
+    this: Expression,
+  ) {
+    this.free();
+  };
 }
 
 // Legacy methods with no Rust backing — defined so calls fail loudly, not as
@@ -523,7 +655,8 @@ for (const name of [
   "expression_to_polynomial",
   "finite_field_evaluate",
 ]) {
-  (Expression.prototype as Record<string, unknown>)[name] = notImplemented(name);
+  (Expression.prototype as Record<string, unknown>)[name] =
+    notImplemented(name);
 }
 
 // Normalization passes with no faithful Rust entry point (folded into
@@ -539,7 +672,9 @@ for (const name of [
   "expand_relations",
   "applyAllTransformations",
 ]) {
-  (Expression.prototype as Record<string, unknown>)[name] = function (this: Expression) {
+  (Expression.prototype as Record<string, unknown>)[name] = function (
+    this: Expression,
+  ) {
     return this;
   };
 }
@@ -552,7 +687,9 @@ for (const name of [
 // library nor the legacy one lists the aggregates by default.
 function parseText(string, opts?) {
   return new Expression(
-    hasOptions(opts) ? wasm.parse_text_with_options(string, JSON.stringify(opts)) : wasm.parse_text(string),
+    hasOptions(opts)
+      ? wasm.parse_text_with_options(string, JSON.stringify(opts))
+      : wasm.parse_text(string),
     Context,
   );
 }
@@ -626,7 +763,9 @@ function dopri(
       return zeros();
     }
     const arr =
-      typeof out === "number" ? [out] : Array.from(out as ArrayLike<number>, Number);
+      typeof out === "number"
+        ? [out]
+        : Array.from(out as ArrayLike<number>, Number);
     if (arr.length !== dim) {
       failure = {
         error: new TypeError(
@@ -710,10 +849,17 @@ const Context = {
   parse_tex: parseLatex,
   fromMml: notImplemented("fromMml"),
   fromAst(ast) {
-    return new Expression(wasm.from_ast(JSON.stringify(ast, astReplacer)), Context);
+    return new Expression(
+      wasm.from_ast(JSON.stringify(ast, astReplacer)),
+      Context,
+    );
   },
   reviver(key, value) {
-    if (value && value.objectType === "math-expression" && value.tree !== undefined) {
+    if (
+      value &&
+      value.objectType === "math-expression" &&
+      value.tree !== undefined
+    ) {
       return Context.fromAst(value.tree);
     }
     return value;
@@ -811,13 +957,23 @@ const Context = {
 //
 // Coercion goes through `toExpr`, not `Context.from`: the argument is usually
 // an `Expression` already, and `from` would try to read that as an AST.
-const NOT_EXPRESSION_FIRST = new Set(["constructor", "toJSON", "free", "dispose"]);
+const NOT_EXPRESSION_FIRST = new Set([
+  "constructor",
+  "toJSON",
+  "free",
+  "dispose",
+]);
 for (const name of Object.getOwnPropertyNames(Expression.prototype)) {
   if (NOT_EXPRESSION_FIRST.has(name) || name in Context) continue;
   const desc = Object.getOwnPropertyDescriptor(Expression.prototype, name);
   if (typeof desc?.value !== "function") continue; // skip accessors such as `tree`
-  (Context as Record<string, unknown>)[name] = (expr: ExpressionLike, ...args: unknown[]) =>
-    (toExpr(expr) as unknown as Record<string, (...a: unknown[]) => unknown>)[name](...args);
+  (Context as Record<string, unknown>)[name] = (
+    expr: ExpressionLike,
+    ...args: unknown[]
+  ) =>
+    (toExpr(expr) as unknown as Record<string, (...a: unknown[]) => unknown>)[
+      name
+    ](...args);
 }
 
 export { Expression, dopri, setWasmModule };

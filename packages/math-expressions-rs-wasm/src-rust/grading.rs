@@ -33,24 +33,7 @@ impl Expression {
         other: &Expression,
         options_json: &str,
     ) -> Result<bool, JsError> {
-        let v: serde_json::Value =
-            serde_json::from_str(options_json).map_err(|e| JsError::new(&e.to_string()))?;
-        let mut o = EqOptions::default();
-        read_opt_f64(&v, "relativeTolerance", &mut o.relative_tolerance);
-        read_opt_f64(&v, "absoluteTolerance", &mut o.absolute_tolerance);
-        read_opt_f64(&v, "toleranceForZero", &mut o.tolerance_for_zero);
-        read_opt_f64(&v, "allowedErrorInNumbers", &mut o.allowed_error_in_numbers);
-        read_opt_bool(
-            &v,
-            "includeErrorInNumberExponents",
-            &mut o.include_error_in_number_exponents,
-        );
-        read_opt_bool(
-            &v,
-            "allowedErrorIsAbsolute",
-            &mut o.allowed_error_is_absolute,
-        );
-        read_opt_bool(&v, "allowBlanks", &mut o.allow_blanks);
+        let o = eq_options_from_json(options_json)?;
         Ok(math_expressions::equals(&self.0, &other.0, &o))
     }
 
@@ -91,6 +74,29 @@ impl Expression {
         }
     }
 
+    /// [`Self::structural_equality`] with grading options, the syntactic
+    /// sibling of [`Self::equals_with_options`]. `options_json` uses the same
+    /// keys, so `allowBlanks` / `allowedErrorInNumbers` reach the syntactic
+    /// path instead of being silently dropped by the caller.
+    ///
+    /// Malformed JSON is an error for the same reason it is on
+    /// [`Self::equals_with_options`]: a typo'd grading config must not grade
+    /// with the wrong tolerances.
+    pub fn structural_equality_with_options(
+        &self,
+        key: &Expression,
+        comparison: &str,
+        options_json: &str,
+    ) -> Result<bool, JsError> {
+        let o = eq_options_from_json(options_json)?;
+        let v: serde_json::Value =
+            serde_json::from_str(comparison).unwrap_or(serde_json::Value::Null);
+        Ok(match structural_comparison_from_json(&v) {
+            Some(c) => math_expressions::structural_equality(&self.0, &key.0, &c, &o),
+            None => false,
+        })
+    }
+
     // ---- certified zero-equivalence (FULL_SIMPLIFY S1) ----
 
     /// Certified test for `self ≡ 0`: `true` = provably zero, `false` =
@@ -115,6 +121,35 @@ impl Expression {
             },
         )
     }
+}
+
+/// Decode `EqOptions` from the grading-options JSON shared by every equality
+/// entry point. Keys (all optional): numbers — `relativeTolerance`,
+/// `absoluteTolerance`, `toleranceForZero`, `allowedErrorInNumbers`; bools —
+/// `includeErrorInNumberExponents`, `allowedErrorIsAbsolute`, `allowBlanks`.
+///
+/// Malformed JSON is an error rather than a silent default, so one decoder
+/// keeps the numeric and syntactic paths from drifting apart.
+fn eq_options_from_json(options_json: &str) -> Result<EqOptions, JsError> {
+    let v: serde_json::Value =
+        serde_json::from_str(options_json).map_err(|e| JsError::new(&e.to_string()))?;
+    let mut o = EqOptions::default();
+    read_opt_f64(&v, "relativeTolerance", &mut o.relative_tolerance);
+    read_opt_f64(&v, "absoluteTolerance", &mut o.absolute_tolerance);
+    read_opt_f64(&v, "toleranceForZero", &mut o.tolerance_for_zero);
+    read_opt_f64(&v, "allowedErrorInNumbers", &mut o.allowed_error_in_numbers);
+    read_opt_bool(
+        &v,
+        "includeErrorInNumberExponents",
+        &mut o.include_error_in_number_exponents,
+    );
+    read_opt_bool(
+        &v,
+        "allowedErrorIsAbsolute",
+        &mut o.allowed_error_is_absolute,
+    );
+    read_opt_bool(&v, "allowBlanks", &mut o.allow_blanks);
+    Ok(o)
 }
 
 /// Decode a `StructuralComparison` from either a bare name string or a

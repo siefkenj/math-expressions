@@ -3,7 +3,7 @@
 //! sorted, exactly folded, like terms/powers combined).
 
 use super::{cmp, identity_matrix, is_matrix_valued, matmul_literal};
-use crate::expr::{Expr, Mat};
+use crate::expr::{Expr, Mat, MathConst};
 use crate::num::Number;
 use std::cell::Cell;
 
@@ -352,6 +352,25 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
 /// Build a canonical power, applying the identities and constant folding that
 /// hold without assumptions. `0` to a negative power is left unfolded (an
 /// exact division by zero).
+/// Is `e` one of the non-finite constants (`±∞`, `NaN`)?
+fn is_nonfinite_const(e: &Expr) -> bool {
+    matches!(
+        e,
+        Expr::Const(MathConst::Inf) | Expr::Const(MathConst::NegInf) | Expr::Const(MathConst::NaN)
+    )
+}
+
+/// Bases for which `base^0` is an indeterminate form rather than 1: zero and
+/// the non-finite constants.
+///
+/// `0^0` is the debatable one — combinatorics and power series take it as 1,
+/// and IEEE `pow(0,0)` is 1. As a *limit* form it is indeterminate (`x^0 → 1`
+/// but `0^x → 0`), which is the reading a mathematics course teaches and the
+/// one this engine reports, alongside `∞ − ∞` and `0 · ∞`.
+fn is_indeterminate_power_base(e: &Expr) -> bool {
+    is_nonfinite_const(e) || matches!(e, Expr::Num(n) if n.is_zero())
+}
+
 pub(crate) fn pow(base: Expr, exp: Expr) -> Expr {
     // Matrix base (MATRIX_PLAN §1a): integer k ≥ 2 on a square matrix folds by
     // binary powering, k = 0 gives the identity, k = 1 the base. Everything
@@ -403,7 +422,14 @@ pub(crate) fn pow(base: Expr, exp: Expr) -> Expr {
     }
     if let Expr::Num(e) = &exp {
         if e.is_zero() {
-            return Expr::Num(Number::one()); // x^0 = 1, including 0^0
+            // `x^0 = 1` requires `x` finite and nonzero. `0^0`, `(±∞)^0` and
+            // `NaN^0` are indeterminate forms — folding them to 1 asserts a
+            // limit that does not exist. This is also the path
+            // `∞/∞` arrives on: it collects to `∞^(1−1)` = `∞^0`.
+            if is_indeterminate_power_base(&base) {
+                return Expr::Const(MathConst::NaN);
+            }
+            return Expr::Num(Number::one());
         }
         if e.is_one() {
             return base;
@@ -445,6 +471,12 @@ pub(crate) fn pow(base: Expr, exp: Expr) -> Expr {
     }
     if let Expr::Num(b) = &base {
         if b.is_one() {
+            // `1^x = 1` for every finite `x`, including a free variable — but
+            // `1^∞` is the classic indeterminate form (it is the shape behind
+            // `(1 + 1/n)^n → e`), so an infinite or NaN exponent must not fold.
+            if is_nonfinite_const(&exp) {
+                return Expr::Const(MathConst::NaN);
+            }
             return Expr::Num(Number::one()); // 1^x = 1
         }
         // `as_int` matches only an integer exponent, the case we fold.

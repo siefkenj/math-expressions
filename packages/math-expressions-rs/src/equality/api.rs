@@ -197,6 +197,13 @@ pub fn equals_syntactic(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     }
     let na = coerce_seqs(normalize_syntactic(a), opts);
     let nb = coerce_seqs(normalize_syntactic(b), opts);
+    // `allowed_error_in_numbers` compares number *leaves* within the allowed
+    // error while the structure still has to match exactly — the same
+    // primitive [`equals`] uses for it, so a tolerance means the same thing on
+    // both paths. With no tolerance set this is plain tree equality.
+    if opts.allowed_error_in_numbers > 0.0 {
+        return super::fuzzy::fuzzy_tree_eq(&na, &nb, opts);
+    }
     na == nb
 }
 
