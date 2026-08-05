@@ -22,7 +22,7 @@
 //! `Expr` has no boolean leaf to hand back (issue #83 R2). They return `None`,
 //! which is what they did before component paths existed.
 
-use crate::expr::{Expr, RelOp, SeqKind};
+use crate::expr::{Expr, Mat, RelOp, SeqKind};
 use crate::num::Number;
 
 /// The component at `path`, or `None` if any step is out of range or lands on
@@ -91,15 +91,11 @@ fn components(e: &Expr) -> Option<Vec<Expr>> {
             operands.clone()
         }
 
-        Expr::Matrix {
-            rows,
-            cols,
-            entries,
-        } if *cols > 0 => vec![
-            tuple(vec![count(*rows), count(*cols)]),
+        Expr::Matrix(m) if m.cols() > 0 => vec![
+            tuple(vec![count(m.rows()), count(m.cols())]),
             tuple(
-                entries
-                    .chunks(*cols as usize)
+                m.entries()
+                    .chunks(m.cols() as usize)
                     .map(|row| tuple(row.to_vec()))
                     .collect(),
             ),
@@ -157,7 +153,7 @@ fn rebuild(e: &Expr, parts: Vec<Expr>) -> Option<Expr> {
             ops: ops.clone(),
         },
 
-        Expr::Matrix { .. } => rebuild_matrix(parts)?,
+        Expr::Matrix(_) => rebuild_matrix(parts)?,
 
         _ => return None,
     })
@@ -183,11 +179,8 @@ fn rebuild_matrix(parts: Vec<Expr>) -> Option<Expr> {
             entries.push(row.get(c)?.clone());
         }
     }
-    Some(Expr::Matrix {
-        rows,
-        cols,
-        entries,
-    })
+    // The loops above push exactly `rows * cols` entries or bail via `?`.
+    Mat::new(rows, cols, entries).map(Expr::Matrix)
 }
 
 /// The single `["apply", f, arg]` argument slot: several arguments ride in one
@@ -290,11 +283,7 @@ mod tests {
     /// is reached through the body at `[1, row, col]` — not `[row, col]`.
     #[test]
     fn indexes_a_matrix_through_its_js_spelling() {
-        let m = Expr::Matrix {
-            rows: 2,
-            cols: 2,
-            entries: vec![p("x1"), p("x2"), p("x3"), p("x4")],
-        };
+        let m = Expr::Matrix(Mat::new(2, 2, vec![p("x1"), p("x2"), p("x3"), p("x4")]).expect("test matrix shape"));
         assert_eq!(txt(&get_component(&m, &[0]).unwrap()), "(2, 2)");
         assert_eq!(got_expr(&m, &[1, 0, 1]), "x2");
         assert_eq!(got_expr(&m, &[1, 1, 0]), "x3");
@@ -330,19 +319,11 @@ mod tests {
     /// `Matrix`, not the tuple-of-tuples it was decomposed into.
     #[test]
     fn substitutes_a_matrix_entry() {
-        let m = Expr::Matrix {
-            rows: 2,
-            cols: 2,
-            entries: vec![p("x1"), p("x2"), p("x3"), p("x4")],
-        };
+        let m = Expr::Matrix(Mat::new(2, 2, vec![p("x1"), p("x2"), p("x3"), p("x4")]).expect("test matrix shape"));
         let subbed = substitute_component(&m, &[1, 1, 0], &p("q")).unwrap();
         assert_eq!(
             subbed,
-            Expr::Matrix {
-                rows: 2,
-                cols: 2,
-                entries: vec![p("x1"), p("x2"), p("q"), p("x4")],
-            }
+            Expr::Matrix(Mat::new(2, 2, vec![p("x1"), p("x2"), p("q"), p("x4")]).expect("test matrix shape"))
         );
     }
 

@@ -73,6 +73,16 @@ pub enum Number {
     /// Floating-point value — produced by numerical evaluation only. User
     /// input never parses to `Float` (decimals are exact rationals).
     Float(F64),
+    /// Exact **negative zero**. Its whole reason to exist is that `1/(−0)` is
+    /// `−∞` while `1/0` is `+∞`, and the sign must survive a product
+    /// (`(−1)·0 → −0`). It is *value-equal to `Int(0)`* — it compares equal,
+    /// hashes identically, prints and serializes as `0`, and satisfies
+    /// [`is_zero`](Number::is_zero) — so every consumer treats it as plain zero
+    /// **except** the ones that explicitly ask [`is_neg_zero`](Number::is_neg_zero)
+    /// (the division-by-zero pole fold). Positive zero stays `Int(0)`; this
+    /// variant is only ever minted by the sign-aware arithmetic below
+    /// (`neg`/`mul`/`add`/`sub`/`checked_div`) and by `annihilate`.
+    NegZero,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +99,10 @@ impl PartialEq for Number {
             (Number::Rat(a, b, _), Number::Rat(c, d, _)) => a == c && b == d,
             (Number::Float(a), Number::Float(b)) => a == b,
             (Number::Big(a), Number::Big(b)) => a == b,
+            // −0 is value-equal to +0 (the only other exact zero is `Int(0)`:
+            // `Rat`/`Big` never reduce to zero).
+            (Number::NegZero, Number::NegZero) => true,
+            (Number::NegZero, Number::Int(0)) | (Number::Int(0), Number::NegZero) => true,
             _ => false,
         }
     }
@@ -97,12 +111,17 @@ impl Eq for Number {}
 
 impl std::hash::Hash for Number {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // −0 compares equal to `Int(0)`, so it must hash identically.
+        if matches!(self, Number::NegZero) {
+            return Number::Int(0).hash(state);
+        }
         std::mem::discriminant(self).hash(state);
         match self {
             Number::Int(i) => i.hash(state),
             Number::Rat(n, d, _) => (n, d).hash(state),
             Number::Float(f) => f.hash(state),
             Number::Big(b) => b.hash(state),
+            Number::NegZero => unreachable!("handled above"),
         }
     }
 }
@@ -178,7 +197,7 @@ impl Number {
                 BigNumber::Rat(_, s) => *s,
                 BigNumber::Int(_) => Spelling::Fraction,
             },
-            Number::Int(_) | Number::Float(_) => Spelling::Fraction,
+            Number::Int(_) | Number::Float(_) | Number::NegZero => Spelling::Fraction,
         }
     }
 
@@ -289,7 +308,19 @@ impl Number {
         }
         // Rounding *to decimal places* produces a decimal, whatever went in:
         // `round_numbers_to_decimals(1/3, 2)` is `0.33`, not `33/100`.
-        Number::from_bigrational_spelled(rounded / scale, Spelling::Decimal)
+        //
+        // But only when rounding actually *changes* the value. `5/2` is `2.5`
+        // exactly, so three significant figures leave it untouched — and a
+        // no-op must not restyle a fraction as a decimal (`displayDigits`
+        // defaults to 3, so every exact rational a student sees passes through
+        // here; in a fractions lesson the fraction is the point). The value
+        // keeps whatever spelling it already had — `1/2` stays a fraction, a
+        // typed `0.5` stays a decimal. Reported by DoenetML (open item 8).
+        let result = rounded / scale;
+        if result == exact {
+            return self.clone();
+        }
+        Number::from_bigrational_spelled(result, Spelling::Decimal)
     }
 
     /// `⌊log10 |self|⌋` — the decimal place of the leading significant digit —
@@ -330,7 +361,21 @@ impl Number {
                 BigNumber::Int(i) => i.to_f64().unwrap_or(f64::NAN),
                 BigNumber::Rat(r, _) => r.to_f64().unwrap_or(f64::NAN),
             },
+            Number::NegZero => -0.0,
         }
+    }
+
+    /// Whether this is the exact negative zero. The *only* predicate that
+    /// distinguishes `−0` from `+0`; every other observation treats them alike.
+    pub fn is_neg_zero(&self) -> bool {
+        matches!(self, Number::NegZero)
+    }
+
+    /// Sign for the purpose of a *zero result*: `true` for negative values and
+    /// for `−0`. (`is_negative` is `false` on `−0` — it is zero, not a negative
+    /// number — so a dedicated helper is needed for XOR-of-signs logic.)
+    fn zero_sign_neg(&self) -> bool {
+        self.is_negative() || self.is_neg_zero()
     }
 
     pub fn is_positive(&self) -> bool {
@@ -342,6 +387,7 @@ impl Number {
                 BigNumber::Int(i) => i.is_positive(),
                 BigNumber::Rat(r, _) => r.is_positive(),
             },
+            Number::NegZero => false,
         }
     }
 
@@ -354,6 +400,8 @@ impl Number {
                 BigNumber::Int(i) => i.is_negative(),
                 BigNumber::Rat(r, _) => r.is_negative(),
             },
+            // −0 is zero, not a negative number (matches IEEE `-0.0 < 0.0`).
+            Number::NegZero => false,
         }
     }
 
@@ -374,6 +422,9 @@ impl Number {
 
     pub fn neg(&self) -> Number {
         match self {
+            // Exact zero flips sign: −(+0) = −0, −(−0) = +0.
+            Number::Int(0) => Number::NegZero,
+            Number::NegZero => Number::Int(0),
             Number::Int(i) => Number::Int(-i),
             Number::Rat(n, d, s) => Number::Rat(-n, *d, *s),
             Number::Float(f) => Number::Float(F64::new(-f.get())),
@@ -400,6 +451,7 @@ impl Number {
                 BigNumber::Int(i) => i.is_zero(),
                 BigNumber::Rat(r, _) => r.is_zero(),
             },
+            Number::NegZero => true,
         }
     }
 
@@ -408,7 +460,9 @@ impl Number {
     }
 
     pub fn abs(&self) -> Number {
-        if self.is_negative() {
+        if self.is_neg_zero() {
+            Number::Int(0) // |−0| = +0
+        } else if self.is_negative() {
             self.neg()
         } else {
             self.clone()
@@ -425,6 +479,7 @@ impl Number {
                 BigNumber::Int(i) => BigRational::from_integer(i.clone()),
                 BigNumber::Rat(r, _) => r.clone(),
             }),
+            Number::NegZero => Some(BigRational::zero()),
             Number::Float(_) => None,
         }
     }
@@ -463,12 +518,36 @@ impl Number {
     }
 
     pub fn add(&self, other: &Number) -> Number {
+        // −0 + −0 = −0 (IEEE). Every other zero-sum is +0, which the exact fold
+        // already yields (`−0` reads as `0` through `to_bigrational`).
+        if self.is_neg_zero() && other.is_neg_zero() {
+            return Number::NegZero;
+        }
         self.binop(other, i64::checked_add, |a, b| a + b, |a, b| a + b)
     }
     pub fn sub(&self, other: &Number) -> Number {
+        // a − b with both exact zeros is −0 only for `−0 − (+0)`.
+        if self.is_zero() && other.is_zero() && !self.is_float() && !other.is_float() {
+            return if self.zero_sign_neg() && !other.zero_sign_neg() {
+                Number::NegZero
+            } else {
+                Number::Int(0)
+            };
+        }
         self.binop(other, i64::checked_sub, |a, b| a - b, |a, b| a - b)
     }
     pub fn mul(&self, other: &Number) -> Number {
+        // Exact signed zero: the sign of a zero product is the XOR of the
+        // operand signs, which the plain (bigrational) fold discards —
+        // `(−3)·0` is −0, not +0. Float operands keep IEEE's own signed zero,
+        // so only the all-exact case is intercepted here.
+        if !self.is_float() && !other.is_float() && (self.is_zero() || other.is_zero()) {
+            return if self.zero_sign_neg() ^ other.zero_sign_neg() {
+                Number::NegZero
+            } else {
+                Number::Int(0)
+            };
+        }
         self.binop(other, i64::checked_mul, |a, b| a * b, |a, b| a * b)
     }
 
@@ -478,6 +557,16 @@ impl Number {
     pub fn checked_div(&self, other: &Number) -> Option<Number> {
         if other.is_zero() && !self.is_float() && !other.is_float() {
             return None;
+        }
+        // Exact `0 / nonzero` carries a sign: `0/(−5)` is −0. (`other` is
+        // nonzero here — a zero divisor returned `None` above.) Float division
+        // follows IEEE through `binop`.
+        if self.is_zero() && !self.is_float() && !other.is_float() {
+            return Some(if self.zero_sign_neg() ^ other.zero_sign_neg() {
+                Number::NegZero
+            } else {
+                Number::Int(0)
+            });
         }
         Some(self.binop(
             other,
@@ -501,7 +590,16 @@ impl Number {
             return Some(Number::one());
         }
         if self.is_zero() {
-            return if exp < 0 { None } else { Some(Number::zero()) };
+            return if exp < 0 {
+                // 0^negative: a pole. Left `None` so the caller keeps the
+                // `Pow(0, negative)` node for the ∞/NaN fold, which reads the
+                // sign of `−0` to choose `+∞` vs `−∞`.
+                None
+            } else if self.is_neg_zero() && exp % 2 != 0 {
+                Some(Number::NegZero) // (−0)^odd = −0
+            } else {
+                Some(Number::zero())
+            };
         }
         let base = self.to_bigrational().unwrap();
         // Refuse exact results beyond ~10^6 bits (canonicalization must stay

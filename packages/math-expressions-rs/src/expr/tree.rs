@@ -13,6 +13,7 @@
 //! Read-only traversal ([`Expr::children`], [`Expr::any_subexpr`]) and n-ary
 //! flattening ([`flatten`](super::flatten)) live in [`visit`](super::visit).
 
+use crate::expr::matrix::Mat;
 use crate::expr::sym::Sym;
 use crate::num::Number;
 
@@ -100,12 +101,10 @@ pub enum Expr {
         ops: Vec<RelOp>,
     },
 
-    /// Row-major; invariant: entries.len() == rows * cols.
-    Matrix {
-        rows: u32,
-        cols: u32,
-        entries: Vec<Expr>,
-    },
+    /// Row-major. The shape invariant `entries.len() == rows * cols` is carried
+    /// by [`Mat`](crate::expr::Mat) itself, whose fields are private, so no
+    /// tree can hold a mis-shaped matrix.
+    Matrix(Mat),
 
     /// Escape hatch for the long tail of faithful-layer notation operators
     /// that only parsers and printers touch: angle, unit, pm, d,

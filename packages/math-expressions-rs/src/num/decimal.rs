@@ -107,6 +107,7 @@ impl Number {
     pub fn terminating_decimal(&self) -> Option<String> {
         let (numer, denom): (BigInt, BigInt) = match self {
             Number::Int(i) => return Some(i.to_string()),
+            Number::NegZero => return Some("0".to_string()),
             Number::Rat(n, d, _) => (BigInt::from(*n), BigInt::from(*d)),
             Number::Big(b) => match &**b {
                 BigNumber::Int(i) => return Some(i.to_string()),
@@ -135,6 +136,7 @@ impl Number {
     pub fn js_string(&self) -> String {
         match self {
             Number::Int(i) => i.to_string(),
+            Number::NegZero => "0".to_string(),
             Number::Float(f) => js_f64_to_string(f.get()),
             Number::Rat(..) | Number::Big(_) => js_f64_to_string(self.to_f64()),
         }

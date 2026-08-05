@@ -173,11 +173,12 @@ fn from_js_array(arr: &[Value]) -> Result<Expr, String> {
                     entries.push(try_from_js(row.get(c + 1).ok_or("matrix entry")?)?);
                 }
             }
-            Expr::Matrix {
-                rows,
-                cols,
-                entries,
-            }
+            // `Mat::new` re-checks the entry count that the loop above just
+            // built, so the shape is validated by the type rather than by this
+            // function getting the loop right.
+            Expr::Matrix(
+                crate::expr::Mat::new(rows, cols, entries).ok_or("matrix shape mismatch")?,
+            )
         }
         // everything else (unit, pm, angle, binom, vec, linesegment,
         // derivative_leibniz, forall, arrows, implies, iff, perp, ":", "|", d)
@@ -297,22 +298,25 @@ fn to_js_rec(expr: &Expr) -> Value {
 
         Expr::Relation { operands, ops } => relation_to_js(operands, ops),
 
-        Expr::Matrix {
-            rows,
-            cols,
-            entries,
-        } => {
+        Expr::Matrix(m) => {
             // ["matrix", ["tuple", rows, cols], ["tuple", <row-tuples>]]
-            let ncols = *cols as usize;
+            // Indexing `entries` is in bounds for every `r < rows`, `c < cols`
+            // by `Mat`'s invariant.
+            let ncols = m.cols() as usize;
+            let entries = m.entries();
             let mut body = vec![Value::String("tuple".to_string())];
-            for r in 0..*rows as usize {
+            for r in 0..m.rows() as usize {
                 let mut row = vec![Value::String("tuple".to_string())];
                 for c in 0..ncols {
                     row.push(to_js_rec(&entries[r * ncols + c]));
                 }
                 body.push(Value::Array(row));
             }
-            json!(["matrix", ["tuple", rows, cols], Value::Array(body)])
+            json!([
+                "matrix",
+                ["tuple", m.rows(), m.cols()],
+                Value::Array(body)
+            ])
         }
 
         Expr::OtherOp(name, args) => {
@@ -332,6 +336,9 @@ fn op(name: &str, args: &[Expr]) -> Value {
 fn number_to_js(n: &Number) -> Value {
     match n {
         Number::Int(i) => json!(i),
+        // −0 serializes as plain `0` (JSON has no exact negative zero, and it is
+        // value-equal to `0` anyway).
+        Number::NegZero => json!(0),
         Number::Float(_) => f64_to_js(n.to_f64()),
         // Exact rationals split on their recorded `Spelling`.
         //
@@ -403,21 +410,54 @@ fn relation_to_js(operands: &[Expr], ops: &[RelOp]) -> Value {
             to_js_rec(&operands[1])
         ]);
     }
-    if ops.iter().all(|o| *o == RelOp::Eq) {
-        // Chained equality: ["=", a, b, c, ...]
-        let mut v = vec![Value::String("=".to_string())];
-        v.extend(operands.iter().map(to_js_rec));
-        return Value::Array(v);
+    // Chained </<= and >/>= use the ["lts"/"gts", ["tuple", ...operands],
+    // ["tuple", ...strict-flags]] encoding, because a run of them can mix
+    // strictness (`a < b <= c`). Checked first, so a uniform `<=` chain still
+    // goes out as `lts` rather than as a flat `["le", …]`.
+    if ops.iter().all(|o| matches!(o, RelOp::Lt | RelOp::Le)) {
+        return chained_inequality_to_js("lts", RelOp::Lt, operands, ops);
     }
-    // Chained inequalities: ["lts"/"gts", ["tuple", ...operands],
-    // ["tuple", ...strict-flags]] where strict means < or > (not <=/>=).
-    let (head, strict_op) = if ops.iter().all(|o| matches!(o, RelOp::Lt | RelOp::Le)) {
-        ("lts", RelOp::Lt)
-    } else if ops.iter().all(|o| matches!(o, RelOp::Gt | RelOp::Ge)) {
-        ("gts", RelOp::Gt)
-    } else {
-        unreachable!("parser nests mixed-direction relation chains");
-    };
+    if ops.iter().all(|o| matches!(o, RelOp::Gt | RelOp::Ge)) {
+        return chained_inequality_to_js("gts", RelOp::Gt, operands, ops);
+    }
+    // Any other *uniform* chain — `a = b = c`, `a ≠ b ≠ c`, `x ∈ A ∈ B`,
+    // `a ⊆ b ⊆ c` — serializes flat as `[op, ...operands]`, the exact inverse
+    // of `rel_op`'s flat `vec![op; n-1]` reconstruction, so it round-trips to
+    // the identical tree. `try_from_js` builds precisely these uniform chains,
+    // so this branch handles every relation an injected tree can carry.
+    if let [first, rest @ ..] = ops {
+        if rest.iter().all(|o| o == first) {
+            let mut v = vec![Value::String(first.js_name().to_string())];
+            v.extend(operands.iter().map(to_js_rec));
+            return Value::Array(v);
+        }
+    }
+    // A genuinely mixed-direction chain reaches here. The parser nests such
+    // chains and `try_from_js` only ever builds uniform ones, so no input
+    // produces this shape — but serialization must never panic (wasm builds are
+    // `panic = "abort"`, so a would-be `unreachable!` is an uncatchable worker
+    // abort on a `to_serialized` round-trip). Lower it to a conjunction of the
+    // adjacent binary relations, which `try_from_js` reads straight back.
+    let mut conj = vec![Value::String("and".to_string())];
+    for (i, op) in ops.iter().enumerate() {
+        conj.push(json!([
+            op.js_name(),
+            to_js_rec(&operands[i]),
+            to_js_rec(&operands[i + 1])
+        ]));
+    }
+    Value::Array(conj)
+}
+
+/// A chained inequality in the JS `["lts"/"gts", ["tuple", ...operands],
+/// ["tuple", ...strict-flags]]` shape, where a `strict` flag marks `<`/`>`
+/// (as opposed to `<=`/`>=`).
+fn chained_inequality_to_js(
+    head: &str,
+    strict_op: RelOp,
+    operands: &[Expr],
+    ops: &[RelOp],
+) -> Value {
     let mut args = vec![Value::String("tuple".to_string())];
     args.extend(operands.iter().map(to_js_rec));
     let mut strict = vec![Value::String("tuple".to_string())];
@@ -447,6 +487,76 @@ mod tests {
             assert_eq!(ops.len(), 2);
             // to_js is the inverse for this shape.
             assert_eq!(to_js_rec(&expr), tree);
+        }
+    }
+
+    /// A matrix whose declared size outruns its body is rejected with an `Err`
+    /// rather than producing a tree that later readers index out of bounds.
+    /// `Mat`'s private fields make that structural: there is no way to build
+    /// the mis-shaped value in the first place, so the check cannot be skipped
+    /// by a future caller that forgets it.
+    #[test]
+    fn a_matrix_body_smaller_than_its_declared_size_is_an_error() {
+        // Declares 2×2, supplies one row of two.
+        let short_body = json!(["matrix", ["tuple", 2, 2], ["tuple", ["tuple", 1, 2]]]);
+        assert!(try_from_js(&short_body).is_err());
+        // Declares 2×2, supplies rows of one.
+        let short_rows = json!([
+            "matrix",
+            ["tuple", 2, 2],
+            ["tuple", ["tuple", 1], ["tuple", 3]]
+        ]);
+        assert!(try_from_js(&short_rows).is_err());
+        // The well-formed one still round-trips, and arrives with the shape
+        // invariant intact.
+        let ok = json!([
+            "matrix",
+            ["tuple", 2, 2],
+            ["tuple", ["tuple", 1, 2], ["tuple", 3, 4]]
+        ]);
+        let expr = try_from_js(&ok).expect("2x2 is well formed");
+        let Expr::Matrix(m) = &expr else {
+            panic!("expected a matrix, got {expr:?}")
+        };
+        assert_eq!(m.entries().len(), (m.rows() * m.cols()) as usize);
+        assert_eq!(to_js_rec(&expr), ok);
+    }
+
+    /// A flat, uniform chain of any *non-order* relation operator must
+    /// serialize without panicking and round-trip to the identical tree. These
+    /// are exactly the shapes `try_from_js` builds from `["ne", a, b, c]`,
+    /// `["in", x, A, B]`, `["subset", …]`, etc. via `rel_op`'s `vec![op; n-1]`.
+    /// Regression: `relation_to_js` used to `unreachable!()` on every one of
+    /// them (only `=`, `lts`, `gts` were handled), so a plain
+    /// `from_ast(["ne", a, b, c]).to_serialized()` — a routine DoenetML state
+    /// save — aborted the whole wasm worker (`panic = "abort"`).
+    #[test]
+    fn uniform_relation_chains_round_trip_flat() {
+        for tree in [
+            json!(["ne", "a", "b", "c"]),
+            json!(["in", "x", "A", "B"]),
+            json!(["ni", "A", "x", "y"]),
+            json!(["subset", "a", "b", "c"]),
+            json!(["superset", "a", "b", "c"]),
+            json!(["subseteq", "a", "b", "c", "d"]),
+            json!(["=", "a", "b", "c"]),
+        ] {
+            let expr = try_from_js(&tree).unwrap_or_else(|e| panic!("{tree}: {e}"));
+            assert_eq!(to_js_rec(&expr), tree, "round trip of {tree}");
+        }
+    }
+
+    /// The order chains keep their dedicated `lts`/`gts` tuple encoding — the
+    /// generalization above must not divert a uniform `<=`/`>=` run into the
+    /// flat form.
+    #[test]
+    fn order_relation_chains_keep_the_tuple_encoding() {
+        for tree in [
+            json!(["lts", ["tuple", "a", "b", "c"], ["tuple", true, false]]),
+            json!(["gts", ["tuple", "a", "b", "c"], ["tuple", false, true]]),
+        ] {
+            let expr = try_from_js(&tree).unwrap_or_else(|e| panic!("{tree}: {e}"));
+            assert_eq!(to_js_rec(&expr), tree, "round trip of {tree}");
         }
     }
 

@@ -7,7 +7,7 @@ use math_expressions::eval_numeric::certified_digits::{
     evaluate_to_precision, integrate_to_precision, Precise,
 };
 use math_expressions::{
-    canonicalize, det, Expr, LatexToAst, LatexToAstOptions, Number, NumberNotation,
+    canonicalize, det, Expr, LatexToAst, LatexToAstOptions, Mat, Number, NumberNotation,
 };
 
 fn parse_latex(nt: NumberNotation, s: &str) -> Result<Expr, math_expressions::ParseError> {
@@ -88,11 +88,7 @@ fn singular_bareiss_tier_determinant_is_zero() {
             });
         }
     }
-    let m = Expr::Matrix {
-        rows: n as u32,
-        cols: n as u32,
-        entries,
-    };
+    let m = Expr::Matrix(Mat::new(n as u32, n as u32, entries).expect("test matrix shape"));
     assert_eq!(
         canonicalize(&det(&m)),
         Expr::Num(Number::Int(0)),

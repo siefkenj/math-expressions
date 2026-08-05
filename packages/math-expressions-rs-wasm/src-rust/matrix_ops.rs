@@ -40,7 +40,7 @@ impl Expression {
             .iter()
             .map(|v| {
                 let entries = match v {
-                    Expr::Matrix { entries, .. } => entries.clone(),
+                    Expr::Matrix(m) => m.entries().to_vec(),
                     other => vec![other.clone()],
                 };
                 serde_json::Value::Array(

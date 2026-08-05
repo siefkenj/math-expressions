@@ -39,20 +39,89 @@ pub(crate) mod prec {
     pub const ATOM: u8 = 100;
 }
 
-/// Split a leading sign out of a sum term, structurally (never from a Mul,
-/// which would not round-trip). Borrows where possible; only a negative
-/// number needs an owned negation.
+/// Split a leading sign out of a term, structurally. Borrows where possible;
+/// an owned node is returned only when the sign has to be pushed inward
+/// (negating a number, or a product's first factor).
+///
+/// A product with a negative leading factor carries that factor's sign
+/// (`["*",-3,"b"]` is `-(3 b)`), so it splits too — which is what lets a sum
+/// render `a - 3 b` rather than `a + (-3) b`, and a bare product `-3 b` rather
+/// than `(-3) b` (DoenetML open item 10). This is display-only: the positive
+/// product re-parses to `Neg(Mul(...))`, an equal but distinct tree. That is
+/// acceptable because the parsers never emit a `Mul` with a negative leading
+/// factor — they use `Neg` — so no expression this changes was round-tripping
+/// through the leading-negative `Mul` form to begin with.
 pub(crate) fn split_sign(e: &Expr) -> (bool, std::borrow::Cow<'_, Expr>) {
     use std::borrow::Cow;
     match e {
         Expr::Neg(x) => (true, Cow::Borrowed(&**x)),
         Expr::Num(n) if number_is_negative(n) => (true, Cow::Owned(Expr::Num(n.neg()))),
+        Expr::Mul(fs) => match strip_mul_leading_sign(fs) {
+            Some(pos) => (true, Cow::Owned(Expr::Mul(pos))),
+            None => (false, Cow::Borrowed(e)),
+        },
         _ => (false, Cow::Borrowed(e)),
+    }
+}
+
+/// If a product's first factor carries a pullable sign, return the factor list
+/// with that factor made positive; otherwise `None`.
+fn strip_mul_leading_sign(factors: &[Expr]) -> Option<Vec<Expr>> {
+    let (neg, body) = split_sign(factors.first()?);
+    if !neg {
+        return None;
+    }
+    let mut out = Vec::with_capacity(factors.len());
+    out.push(body.into_owned());
+    out.extend(factors[1..].iter().cloned());
+    Some(out)
+}
+
+/// Display-only pass (port of the legacy `normalize_display_negative_fractions`)
+/// that pulls a leading negative factor out of a fraction's numerator into a
+/// unary minus: `["/",-2,3]` shows as `-2/3`, and `z + (-2)/3` as `z - 2/3`.
+/// Purely presentational — run at the printer entry, never on a stored tree.
+///
+/// The `inside_unary_minus` guard skips a fraction that is already the operand
+/// of a unary minus (`-(-2/3)` stays as written, not `--2/3`); every other node
+/// recurses with the guard cleared, so only a fraction directly under a `Neg`
+/// is left alone.
+pub(crate) fn normalize_display_negative_fractions(e: &Expr) -> Expr {
+    ndf(e, false)
+}
+
+fn ndf(e: &Expr, inside_unary_minus: bool) -> Expr {
+    match e {
+        // A unary minus sets the guard for its immediate operand only.
+        Expr::Neg(x) => Expr::Neg(Box::new(ndf(x, true))),
+        Expr::Div(num, den) => {
+            if !inside_unary_minus {
+                if let (true, pos) = split_sign(num) {
+                    return Expr::Neg(Box::new(Expr::Div(
+                        Box::new(ndf(pos.as_ref(), false)),
+                        Box::new(ndf(den, false)),
+                    )));
+                }
+            }
+            Expr::Div(Box::new(ndf(num, false)), Box::new(ndf(den, false)))
+        }
+        _ => crate::expr::map_children(e, |c| ndf(c, false)),
     }
 }
 
 pub(crate) fn number_is_negative(n: &Number) -> bool {
     n.is_negative()
+}
+
+/// Whether an `Apply` head is the integral sign — a bare `int` symbol, possibly
+/// wrapped in the sub/superscript limits (`∫_a^b`). Mirrors the legacy check
+/// that strips a `^` then a `_` from the head before comparing to `int`.
+pub(crate) fn is_integral_head(head: &Expr) -> bool {
+    match head {
+        Expr::Sym(s) => s.name() == "int",
+        Expr::Pow(b, _) | Expr::Index(b, _) => is_integral_head(b),
+        _ => false,
+    }
 }
 
 /// A Leibniz-notation variable entry is either `x` or `(x, n)`. A malformed
@@ -159,6 +228,7 @@ pub(crate) fn greek_unicode(name: &str) -> Option<&'static str> {
         "circ" => "∘",
         "star" => "⋆",
         "perp" => "⟂",
+        "int" => "∫",
         _ => return None,
     })
 }

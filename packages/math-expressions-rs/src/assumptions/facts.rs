@@ -31,6 +31,7 @@ impl Facts {
         }
         let is_int = match n {
             Number::Int(_) => true,
+            Number::NegZero => true,
             Number::Rat(..) => false,
             Number::Big(_) => n.magnitude_log10().is_some() && is_big_int(n),
             Number::Float(_) => v.fract() == 0.0,

@@ -152,14 +152,17 @@ fn absorb_negation(e: Expr) -> Result<Expr, Expr> {
 /// `try_evaluate_quotient_of_numbers`, which is why `x/2/3` stays as written
 /// rather than collapsing to `x/6`. A zero divisor yields the same constants
 /// the canonical layer produces: `0/0` is indeterminate, anything else over
-/// zero is a pole (unsigned — there is no negative zero in the exact model).
+/// zero is a pole whose sign is `sign(n) · sign(d)` — a `−0` divisor flips it,
+/// so `6/(−0) → −∞`.
 fn divide(a: Expr, b: Expr) -> Expr {
     if let (Expr::Num(n), Expr::Num(d)) = (&a, &b) {
         if d.is_zero() {
-            return Expr::Const(match () {
-                _ if n.is_zero() => MathConst::NaN,
-                _ if n.is_negative() => MathConst::NegInf,
-                _ => MathConst::Inf,
+            return Expr::Const(if n.is_zero() {
+                MathConst::NaN
+            } else if n.is_negative() ^ d.is_neg_zero() {
+                MathConst::NegInf
+            } else {
+                MathConst::Inf
             });
         }
         if let Some(q) = n.checked_div(d) {

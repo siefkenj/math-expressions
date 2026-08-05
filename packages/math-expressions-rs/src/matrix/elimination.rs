@@ -35,19 +35,14 @@ pub(super) fn as_rationals(entries: &[Expr]) -> Option<Vec<BigRational>> {
 
 /// A canonical square literal matrix with its dimension, under the dim cap.
 pub(super) fn square_literal(c: &Expr) -> Option<(usize, &[Expr])> {
-    let Expr::Matrix {
-        rows,
-        cols,
-        entries,
-    } = c
-    else {
+    let Expr::Matrix(m) = c else {
         return None;
     };
-    let n = *rows as usize;
-    if rows != cols || n == 0 || n > crate::resource_limits::current().max_matrix_dim {
+    let n = m.rows() as usize;
+    if !m.is_square() || n == 0 || n > crate::resource_limits::current().max_matrix_dim {
         return None;
     }
-    Some((n, entries))
+    Some((n, m.entries()))
 }
 
 /// Is this entry provably zero? Pivot/rank/discriminant decisions ride on

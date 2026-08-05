@@ -158,21 +158,11 @@ pub(crate) fn cmp(a: &Expr, b: &Expr) -> Ordering {
                 .cmp(p2.iter().map(|r| rel_index(*r)))
         }),
 
-        (
-            Expr::Matrix {
-                rows: r1,
-                cols: c1,
-                entries: e1,
-            },
-            Expr::Matrix {
-                rows: r2,
-                cols: c2,
-                entries: e2,
-            },
-        ) => r1
-            .cmp(r2)
-            .then_with(|| c1.cmp(c2))
-            .then_with(|| slice_cmp(e1, e2)),
+        (Expr::Matrix(m1), Expr::Matrix(m2)) => m1
+            .rows()
+            .cmp(&m2.rows())
+            .then_with(|| m1.cols().cmp(&m2.cols()))
+            .then_with(|| slice_cmp(m1.entries(), m2.entries())),
 
         (Expr::OtherOp(n1, a1), Expr::OtherOp(n2, a2)) => {
             n1.name().cmp(&n2.name()).then_with(|| slice_cmp(a1, a2))

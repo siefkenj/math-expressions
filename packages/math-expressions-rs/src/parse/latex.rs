@@ -13,7 +13,7 @@ use super::common::{
 };
 use super::error::ParseError;
 use super::lexer::{Lexer, LexerState, Tok, Token};
-use crate::expr::{flatten, Expr, MathConst, RelOp, SeqKind};
+use crate::expr::{flatten, Expr, Mat, MathConst, RelOp, SeqKind};
 use crate::num::Number;
 use std::collections::HashSet;
 
@@ -488,11 +488,14 @@ impl LatexToAst {
             }
         }
 
-        Ok(Expr::Matrix {
-            rows: n_rows as u32,
-            cols: n_cols as u32,
-            entries,
-        })
+        // Every row was padded to `n_cols` just above, so the count matches;
+        // if it somehow did not, this is a parse error rather than a tree
+        // carrying a shape the rest of the crate indexes on faith.
+        Mat::new(n_rows as u32, n_cols as u32, entries)
+            .map(Expr::Matrix)
+            .ok_or_else(|| {
+                ParseError::new("matrix rows do not form a rectangle", self.lexer.location)
+            })
     }
 
     fn sqrt_factor(&mut self, p: P) -> R<Expr> {
@@ -1057,5 +1060,9 @@ enum SymbolResult {
 fn brace_content(s: &str) -> String {
     let start = s.find('{').map(|i| i + 1).unwrap_or(0);
     let end = s.rfind('}').unwrap_or(s.len());
-    s[start..end].trim().to_string()
+    // `start > end` (a `}` before the `{`) would make `s[start..end]` panic —
+    // an uncatchable abort in wasm. No lexer token feeds that shape today, but
+    // keep the safety local rather than resting on a lexer invariant enforced
+    // elsewhere: `get` yields `None` for an out-of-order or non-boundary range.
+    s.get(start..end).unwrap_or("").trim().to_string()
 }

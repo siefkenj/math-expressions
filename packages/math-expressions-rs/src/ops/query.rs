@@ -132,8 +132,8 @@ fn collect(e: &Expr, out: &mut Vec<String>, seen: &mut HashSet<String>) {
                 collect(c, out, seen);
             }
         }
-        Expr::Matrix { entries, .. } => {
-            for c in entries {
+        Expr::Matrix(m) => {
+            for c in m.entries() {
                 collect(c, out, seen);
             }
         }

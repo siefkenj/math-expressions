@@ -80,7 +80,7 @@ pub use eval_numeric::certified_digits::{
 };
 pub use expr::sym::{interner_len, Sym};
 pub use expr::tear_down;
-pub use expr::{Expr, MathConst, RelOp};
+pub use expr::{Expr, Mat, MathConst, RelOp};
 pub use grade::{
     equal_specified_sign_errors, equal_with_sign_errors, evaluate_membership, solve_linear,
 };

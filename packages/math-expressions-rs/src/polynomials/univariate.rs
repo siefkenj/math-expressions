@@ -76,12 +76,24 @@ pub(crate) fn scale(a: &[BigRational], c: &BigRational) -> UPoly {
     a.iter().map(|x| x * c).collect()
 }
 
-/// Euclidean division over ℚ: `a = q·b + r`, deg r < deg b. `b` nonzero.
+/// Euclidean division over ℚ: `a = q·b + r`, deg r < deg b.
+///
+/// Division by the zero polynomial is undefined; rather than assert, it yields
+/// `(0, a)` — "no division performed". Every caller already refuses a zero
+/// divisor upstream, so that branch is dead today, and it exists only so a
+/// future caller cannot turn a missed guard into an uncatchable wasm abort
+/// (`panic = "abort"`); a benign wrong answer beats a dead worker.
+///
+/// The divisor's degree is taken as its last *nonzero* coefficient rather than
+/// `b.len() - 1`, so a `b` carrying trailing zeros divides by its true leading
+/// coefficient instead of by zero. `rposition` allocates nothing, so the
+/// hot Euclidean loops (`gcd`, Sturm chains) pay nothing for this.
 pub(crate) fn divrem(a: &[BigRational], b: &[BigRational]) -> (UPoly, UPoly) {
-    assert!(!b.is_empty(), "division by the zero polynomial");
     let mut r: UPoly = a.to_vec();
     trim(&mut r);
-    let db = degree(b);
+    let Some(db) = b.iter().rposition(|c| !c.is_zero()) else {
+        return (Vec::new(), r);
+    };
     let lc = &b[db];
     let mut q = vec![BigRational::zero(); r.len().saturating_sub(db)];
     while !r.is_empty() && degree(&r) >= db {

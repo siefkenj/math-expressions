@@ -66,8 +66,12 @@ fn drain_children(e: &mut Expr, stack: &mut Vec<Expr>) {
         | Expr::Intersect(xs)
         | Expr::Seq(_, xs)
         | Expr::Relation { operands: xs, .. }
-        | Expr::Matrix { entries: xs, .. }
         | Expr::OtherOp(_, xs) => stack.extend(take(xs)),
+
+        // Not part of the or-pattern above: the entries live behind `Mat`'s
+        // private fields, which hand them over only alongside a dimension
+        // reset (see `Mat::take_entries`).
+        Expr::Matrix(m) => stack.extend(m.take_entries()),
 
         // Head plus argument list.
         Expr::Apply(head, args) => {

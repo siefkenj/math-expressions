@@ -13,11 +13,9 @@ fn as_vector(e: &Expr) -> Option<(crate::expr::SeqKind, Vec<Expr>)> {
         Expr::Seq(k @ (SeqKind::Vector | SeqKind::AltVector | SeqKind::Tuple), xs) => {
             Some((*k, xs.clone()))
         }
-        Expr::Matrix {
-            rows,
-            cols,
-            entries,
-        } if *rows == 1 || *cols == 1 => Some((SeqKind::Vector, entries.clone())),
+        Expr::Matrix(m) if m.rows() == 1 || m.cols() == 1 => {
+            Some((SeqKind::Vector, m.entries().to_vec()))
+        }
         _ => None,
     }
 }

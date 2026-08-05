@@ -10,7 +10,7 @@
 use math_expressions::eval_numeric::complex::{eval_complex, Env};
 use math_expressions::matrix::{char_poly, eigenvalues, eigenvectors};
 use math_expressions::{
-    canonicalize, equals, expand, simplify, Assumptions, EqOptions, Expr, TextToAst,
+    canonicalize, equals, expand, simplify, Assumptions, EqOptions, Expr, Mat, TextToAst,
     TextToAstOptions,
 };
 
@@ -32,19 +32,11 @@ fn subst_t(p: &Expr, v: &Expr) -> Expr {
 /// Build a literal matrix from entry strings (row-major).
 fn mat(rows: u32, cols: u32, entries: &[&str]) -> Expr {
     assert_eq!(entries.len() as u32, rows * cols);
-    Expr::Matrix {
-        rows,
-        cols,
-        entries: entries.iter().map(|s| parse(s)).collect(),
-    }
+    Expr::Matrix(Mat::new(rows, cols, entries.iter().map(|s| parse(s)).collect()).expect("test matrix shape"))
 }
 
 fn column(entries: &[Expr]) -> Expr {
-    Expr::Matrix {
-        rows: entries.len() as u32,
-        cols: 1,
-        entries: entries.to_vec(),
-    }
+    Expr::Matrix(Mat::new(entries.len() as u32, 1, entries.to_vec()).expect("test matrix shape"))
 }
 
 fn zero_column(n: usize) -> Expr {
@@ -109,11 +101,7 @@ fn companion(cs: &[&str]) -> Expr {
             }
         }
     }
-    Expr::Matrix {
-        rows: n as u32,
-        cols: n as u32,
-        entries,
-    }
+    Expr::Matrix(Mat::new(n as u32, n as u32, entries).expect("test matrix shape"))
 }
 
 // ================= M3: characteristic polynomial =================
@@ -410,11 +398,7 @@ fn eigenvectors_block_diagonal_discovers_factors() {
             entries.push(parse(&s));
         }
     }
-    let a = Expr::Matrix {
-        rows: 6,
-        cols: 6,
-        entries,
-    };
+    let a = Expr::Matrix(Mat::new(6, 6, entries).expect("test matrix shape"));
     let pairs = eigenvectors(&a, &Assumptions::new()).expect("eigenvectors");
     let total: u32 = pairs.iter().map(|p| p.alg_mult).sum();
     assert_eq!(total, 6);
@@ -457,10 +441,8 @@ fn eigen_self_verification_sweep() {
         let p = char_poly(a, "t").unwrap_or_else(|| panic!("{name}: char poly"));
         let vals = eigenvalues(a, &Assumptions::new()).unwrap_or_else(|| panic!("{name}: values"));
         let n: u32 = vals.iter().map(|(_, m)| m).sum();
-        let Expr::Matrix { rows, .. } = a else {
-            unreachable!()
-        };
-        assert_eq!(n, *rows, "{name}: multiplicities sum to n");
+        let Expr::Matrix(m) = a else { unreachable!() };
+        assert_eq!(n, m.rows(), "{name}: multiplicities sum to n");
         for (v, _) in &vals {
             assert_annihilates(&p, v, name);
         }

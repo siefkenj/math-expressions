@@ -284,24 +284,30 @@ fn a_coefficient_is_not_forced_under_a_fraction_bar() {
     assert_eq!(tree(&simplify(&p("x^1.5"))), r#"["^","x",1.5]"#);
 }
 
-/// Rounding *to decimal places* produces a decimal whatever went in — the one
-/// operation whose whole purpose is to impose the decimal spelling.
+/// Rounding *to decimal places* imposes the decimal spelling — but only when it
+/// actually rounds. If the value survives the round unchanged it keeps whatever
+/// spelling it had, so an exact fraction a student sees stays a fraction
+/// (DoenetML open item 8: `displayDigits` defaults to 3 and every rational goes
+/// through this path — in a fractions lesson the fraction is the point).
 #[test]
 fn rounding_produces_decimals() {
     use math_expressions::{round_numbers_to_decimals, round_numbers_to_precision};
+    // Rounding that *changes* the value produces a decimal.
     assert_eq!(
         tree(&round_numbers_to_decimals(&simplify(&p("1/3")), 2)),
         "0.33"
     );
+    assert_eq!(tree(&round_numbers_to_decimals(&p("2.345"), 2)), "2.35");
+    // Rounding that changes nothing (`3/6` is `1/2` is `0.5` exactly) leaves the
+    // fraction untouched, at both a decimal count and a significant-figure count.
     assert_eq!(
         tree(&round_numbers_to_decimals(&simplify(&p("3/6")), 3)),
-        "0.5"
+        r#"["/",1,2]"#
     );
     assert_eq!(
         tree(&round_numbers_to_precision(&simplify(&p("3/6")), 3)),
-        "0.5"
+        r#"["/",1,2]"#
     );
-    assert_eq!(tree(&round_numbers_to_decimals(&p("2.345"), 2)), "2.35");
 }
 
 /// The spelling is *not* part of a number's identity: `0.5` and `1/2` are the

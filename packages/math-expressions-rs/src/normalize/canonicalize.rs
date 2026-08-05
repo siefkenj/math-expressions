@@ -84,15 +84,7 @@ pub fn canonicalize(e: &Expr) -> Expr {
         Expr::Relation { operands, ops } => {
             canon_relation(operands.iter().map(canonicalize).collect(), ops.clone())
         }
-        Expr::Matrix {
-            rows,
-            cols,
-            entries,
-        } => Expr::Matrix {
-            rows: *rows,
-            cols: *cols,
-            entries: entries.iter().map(canonicalize).collect(),
-        },
+        Expr::Matrix(m) => Expr::Matrix(m.map(canonicalize)),
         Expr::OtherOp(name, args) => {
             let mut cargs: Vec<Expr> = args.iter().map(canonicalize).collect();
             // `binom(n,k)` and the applied `nCr(n,k)` denote the same thing;

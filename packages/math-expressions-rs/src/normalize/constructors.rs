@@ -3,7 +3,7 @@
 //! sorted, exactly folded, like terms/powers combined).
 
 use super::{cmp, identity_matrix, is_matrix_valued, matmul_literal};
-use crate::expr::Expr;
+use crate::expr::{Expr, Mat};
 use crate::num::Number;
 use std::cell::Cell;
 
@@ -67,12 +67,9 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
     // Entrywise accumulation per matrix dimension: (rows, cols, per-entry terms).
     let mut mats: Vec<(u32, u32, Vec<Vec<Expr>>)> = Vec::new();
     for t in flat {
-        if let Expr::Matrix {
-            rows,
-            cols,
-            entries,
-        } = t
-        {
+        if let Expr::Matrix(m) = t {
+            let (rows, cols) = (m.rows(), m.cols());
+            let entries = m.into_entries();
             match mats.iter_mut().find(|(r, c, _)| *r == rows && *c == cols) {
                 Some((_, _, acc)) => {
                     for (slot, e) in acc.iter_mut().zip(entries) {
@@ -105,11 +102,12 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
 
     let mut out = Vec::with_capacity(parts.len() + mats.len() + 1);
     for (rows, cols, acc) in mats {
-        out.push(Expr::Matrix {
-            rows,
-            cols,
-            entries: acc.into_iter().map(add).collect(),
-        });
+        // `acc` carries exactly one accumulator per entry of a rows×cols
+        // matrix (it was seeded from one and only ever `zip`ped), so this
+        // always constructs.
+        if let Some(m) = Mat::new(rows, cols, acc.into_iter().map(add).collect()) {
+            out.push(Expr::Matrix(m));
+        }
     }
     if !constant.is_zero() {
         out.push(Expr::Num(constant));
@@ -147,11 +145,14 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
 /// `try_evaluate_quotient_of_numbers` tests `is_nonzero(denom) === false` before
 /// the `numer === 0 → 0` shortcut, and its product fold checks `!isFinite`
 /// before annihilating.
-fn annihilate(indeterminate: bool) -> Expr {
+fn annihilate(coeff: &Number, indeterminate: bool) -> Expr {
     if indeterminate {
         Expr::Const(crate::expr::MathConst::NaN)
     } else {
-        Expr::Num(Number::zero())
+        // Preserve the coefficient's *sign of zero* (`Int(0)` or `−0`), so a
+        // product like `(−1)·0` collapses to `−0` and a later `1/(−0)` can fold
+        // to `−∞`. `−0` reads as plain `0` everywhere that does not ask.
+        Expr::Num(coeff.clone())
     }
 }
 
@@ -211,7 +212,7 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         let mut seq: Vec<Expr> = Vec::with_capacity(matrices.len());
         for m in matrices {
             match (seq.last(), &m) {
-                (Some(Expr::Matrix { .. }), Expr::Matrix { .. }) => {
+                (Some(Expr::Matrix(_)), Expr::Matrix(_)) => {
                     let prev = seq.pop().unwrap();
                     match matmul_literal(&prev, &m) {
                         Some(folded) => seq.push(folded),
@@ -226,21 +227,10 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         }
         // Fully folded: the scalar part distributes into the entries.
         if seq.len() == 1 {
-            if let Expr::Matrix {
-                rows,
-                cols,
-                entries,
-            } = &seq[0]
-            {
+            if let Expr::Matrix(m) = &seq[0] {
                 if !matches!(&scalar_part, Expr::Num(n) if n.is_one()) {
-                    return Expr::Matrix {
-                        rows: *rows,
-                        cols: *cols,
-                        entries: entries
-                            .iter()
-                            .map(|e| mul(vec![scalar_part.clone(), e.clone()]))
-                            .collect(),
-                    };
+                    // Entrywise, so the shape carries over untouched.
+                    return Expr::Matrix(m.map(|e| mul(vec![scalar_part.clone(), e.clone()])));
                 }
                 return seq.pop().unwrap();
             }
@@ -307,7 +297,7 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
     }
 
     if coeff.is_zero() {
-        return annihilate(parts.iter().any(|(b, x)| is_infinite_factor(b, x)));
+        return annihilate(&coeff, parts.iter().any(|(b, x)| is_infinite_factor(b, x)));
     }
 
     let mut out = Vec::with_capacity(parts.len() + 1);
@@ -329,7 +319,7 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         }
     }
     if coeff.is_zero() {
-        return annihilate(out.iter().cloned().any(|f| {
+        return annihilate(&coeff, out.iter().cloned().any(|f| {
             let (b, x) = split_pow(f);
             is_infinite_factor(&b, &x)
         }));
@@ -368,8 +358,8 @@ pub(crate) fn pow(base: Expr, exp: Expr) -> Expr {
     // else (negative — inverse is Layer 2 —, symbolic, non-square) stays an
     // unevaluated Pow. Ordered before the scalar fast paths: `A^0` must be I,
     // not the scalar 1.
-    if let Expr::Matrix { rows, cols, .. } = &base {
-        let (rows, cols) = (*rows, *cols);
+    if let Expr::Matrix(m) = &base {
+        let (rows, cols) = (m.rows(), m.cols());
         match as_int(&exp) {
             Some(1) => return base,
             Some(0) if rows == cols => return identity_matrix(rows),

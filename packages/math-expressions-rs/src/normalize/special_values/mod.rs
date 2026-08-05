@@ -102,7 +102,31 @@ fn fold_node(e: &Expr) -> Expr {
         }
         // e^{ln u} → u.
         Expr::Pow(b, x) if is_e(b) => log_arg(x).unwrap_or_else(|| e.clone()),
+        // i^n → {1, i, −1, −i}.
+        Expr::Pow(b, x) => fold_imaginary_power(b, x).unwrap_or_else(|| e.clone()),
         Expr::Add(ts) => fold_complementary(ts).unwrap_or_else(|| e.clone()),
         _ => e.clone(),
     }
+}
+
+/// `i^n → {1, i, −1, −i}` for an integer exponent (`n mod 4`). Unconditionally
+/// sound: the imaginary unit's integer powers are exact, with no branch cut to
+/// choose. `i` is a symbol here (`canonicalize` turns `Const(I)` into
+/// `Sym("i")`), so without this rewrite its integer powers stay symbolic —
+/// `equals` already knows `i² = −1` numerically, so only `simplify`/`.tree`
+/// display was affected. DoenetML open item 9 (the unambiguous half; the root
+/// cases await the corpus). `n mod 4` is Euclidean so `i^{-1} = −i` folds too.
+fn fold_imaginary_power(base: &Expr, exp: &Expr) -> Option<Expr> {
+    if !util::is_i(base) {
+        return None;
+    }
+    let crate::expr::Expr::Num(crate::num::Number::Int(n)) = exp else {
+        return None;
+    };
+    Some(match n.rem_euclid(4) {
+        0 => Expr::int(1),
+        1 => Expr::sym("i"),
+        2 => Expr::int(-1),
+        _ => Expr::Neg(Box::new(Expr::sym("i"))),
+    })
 }

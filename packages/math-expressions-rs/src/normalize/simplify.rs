@@ -251,7 +251,10 @@ fn even_power_root(u: &Expr) -> Option<Expr> {
 //     any infinity is seen, so `0·∞`, `0/0`, `0·(1/0)` stay `0`, not `NaN`.
 //   * `0^0 → 1`: our `pow` defines this (a common CAS choice), so `(3-3)^0 → 1`,
 //     not `NaN`.
-//   * no signed zero: `6/-0` folds to `+∞`, not `-∞`.
+//
+// We DO track a signed zero (`Number::NegZero`), narrowly: it is value-equal to
+// `0` everywhere except the pole fold, so `6/-0 → −∞` and `1/((−1)·0) → −∞`
+// while `−0` on its own still prints as `0`. See `Number::NegZero`.
 //
 // What we DO fold: a pole `Pow(0, negative) → ∞`, infinities absorbing
 // *constant* co-operands in sums/products, `x/∞ → 0`, and `∞ − ∞ → NaN`.
@@ -281,11 +284,19 @@ fn const_of(e: &Expr) -> Option<MathConst> {
     }
 }
 
-/// True for a `Pow(0, negative)` node — a division-by-zero pole, which we treat
-/// as `+∞` (no signed zero in the exact model).
+/// True for a `Pow(0, negative)` node — a division-by-zero pole. `+0` gives a
+/// `+∞` pole, `−0` a `−∞` pole (see [`neg_zero_pole`]).
 fn is_zero_pole(e: &Expr) -> bool {
     matches!(e, Expr::Pow(b, x)
         if matches!(&**b, Expr::Num(n) if n.is_zero())
+        && matches!(&**x, Expr::Num(n) if n.is_negative()))
+}
+
+/// True for a `Pow(−0, negative)` node — a pole whose base is exact negative
+/// zero, so it folds to `−∞` rather than `+∞`. Implies [`is_zero_pole`].
+fn neg_zero_pole(e: &Expr) -> bool {
+    matches!(e, Expr::Pow(b, x)
+        if matches!(&**b, Expr::Num(n) if n.is_neg_zero())
         && matches!(&**x, Expr::Num(n) if n.is_negative()))
 }
 
@@ -303,10 +314,14 @@ fn is_infnan_constant(e: &Expr) -> bool {
 }
 
 fn fold_infnan_pow(base: &Expr, exp: &Expr) -> Option<Expr> {
-    // A bare pole `1/0`.
+    // A bare pole `1/0` → `+∞`, or `1/(−0)` → `−∞`.
     if let (Expr::Num(b), Expr::Num(x)) = (base, exp) {
         if b.is_zero() && x.is_negative() {
-            return Some(Expr::Const(MathConst::Inf));
+            return Some(Expr::Const(if b.is_neg_zero() {
+                MathConst::NegInf
+            } else {
+                MathConst::Inf
+            }));
         }
     }
     // `∞^n`: → 0 for n < 0, → ∞ for n > 0 (n == 0 is handled by `pow`).
@@ -358,6 +373,9 @@ fn fold_infnan_mul(factors: &[Expr]) -> Option<Expr> {
             _ => {
                 if is_zero_pole(f) {
                     saw_infinite = true;
+                    if neg_zero_pole(f) {
+                        sign = -sign; // a `1/(−0)` factor is `−∞`
+                    }
                 } else if let Expr::Num(n) = f {
                     if n.is_negative() {
                         sign = -sign;
@@ -391,7 +409,12 @@ fn fold_infnan_add(terms: &[Expr]) -> Option<Expr> {
             Some(MathConst::NaN) => nan = true,
             _ => {
                 if is_zero_pole(t) {
-                    pos = true; // a pole term is +∞ in the no-signed-zero model
+                    // `1/0` is a `+∞` term, `1/(−0)` a `−∞` term.
+                    if neg_zero_pole(t) {
+                        neg = true;
+                    } else {
+                        pos = true;
+                    }
                 }
             }
         }
@@ -657,18 +680,23 @@ fn combine_seqs_in_add(terms: &[Expr]) -> Option<Expr> {
 
 // ---- Cluster: radical simplification ----
 //
-// Real-domain root simplification (the whole library is real-analysis
-// educational): pull the sign out of an odd root of a negative
-// (`cbrt(-x²) → -cbrt(x²)`), pull perfect q-th-power factors of the numeric
-// coefficient out from under the radical (`cbrt(-16x⁴) → -2·cbrt(2x⁴)`), and
-// fold a numeric power whose base is an exact perfect power
-// (`(-8)^(1/3) → -2`). These are *false* under complex principal branches, but
-// correct on the reals and what JS `.simplify()` does — the corpus's advisory
-// JS cross-check confirms them.
+// Numeric root simplification. The confirmed DoenetML rule: a *number* under a
+// root folds — preferring a real root when one exists, else the correct
+// principal complex root — while a *variable* radicand never folds.
 //
-// Even roots of negatives are left alone (complex). Symbolic radicands that are
-// not a numeric multiple of a rest (`cbrt((-x)^3)`) need power-of-product
-// expansion, which is a separate rule not yet ported.
+// - Odd root of a negative: the real root wins, so pull the sign out
+//   (`cbrt(-16x⁴) → -2·cbrt(2x⁴)`, `(-8)^(1/3) → -2`).
+// - Perfect q-th-power factors of the numeric coefficient come out front
+//   (`sqrt(8) → 2·sqrt(2)`).
+// - Even root of a *negative number*: no real value, so the principal complex
+//   root. Exact on the imaginary axis at q = 2 (`sqrt(-4) → 2i`,
+//   `sqrt(-2) → i·sqrt(2)`); higher even roots need the surd `cos(π/q)+i·sin(π/q)`
+//   form we don't build for roots yet, and stay symbolic.
+//
+// A variable radicand of an even root (`sqrt(-4x)`, `sqrt(x²)`) has unknown
+// sign, so it never folds. Symbolic radicands that are not a numeric multiple
+// of a rest (`cbrt((-x)^3)`) need power-of-product expansion, a separate rule
+// not yet ported.
 
 fn rule_radical(e: &Expr) -> Option<Expr> {
     match e {
@@ -724,7 +752,23 @@ fn fold_numeric_radical(b: &Number, p: i64, q: i64) -> Option<Expr> {
     let q = u32::try_from(q).ok()?;
     let negative = base < 0;
     if negative && q % 2 == 0 {
-        return None; // even root of a negative — complex
+        // Even root of a negative — no real value. At q = 2 the principal value
+        // is `m^p · i^p` when `|base| = m²` is a perfect square (this form does
+        // not partial-extract, matching the positive `b^(p/q)` path — `8^(1/2)`
+        // stays symbolic while `sqrt(8)` reduces). Higher even roots need a surd
+        // form we don't build, so they stay symbolic.
+        if q == 2 {
+            let (m, r) = extract_qth_power(base.unsigned_abs(), 2);
+            if r != 1 {
+                return None;
+            }
+            let mag = Number::Int(m as i64).checked_pow_int(p)?;
+            // p is odd (p/q is reduced, q = 2), so `i^p` is `±i`; fold the sign
+            // into the magnitude.
+            let mag = if p.rem_euclid(4) == 3 { mag.neg() } else { mag };
+            return Some(mul(vec![Expr::Num(mag), Expr::sym("i")]));
+        }
+        return None;
     }
     let (m, r) = extract_qth_power(base.unsigned_abs(), q);
     if r != 1 {
@@ -749,7 +793,15 @@ fn simplify_root(degree: i64, radicand: &Expr, root: Root) -> Option<Expr> {
 
     let negative = c < 0;
     if negative && q % 2 == 0 {
-        return None; // even root of a negative — complex, leave alone
+        // No real even root of a negative. For a *purely numeric* radicand the
+        // principal value is exact on the imaginary axis at q = 2
+        // (`sqrt(-c) = sqrt(c)·i`), so fold it; a variable radicand has unknown
+        // sign and never folds. Higher even roots (q ≥ 4) need the exact
+        // `cos(π/q) + i·sin(π/q)` surd form we don't build for roots yet.
+        if q == 2 && rest.is_none() {
+            return Some(principal_imaginary_sqrt(c.unsigned_abs()));
+        }
+        return None;
     }
     let sign: i64 = if negative { -1 } else { 1 };
     let (m, r) = extract_qth_power(c.unsigned_abs(), q);
@@ -777,6 +829,27 @@ fn simplify_root(degree: i64, radicand: &Expr, root: Root) -> Option<Expr> {
     } else {
         Some(mul(vec![coeff_out, root.rebuild(inner)]))
     }
+}
+
+/// The principal square root of a negative integer whose magnitude is `c`:
+/// `sqrt(-c) = sqrt(c)·i`, with the perfect-square part pulled out so the result
+/// is fully reduced — `sqrt(-1) → i`, `sqrt(-4) → 2i`, `sqrt(-2) → i·sqrt(2)`,
+/// `sqrt(-8) → 2·i·sqrt(2)`. The factor order is normalized by the surrounding
+/// canonicalization.
+fn principal_imaginary_sqrt(c: u64) -> Expr {
+    let (m, r) = extract_qth_power(c, 2);
+    let mut factors = Vec::new();
+    if m != 1 {
+        factors.push(Expr::Num(Number::Int(m as i64)));
+    }
+    factors.push(Expr::sym("i"));
+    if r != 1 {
+        factors.push(Expr::Apply(
+            Box::new(Expr::sym("sqrt")),
+            vec![Expr::Num(Number::Int(r as i64))],
+        ));
+    }
+    mul(factors)
 }
 
 /// Largest `m` such that `m^q` divides `c`, with `r = c / m^q` the

@@ -59,6 +59,10 @@ pub(super) fn is_e(e: &Expr) -> bool {
     matches!(e, Expr::Const(MathConst::E)) || matches!(e, Expr::Sym(s) if s.name() == "e")
 }
 
+pub(super) fn is_i(e: &Expr) -> bool {
+    matches!(e, Expr::Const(MathConst::I)) || matches!(e, Expr::Sym(s) if s.name() == "i")
+}
+
 pub(super) fn is_zero_expr(e: &Expr) -> bool {
     matches!(canon(e), Expr::Num(n) if n.is_zero())
 }

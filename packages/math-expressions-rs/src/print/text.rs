@@ -53,7 +53,8 @@ impl Default for TextOpts {
 }
 
 pub fn convert(expr: &Expr, opts: &TextOpts) -> String {
-    Writer { opts, pad: true }.emit(expr, 0)
+    let expr = super::normalize_display_negative_fractions(expr);
+    Writer { opts, pad: true }.emit(&expr, 0)
 }
 
 struct Writer<'a> {
@@ -115,7 +116,7 @@ impl Writer<'_> {
             Expr::Ldots => ("...".to_string(), ATOM),
 
             Expr::Add(terms) => (self.render_add(terms), ADD),
-            Expr::Mul(factors) => (self.render_mul(factors), MUL),
+            Expr::Mul(factors) => self.render_mul(factors),
             Expr::Div(a, b) => (
                 format!("{}/{}", self.emit(a, MUL), self.emit(b, MUL + 1)),
                 MUL,
@@ -186,11 +187,7 @@ impl Writer<'_> {
                 (self.render_interval(endpoints, *closed), ATOM)
             }
             Expr::Relation { operands, ops } => (self.render_relation(operands, ops), REL),
-            Expr::Matrix {
-                rows,
-                cols,
-                entries,
-            } => (self.render_matrix(*rows, *cols, entries), ATOM),
+            Expr::Matrix(m) => (self.render_matrix(m.rows(), m.cols(), m.entries()), ATOM),
             Expr::OtherOp(name, args) => self.render_other(&name.name(), args),
         }
     }
@@ -386,10 +383,28 @@ impl Writer<'_> {
         out
     }
 
-    fn render_mul(&self, factors: &[Expr]) -> String {
+    /// Returns the product's precedence too: a negative leading factor makes
+    /// the whole product bind like a negation (`NEG`), so it parenthesises as a
+    /// fraction numerator / power base but reads `-3 b`, not `(-3) b`.
+    fn render_mul(&self, factors: &[Expr]) -> (String, u8) {
         let mut out = String::new();
+        let mut p = prec::MUL;
         for (i, f) in factors.iter().enumerate() {
-            let s = self.emit(f, if i == 0 { prec::MUL } else { prec::MUL + 1 });
+            let s = if i == 0 {
+                // The sign of a negative leading factor renders inline, without
+                // parentheses (port of the JS `factor()` at term level); a sum
+                // pulls it into the connective via `split_sign` before reaching
+                // here, so this branch is only hit standalone / as a factor.
+                match split_sign(f) {
+                    (true, body) => {
+                        p = prec::NEG;
+                        format!("-{}", self.emit(&body, prec::MUL))
+                    }
+                    (false, _) => self.emit(f, prec::MUL),
+                }
+            } else {
+                self.emit(f, prec::MUL + 1)
+            };
             if i > 0 {
                 // `explicitMultiplicationSymbols`: a bare `*` between every pair
                 // (port of the legacy `termFactors.join("*")`).
@@ -409,10 +424,25 @@ impl Writer<'_> {
             }
             out.push_str(&s);
         }
-        out
+        (out, p)
     }
 
     fn render_apply(&self, head: &Expr, args: &[Expr]) -> (String, u8) {
+        // An integral `∫_a^b <integrand>`: keep the `∫` glyph (a `d x`
+        // differential was already split into a `["d", x]` factor at parse
+        // time, so it renders as `dx`) and drop the parentheses a generic
+        // application would put round the integrand. Port of the legacy `apply`
+        // integral branch; DoenetML open item 10.
+        if args.len() == 1 && super::is_integral_head(head) {
+            return (
+                format!(
+                    "{} {}",
+                    self.emit(head, prec::POW),
+                    self.emit(&args[0], prec::MUL)
+                ),
+                prec::MUL,
+            );
+        }
         // Special notations for particular function heads.
         if let Expr::Sym(s) = head {
             match s.name().as_str() {

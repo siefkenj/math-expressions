@@ -38,7 +38,7 @@
 //!   any was one, else `tuple`.
 
 use crate::expr::map_children;
-use crate::expr::{Expr, SeqKind};
+use crate::expr::{Expr, Mat, SeqKind};
 
 /// Move `+`/scalar-`*` inside vector and matrix containers, bottom-up.
 ///
@@ -80,7 +80,7 @@ fn vector_kind(e: &Expr) -> Option<SeqKind> {
 fn is_container(e: &Expr) -> bool {
     matches!(
         e,
-        Expr::Seq(..) | Expr::Matrix { .. } | Expr::Interval { .. }
+        Expr::Seq(..) | Expr::Matrix(_) | Expr::Interval { .. }
     )
 }
 
@@ -126,7 +126,7 @@ fn candidates<T>(factors: &[Expr], classify: fn(&Expr) -> Option<T>) -> Vec<(usi
 /// The dimensions of a `["matrix", …]`, or `None` for anything else.
 fn matrix_dims(e: &Expr) -> Option<(u32, u32)> {
     match e {
-        Expr::Matrix { rows, cols, .. } => Some((*rows, *cols)),
+        Expr::Matrix(m) => Some((m.rows(), m.cols())),
         _ => None,
     }
 }
@@ -139,18 +139,17 @@ fn matrix_scalar_mult(e: &Expr) -> Expr {
         return e.clone();
     };
     for (pos, (rows, cols)) in candidates(factors, matrix_dims) {
-        let Expr::Matrix { entries, .. } = &factors[pos] else {
-            unreachable!()
+        // `candidates` only yields positions where `matrix_dims` matched, so
+        // this destructure always succeeds; skipping beats asserting it.
+        let Expr::Matrix(m) = &factors[pos] else {
+            continue;
         };
         let (pre, entries, post) =
-            consume_scalars(&factors[..pos], entries.clone(), &factors[pos + 1..]);
-        if let Some(entries) = entries {
-            let matrix = Expr::Matrix {
-                rows,
-                cols,
-                entries,
-            };
-            return rebuild_product(pre, matrix, post);
+            consume_scalars(&factors[..pos], m.entries().to_vec(), &factors[pos + 1..]);
+        // `consume_scalars` rewrites entries in place, so the count still
+        // matches; if it ever did not, leaving the product alone is correct.
+        if let Some(matrix) = entries.and_then(|es| Mat::new(rows, cols, es)) {
+            return rebuild_product(pre, Expr::Matrix(matrix), post);
         }
     }
     e.clone()
@@ -259,8 +258,8 @@ fn vector_matrix_addition(e: &Expr) -> Expr {
             }
             continue;
         }
-        if let Expr::Matrix { rows, cols, .. } = a {
-            let (r, c) = (*rows, *cols);
+        if let Expr::Matrix(m) = a {
+            let (r, c) = (m.rows(), m.cols());
             match slots
                 .iter_mut()
                 .find(|s| matches!(s, Slot::Matrices(sr, sc, _) if (*sr, *sc) == (r, c)))
@@ -338,18 +337,17 @@ fn combine_vectors(n: usize, group: &[Expr]) -> Expr {
 
 /// Componentwise sum of same-dimension matrix addends into one matrix.
 fn combine_matrices(rows: u32, cols: u32, group: &[Expr]) -> Expr {
-    let entry = |m: &Expr, idx: usize| match m {
-        Expr::Matrix { entries, .. } => entries[idx].clone(),
-        _ => unreachable!(),
+    // The group was formed from `rows`×`cols` matrices only, and `Mat` fixes
+    // the entry count to match, so every `get` here resolves. Substituting zero
+    // if one somehow did not keeps a malformed addend from aborting the worker,
+    // which indexing (and the `unreachable!` this replaced) would have done.
+    let entry = |m: &Expr, r: u32, c: u32| match m {
+        Expr::Matrix(mm) => mm.get(r, c).cloned().unwrap_or_else(|| Expr::int(0)),
+        _ => Expr::int(0),
     };
-    let entries = (0..(rows as usize * cols as usize))
-        .map(|idx| Expr::Add(group.iter().map(|m| entry(m, idx)).collect()))
-        .collect();
-    Expr::Matrix {
-        rows,
-        cols,
-        entries,
-    }
+    Expr::Matrix(Mat::generate(rows, cols, |r, c| {
+        Expr::Add(group.iter().map(|m| entry(m, r, c)).collect())
+    }))
 }
 
 #[cfg(test)]
@@ -516,18 +514,16 @@ mod tests {
 
     #[test]
     fn adds_two_matrices_componentwise() {
-        let m = |a, b, c, d| Expr::Matrix {
-            rows: 2,
-            cols: 2,
-            entries: vec![p(a), p(b), p(c), p(d)],
+        let m = |a, b, c, d| {
+            Expr::Matrix(Mat::new(2, 2, vec![p(a), p(b), p(c), p(d)]).expect("2x2 has 4 entries"))
         };
         let sum = Expr::Add(vec![m("1", "2", "3", "4"), m("5", "6", "7", "8")]);
         let r = perform_vector_matrix_additions_scalar_multiplications(&sum);
-        let Expr::Matrix { entries, .. } = &r else {
+        let Expr::Matrix(mat) = &r else {
             panic!("got {r:?}")
         };
-        assert_eq!(txt(&entries[0]), "1 + 5");
-        assert_eq!(txt(&entries[3]), "4 + 8");
+        assert_eq!(txt(&mat.entries()[0]), "1 + 5");
+        assert_eq!(txt(&mat.entries()[3]), "4 + 8");
     }
 
     #[test]

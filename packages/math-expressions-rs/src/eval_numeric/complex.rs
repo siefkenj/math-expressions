@@ -224,7 +224,7 @@ pub fn free_symbols(e: &Expr, out: &mut std::collections::BTreeSet<String>) {
             free_symbols(&endpoints.1, out);
         }
         Expr::Relation { operands, .. } => operands.iter().for_each(|x| free_symbols(x, out)),
-        Expr::Matrix { entries, .. } => entries.iter().for_each(|x| free_symbols(x, out)),
+        Expr::Matrix(m) => m.entries().iter().for_each(|x| free_symbols(x, out)),
         // Opaque nodes (Index, Prime, OtherOp) are handled above.
         Expr::Index(..) | Expr::Prime(_) | Expr::OtherOp(..) => {}
     }

@@ -34,7 +34,7 @@ impl Expr {
             Expr::Neg(x) | Expr::Not(x) | Expr::Prime(x) => vec![x],
             Expr::Interval { endpoints, .. } => vec![&endpoints.0, &endpoints.1],
             Expr::Relation { operands, .. } => operands.iter().collect(),
-            Expr::Matrix { entries, .. } => entries.iter().collect(),
+            Expr::Matrix(m) => m.entries().iter().collect(),
         }
     }
 
@@ -119,15 +119,7 @@ pub fn flatten(expr: Expr) -> Expr {
             operands: flatten_args(operands),
             ops,
         },
-        Expr::Matrix {
-            rows,
-            cols,
-            entries,
-        } => Expr::Matrix {
-            rows,
-            cols,
-            entries: flatten_args(entries),
-        },
+        Expr::Matrix(m) => Expr::Matrix(m.into_map(flatten)),
         Expr::OtherOp(op, args) => Expr::OtherOp(op, flatten_args(args)),
 
         // Leaves — spelled out (no catch-all) so that adding a new compound
@@ -182,15 +174,7 @@ pub(crate) fn map_children<F: FnMut(&Expr) -> Expr>(e: &Expr, mut f: F) -> Expr 
             operands: operands.iter().map(&mut f).collect(),
             ops: ops.clone(),
         },
-        Expr::Matrix {
-            rows,
-            cols,
-            entries,
-        } => Expr::Matrix {
-            rows: *rows,
-            cols: *cols,
-            entries: entries.iter().map(&mut f).collect(),
-        },
+        Expr::Matrix(m) => Expr::Matrix(m.map(&mut f)),
         Expr::OtherOp(name, xs) => Expr::OtherOp(*name, xs.iter().map(&mut f).collect()),
     }
 }

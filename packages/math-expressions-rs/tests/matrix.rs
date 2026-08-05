@@ -2,8 +2,8 @@
 //! Written test-first: these specify the M1 contract from §0/§1a of the plan.
 
 use math_expressions::{
-    canonicalize, equals, matmul, to_text, trace, transpose, EqOptions, Expr, TextOpts, TextToAst,
-    TextToAstOptions,
+    canonicalize, equals, matmul, to_text, trace, transpose, EqOptions, Expr, Mat, TextOpts,
+    TextToAst, TextToAstOptions,
 };
 
 fn parse(s: &str) -> Expr {
@@ -15,11 +15,7 @@ fn parse(s: &str) -> Expr {
 /// Build a literal matrix from entry strings (row-major).
 fn mat(rows: u32, cols: u32, entries: &[&str]) -> Expr {
     assert_eq!(entries.len() as u32, rows * cols);
-    Expr::Matrix {
-        rows,
-        cols,
-        entries: entries.iter().map(|s| parse(s)).collect(),
-    }
+    Expr::Matrix(Mat::new(rows, cols, entries.iter().map(|s| parse(s)).collect()).expect("test matrix shape"))
 }
 
 /// Canonicalize both and require identical trees.
