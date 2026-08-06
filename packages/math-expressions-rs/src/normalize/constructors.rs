@@ -2,7 +2,7 @@
 //! already canonical and re-establish the canonical invariants (flattened,
 //! sorted, exactly folded, like terms/powers combined).
 
-use super::{cmp, identity_matrix, is_matrix_valued, matmul_literal};
+use super::{cmp, identity_matrix, is_matrix_valued, is_vector_valued, matmul_literal};
 use crate::expr::{Expr, Mat, MathConst};
 use crate::num::Number;
 use std::cell::Cell;
@@ -205,8 +205,15 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
     }
 
     if flat.iter().any(is_matrix_valued) {
-        let (scalars, matrices): (Vec<Expr>, Vec<Expr>) =
-            flat.into_iter().partition(|f| !is_matrix_valued(f));
+        // A coordinate vector joins the ordered segment rather than the scalar
+        // one: `M·(e,f)` is a matrix *applied to* a vector, and distributing
+        // the vector into the entries — which is what the scalar segment does
+        // — produced a matrix of `a·(e,f)`. The contraction itself belongs to
+        // `expand`; here the product is simply left in the order it was
+        // written.
+        let (scalars, matrices): (Vec<Expr>, Vec<Expr>) = flat
+            .into_iter()
+            .partition(|f| !is_matrix_valued(f) && !is_vector_valued(f));
         let scalar_part = mul(scalars); // no matrices: the commutative pipeline
                                         // Fold adjacent compatible literal matrices, left to right.
         let mut seq: Vec<Expr> = Vec::with_capacity(matrices.len());
@@ -535,6 +542,23 @@ pub(crate) fn pow(base: Expr, exp: Expr) -> Expr {
         }
         if e.is_one() {
             return base;
+        }
+    }
+    // `i^n` for an integer `n` walks the four-cycle `1, i, −1, −i`. Without it
+    // the imaginary unit is the one number in the engine that does not
+    // arithmetic: `i²` stayed `i²`, so `(a+bi)(c+di)` expanded to a form still
+    // carrying `i²` instead of `ac − bd + (ad + bc)i`, and a product of three
+    // `i`s collected to `i³` and stopped. Negative exponents come out of
+    // `rem_euclid`, which is why `1/i` is `−i` rather than an unevaluated
+    // reciprocal.
+    if matches!(base, Expr::Const(MathConst::I)) {
+        if let Some(k) = as_int(&exp) {
+            return match k.rem_euclid(4) {
+                0 => Expr::Num(Number::one()),
+                1 => base,
+                2 => Expr::int(-1),
+                _ => mul(vec![Expr::int(-1), Expr::Const(MathConst::I)]),
+            };
         }
     }
     // RootOf power reduction (MATRIX_PLAN §2d): an integer exponent ≥ deg p

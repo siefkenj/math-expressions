@@ -2,7 +2,7 @@
 //! matrix-valued detection, the identity, and symbolic literal multiplication.
 
 use super::{add, mul};
-use crate::expr::{Expr, Mat};
+use crate::expr::{Expr, Mat, SeqKind};
 
 /// Is this canonical factor matrix-valued (a literal matrix, an unevaluated
 /// matrix power, or an unfoldable matrix product)? Such factors must not
@@ -19,6 +19,53 @@ pub(crate) fn is_matrix_valued(e: &Expr) -> bool {
 /// The n×n identity matrix.
 pub(crate) fn identity_matrix(n: u32) -> Expr {
     Expr::Matrix(Mat::generate(n, n, |r, c| Expr::int(i64::from(r == c))))
+}
+
+/// Is this factor a coordinate vector — something a matrix *multiplies* rather
+/// than something that scales it?
+///
+/// `M·(e,f)` used to partition `(e,f)` into `mul`'s scalar segment, which
+/// distributed it into every entry and produced a matrix of `a·(e,f)`. A vector
+/// is not a scalar; it belongs in the ordered segment beside the matrices, so
+/// the product either contracts (in [`matvec_literal`], under `expand`) or
+/// stays written as it was.
+pub(crate) fn is_vector_valued(e: &Expr) -> bool {
+    matches!(e, Expr::Seq(k, _)
+        if matches!(k, SeqKind::Tuple | SeqKind::Array | SeqKind::Vector | SeqKind::AltVector))
+}
+
+/// `M · v` for a literal matrix and a coordinate vector: the contraction
+/// `(Σ a₁ⱼ vⱼ, …)`, in **the vector's own container kind**, so a tuple comes
+/// back a tuple and `⟨p,q⟩` comes back `⟨…⟩`.
+///
+/// `None` when the shapes do not conform (`v` is read as a column, so the
+/// matrix must have as many columns as `v` has entries) or when the work would
+/// exceed the expansion cap. A vector on the *left* is not handled at all: as a
+/// column it is not conformable with a matrix on the right, and silently
+/// transposing it would answer a question the author did not ask.
+pub(crate) fn matvec_literal(m: &Expr, v: &Expr) -> Option<Expr> {
+    let (Expr::Matrix(ma), Expr::Seq(kind, comps)) = (m, v) else {
+        return None;
+    };
+    if ma.cols() as usize != comps.len() {
+        return None;
+    }
+    let (rows, cols) = (ma.rows() as usize, ma.cols() as usize);
+    if rows.saturating_mul(cols) > crate::resource_limits::current().max_expand_terms {
+        return None;
+    }
+    let mut out = Vec::with_capacity(rows);
+    for r in 0..rows {
+        let mut terms = Vec::with_capacity(cols);
+        for c in 0..cols {
+            terms.push(mul(vec![
+                ma.get(r as u32, c as u32)?.clone(),
+                comps[c].clone(),
+            ]));
+        }
+        out.push(add(terms));
+    }
+    Some(Expr::Seq(*kind, out))
 }
 
 /// Multiply two literal matrices symbolically (entries built with the smart

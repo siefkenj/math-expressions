@@ -332,6 +332,13 @@ fn number_to_js(n: &Number) -> Value {
         Number::Int(i) => json!(i),
         // −0 serializes as plain `0` (JSON has no exact negative zero, and it is
         // value-equal to `0` anyway).
+        //
+        // This is what keeps the sign *inside* the engine: `round_to_decimals`
+        // returns `−0` for a small negative value, and `1/(−0)` is `−∞`, but a
+        // caller reading `.tree` sees `0` and loses it on the way back in.
+        // Emitting `-0.0` would carry it (`JSON.parse("-0.0")` is JS `−0`) and
+        // is pinned *against* by `tests/signed_zero.rs`, so it is a decision to
+        // revisit deliberately rather than a line to flip.
         Number::NegZero => json!(0),
         Number::Float(_) => f64_to_js(n.to_f64()),
         // Exact rationals split on their recorded `Spelling`.

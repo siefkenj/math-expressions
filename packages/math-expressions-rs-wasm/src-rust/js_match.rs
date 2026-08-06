@@ -547,13 +547,40 @@ pub fn flatten_tree(tree: &Value) -> Value {
 
 /// Left-associate an n-ary associative operator:
 /// `["+", a, b, c] → ["+", ["+", a, b], c]`.
-pub fn unflatten_left(tree: &Value) -> Value {
-    unflatten(tree, true)
+pub fn unflatten_left(tree: &Value) -> Option<Value> {
+    (widest_associative_run(tree) <= MAX_UNFLATTEN_OPERANDS).then(|| unflatten(tree, true))
 }
 
 /// Right-associate: `["+", a, b, c] → ["+", a, ["+", b, c]]`.
-pub fn unflatten_right(tree: &Value) -> Value {
-    unflatten(tree, false)
+pub fn unflatten_right(tree: &Value) -> Option<Value> {
+    (widest_associative_run(tree) <= MAX_UNFLATTEN_OPERANDS).then(|| unflatten(tree, false))
+}
+
+/// How many operands an associative operator may carry into an unflatten.
+///
+/// The fold turns *width* into *depth*: `["+", a₁, …, aₙ]` is depth 2 as JSON
+/// and comes back `n − 1` levels deep. Nothing downstream survives that
+/// unbounded — serializing the result recurses in serde_json, and on the JS
+/// side both `JSON.parse` and the `jsonToAst` walk recurse again, which is
+/// where it actually broke: width 1,000 round-trips, width 3,000 raises
+/// `RangeError: Maximum call stack size exceeded`. The bound sits below the
+/// first failure with room to spare, and well above any authored expression —
+/// a sum of a thousand terms is not something a person writes.
+pub const MAX_UNFLATTEN_OPERANDS: usize = 1000;
+
+/// The largest number of operands any single associative node in `tree` holds.
+///
+/// Checked before folding rather than during, so the refusal costs nothing and
+/// no partial result is built.
+fn widest_associative_run(tree: &Value) -> usize {
+    let Some(arr) = tree.as_array() else { return 0 };
+    let here = match arr.first().and_then(Value::as_str) {
+        Some(op) if is_associative(op) => arr.len().saturating_sub(1),
+        _ => 0,
+    };
+    arr.iter()
+        .map(widest_associative_run)
+        .fold(here, usize::max)
 }
 
 fn unflatten(tree: &Value, left: bool) -> Value {

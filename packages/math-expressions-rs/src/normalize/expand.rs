@@ -20,7 +20,7 @@
 use crate::expr::Expr;
 use crate::num::Number;
 
-use super::{add, mul, pow};
+use super::{add, matvec_literal, mul, pow};
 use crate::expr::map_children;
 
 // Caps (resource_limits::current().max_expand_power / max_expand_terms): the exponent
@@ -33,6 +33,28 @@ use crate::expr::map_children;
 /// that pattern-match on canonical shapes use [`expand_core`].
 pub fn expand(e: &Expr) -> Expr {
     super::present(&expand_core(e))
+}
+
+/// Contract a `matrix · vector` pair inside a product, if there is one.
+///
+/// Multiplying a matrix into a vector is exactly the kind of "multiply it out"
+/// that `expand` is for, and it is the only place it happens: canonicalization
+/// leaves the product written as it stands, because a `<math>` that asked for
+/// nothing should render what the author typed. Scalar factors ride along and
+/// are folded into the resulting components.
+///
+/// Only `matrix` *then* `vector`, in that order and adjacent in the ordered
+/// segment. A vector on the left is a column and does not conform; transposing
+/// it to make the product work would be answering a different question.
+fn contract_matrix_vector(factors: &[Expr]) -> Option<Expr> {
+    let i = factors
+        .windows(2)
+        .position(|w| matches!(w[0], Expr::Matrix(_)) && super::is_vector_valued(&w[1]))?;
+    let contracted = matvec_literal(&factors[i], &factors[i + 1])?;
+    let mut rest: Vec<Expr> = factors[..i].to_vec();
+    rest.push(contracted);
+    rest.extend_from_slice(&factors[i + 2..]);
+    Some(mul(rest))
 }
 
 /// [`expand`] without the final presentation pass: the result is canonical.
@@ -53,6 +75,9 @@ pub(crate) fn expand_core(e: &Expr) -> Expr {
         // fall back to the unexpanded (canonical) product.
         Expr::Mul(fs) => {
             let factors: Vec<Expr> = fs.iter().map(expand_core).collect();
+            if let Some(contracted) = contract_matrix_vector(&factors) {
+                return contracted;
+            }
             let fallback = mul(factors.clone());
             distribute_guarded(try_distribute(&factors), fallback)
         }

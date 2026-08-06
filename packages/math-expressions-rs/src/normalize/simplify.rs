@@ -34,6 +34,8 @@
 use crate::assumptions::{is_nonnegative, is_real, Assumptions};
 use crate::expr::{Expr, MathConst, SeqKind};
 use crate::num::{Number, Spelling};
+use num_rational::BigRational;
+use num_traits::{One, ToPrimitive, Zero};
 
 use super::{add, canonicalize, mul, split_coeff};
 use crate::expr::map_children;
@@ -172,6 +174,10 @@ fn rewrite(e: &Expr, fired: &mut bool, assumptions: &Assumptions) -> Expr {
     }
     // Cluster rules, in order. Each returns `Some(replacement)` if it fired.
     if let Some(r) = rule_infnan(&e) {
+        *fired = true;
+        return r;
+    }
+    if let Some(r) = rule_gaussian(&e) {
         *fired = true;
         return r;
     }
@@ -519,6 +525,136 @@ fn fold_infnan_add(terms: &[Expr]) -> Option<Expr> {
 // equality path needs (the `sin²+cos²` corpus cases, including one nested inside
 // a set membership). Broader trig normalization is a later addition.
 
+// ---- Cluster: exact arithmetic in ℚ(i) ----
+
+/// Evaluate a variable-free subtree that mentions `i` exactly, in ℚ(i).
+///
+/// `i` is a symbol here, not a numeric type, so nothing in the numeric fold
+/// multiplies two complex numbers: `(1+i)(1-i)` is a product of two sums and
+/// stays one, where a student writing `<math simplify>` expects `2`. The
+/// smart-constructor fold for `i^n` gets `i·i·i` and `(a+bi)(c+di)` *after
+/// expansion*, but a product of sums is never expanded by `simplify`, so this
+/// rule closes the case the constructor cannot see.
+///
+/// Exact, and it stays in ℚ(i): a `√2` or a `π` anywhere makes the evaluation
+/// decline rather than approximate. The rule also declines when the value it
+/// computes is the expression it was handed — otherwise `2i` would "fire"
+/// forever against its own output and the fixpoint would never settle.
+fn rule_gaussian(e: &Expr) -> Option<Expr> {
+    // Only worth attempting where an `i` is involved: a real subtree is the
+    // canonical fold's business and rebuilding it here would churn spellings
+    // (an exact `1/3` would come back as `1/3` through a different path).
+    if !mentions_i(e) {
+        return None;
+    }
+    let (re, im) = gaussian_eval(e)?;
+    let rebuilt = canonicalize(&gaussian_expr(&re, &im)?);
+    (rebuilt != canonicalize(e)).then_some(rebuilt)
+}
+
+fn mentions_i(e: &Expr) -> bool {
+    is_imaginary_unit(e) || e.children().into_iter().any(mentions_i)
+}
+
+/// `i` in either spelling. The parser produces the symbol; the constructors
+/// produce the constant, and both reach the rules.
+fn is_imaginary_unit(e: &Expr) -> bool {
+    matches!(e, Expr::Const(MathConst::I)) || matches!(e, Expr::Sym(s) if s.name() == "i")
+}
+
+/// `(re, im)` of `e` as exact rationals, or `None` if `e` leaves ℚ(i).
+fn gaussian_eval(e: &Expr) -> Option<(BigRational, BigRational)> {
+    let zero = BigRational::zero();
+    match e {
+        Expr::Num(n) => Some((n.to_bigrational()?, zero)),
+        _ if is_imaginary_unit(e) => Some((zero, BigRational::one())),
+        Expr::Neg(a) => {
+            let (r, i) = gaussian_eval(a)?;
+            Some((-r, -i))
+        }
+        Expr::Add(ts) => ts.iter().try_fold((zero.clone(), zero), |(ar, ai), t| {
+            let (br, bi) = gaussian_eval(t)?;
+            Some((ar + br, ai + bi))
+        }),
+        Expr::Mul(fs) => fs
+            .iter()
+            .try_fold((BigRational::one(), zero), |(ar, ai), f| {
+                let (br, bi) = gaussian_eval(f)?;
+                Some((&ar * &br - &ai * &bi, ar * bi + ai * br))
+            }),
+        Expr::Div(a, b) => {
+            let (ar, ai) = gaussian_eval(a)?;
+            let (br, bi) = gaussian_eval(b)?;
+            gaussian_div(ar, ai, br, bi)
+        }
+        Expr::Pow(b, k) => {
+            let k = match k.as_ref() {
+                Expr::Num(n) => n.to_bigrational()?.to_integer().to_i64()?,
+                _ => return None,
+            };
+            let (br, bi) = gaussian_eval(b)?;
+            let (mut ar, mut ai) = (BigRational::one(), BigRational::zero());
+            for _ in 0..k.unsigned_abs().min(64) {
+                let (nr, ni) = (&ar * &br - &ai * &bi, &ar * &bi + &ai * &br);
+                ar = nr;
+                ai = ni;
+            }
+            // Bounded so a huge exponent cannot spend the budget here; past the
+            // bound the value is left to whoever can afford it.
+            if k.unsigned_abs() > 64 {
+                return None;
+            }
+            if k < 0 {
+                return gaussian_div(BigRational::one(), BigRational::zero(), ar, ai);
+            }
+            Some((ar, ai))
+        }
+        _ => None,
+    }
+}
+
+/// `(ar + ai·i) / (br + bi·i)`, by the conjugate. `None` on division by zero,
+/// which is a pole rather than a value and belongs to the ∞ rules.
+fn gaussian_div(
+    ar: BigRational,
+    ai: BigRational,
+    br: BigRational,
+    bi: BigRational,
+) -> Option<(BigRational, BigRational)> {
+    let d = &br * &br + &bi * &bi;
+    if d.is_zero() {
+        return None;
+    }
+    Some(((&ar * &br + &ai * &bi) / &d, (&ai * &br - &ar * &bi) / d))
+}
+
+/// `re + im·i` as an expression, exactly. `None` if either part leaves the
+/// range the engine's rationals hold.
+fn gaussian_expr(re: &BigRational, im: &BigRational) -> Option<Expr> {
+    let part = |q: &BigRational| -> Option<Expr> {
+        Some(Expr::Num(Number::from_bigrational_spelled(
+            q.clone(),
+            Spelling::Fraction,
+        )))
+    };
+    let mut terms = Vec::new();
+    if !re.is_zero() {
+        terms.push(part(re)?);
+    }
+    if !im.is_zero() {
+        terms.push(if im.is_one() {
+            Expr::Const(MathConst::I)
+        } else {
+            mul(vec![part(im)?, Expr::Const(MathConst::I)])
+        });
+    }
+    Some(match terms.len() {
+        0 => Expr::Num(Number::zero()),
+        1 => terms.pop()?,
+        _ => add(terms),
+    })
+}
+
 fn rule_trig_pythagorean(e: &Expr) -> Option<Expr> {
     let Expr::Add(terms) = e else { return None };
 
@@ -726,6 +862,12 @@ fn rule_seq_arith(e: &Expr) -> Option<Expr> {
 /// → `Seq(k, [ (rest·s1) .. (rest·sn) ])`. More than one sequence factor is
 /// left alone (the product of two vectors is not componentwise in general).
 fn distribute_mul_over_seq(factors: &[Expr]) -> Option<Expr> {
+    // A matrix among the factors is not a scalar: `M·(e,f)` is a contraction,
+    // handled by `expand`, and distributing `M` into the components instead
+    // would produce the nonsense `(M·e, M·f)`.
+    if factors.iter().any(crate::normalize::is_matrix_valued) {
+        return None;
+    }
     let mut seq_idx = None;
     for (i, f) in factors.iter().enumerate() {
         if matches!(f, Expr::Seq(k, _) if is_vectorlike(*k)) {

@@ -303,6 +303,13 @@ impl Number {
         };
         let rounded = (&exact * &scale).round(); // half away from zero
         if self.is_float() {
+            // Rounding a small negative value to zero keeps the sign: legacy's
+            // `parseFloat((-0.001).toFixed(2))` is `-0`, and the sign is not
+            // decoration — `1/(-0)` is `-∞`. The scaled integer is `0` with no
+            // sign to carry, so it is read off the value that went in.
+            if rounded.is_zero() && exact.is_negative() {
+                return Number::NegZero;
+            }
             // Stays inexact: rounding a computed value does not make it exact.
             return Number::from_f64(float_from_scaled(&rounded.to_integer(), d));
         }

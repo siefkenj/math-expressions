@@ -213,15 +213,41 @@ pub fn flatten_ast(tree_json: &str) -> Option<String> {
 }
 
 /// `me.utils.unflattenLeft`.
+///
+/// Refuses a tree whose widest associative node exceeds
+/// [`MAX_UNFLATTEN_OPERANDS`](crate::js_match::MAX_UNFLATTEN_OPERANDS): the
+/// fold turns width into depth, and nothing downstream — serialization here,
+/// `JSON.parse` and the tree walk on the JS side — survives an unbounded one.
+/// An error rather than a silent pass-through, because the flat tree a caller
+/// would get back is *not* the associated one it asked for, and the difference
+/// is invisible until something later reads it as binary.
 #[wasm_bindgen]
-pub fn unflatten_left(tree_json: &str) -> Option<String> {
-    let tree: serde_json::Value = serde_json::from_str(tree_json).ok()?;
-    Some(crate::js_match::unflatten_left(&tree).to_string())
+pub fn unflatten_left(tree_json: &str) -> Result<Option<String>, JsError> {
+    let Ok(tree) = serde_json::from_str::<serde_json::Value>(tree_json) else {
+        return Ok(None);
+    };
+    match crate::js_match::unflatten_left(&tree) {
+        Some(v) => Ok(Some(v.to_string())),
+        None => Err(too_wide_to_unflatten()),
+    }
 }
 
-/// `me.utils.unflattenRight`.
+/// `me.utils.unflattenRight`. Bounded exactly like [`unflatten_left`].
 #[wasm_bindgen]
-pub fn unflatten_right(tree_json: &str) -> Option<String> {
-    let tree: serde_json::Value = serde_json::from_str(tree_json).ok()?;
-    Some(crate::js_match::unflatten_right(&tree).to_string())
+pub fn unflatten_right(tree_json: &str) -> Result<Option<String>, JsError> {
+    let Ok(tree) = serde_json::from_str::<serde_json::Value>(tree_json) else {
+        return Ok(None);
+    };
+    match crate::js_match::unflatten_right(&tree) {
+        Some(v) => Ok(Some(v.to_string())),
+        None => Err(too_wide_to_unflatten()),
+    }
+}
+
+fn too_wide_to_unflatten() -> JsError {
+    JsError::new(&format!(
+        "unflatten: an associative operator with more than {} operands would \
+         produce a tree too deep to serialize or read back",
+        crate::js_match::MAX_UNFLATTEN_OPERANDS
+    ))
 }
