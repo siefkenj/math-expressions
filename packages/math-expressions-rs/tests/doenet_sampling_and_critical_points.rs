@@ -34,22 +34,20 @@ fn value_of(e: &Expr) -> f64 {
 
 // ============================ evaluate_many ============================
 
-/// Agreement is to within a few ulp, **not** bit-for-bit.
+/// For rational arithmetic the two entry points agree **bit-for-bit**, and that
+/// is now a property rather than a coincidence.
 ///
-/// This assertion used to be `assert_eq!`, and held while `evaluate_many` ran
-/// the same `eval_complex` walk as `evaluate`. It now runs a compiled Tier-0
-/// tape, which flattens `Add`/`Mul` and so associates the arithmetic
-/// differently: measured over a 13-expression corpus at 2001 points each,
-/// 85 % of results are still bit-identical, 12 % differ by 1 ulp, and the tail
-/// reaches ~500 ulp where the expression very nearly cancels — there the
-/// *absolute* error is 1.7e-16 against a true value of 2.07e-3, i.e. both
-/// evaluators are at the f64 noise floor and the ulp count is an artifact of
-/// measuring a small difference of large terms.
+/// It started as a coincidence: `evaluate_many` ran the same `eval_complex`
+/// walk as `evaluate`, so identical bits came from identical code. Putting a
+/// compiled Tier-0 tape behind `evaluate_many` broke it — the tape consumes
+/// canonical form, which reorders an `Add`'s terms and so reassociates the sum,
+/// and this very expression at `x = −4/7` came back 1 ulp apart.
 ///
-/// The tolerance is relative-with-an-absolute-floor for exactly that reason: a
-/// pure relative bound is meaningless near a zero. A sampler bracketing a root
-/// to 1e-6 cannot see any of this; if a caller ever needs the last bit,
-/// `evaluate` point-by-point is still the exact-agreement path.
+/// `evaluate` now canonicalizes too, so both sides associate alike and the bits
+/// agree by construction wherever the two share arithmetic kernels. That covers
+/// `+`, `*`, integer powers and most named functions; it does *not* cover the
+/// handful where the tape's real kernel and `eval_complex`'s complex one differ
+/// — see `evaluate_and_batch_still_differ_on_unaligned_kernels`.
 #[test]
 fn batched_sampling_agrees_with_point_by_point() {
     let e = t("x^2-3x+1");
@@ -58,10 +56,52 @@ fn batched_sampling_agrees_with_point_by_point() {
     assert_eq!(batch.len(), xs.len(), "one result per point asked about");
     for (i, x) in xs.iter().enumerate() {
         let one = evaluate(&e, &HashMap::from([("x".to_string(), *x)])).unwrap().re;
-        let tol = 1e-13 * one.abs().max(1.0);
+        assert_eq!(batch[i], one, "disagreement at x = {x}");
+    }
+}
+
+/// The known limit of the agreement above, pinned so it stays known.
+///
+/// Canonicalizing both sides aligns the *tree*; it cannot align the *kernels*.
+/// `eval_complex` dispatches `tan` to `Complex64::tan` — a complex sin/cos
+/// quotient — while the tape calls the real `tan`, and the two round
+/// differently. The tell is that `exp(x)` agrees exactly while `e^x` does not:
+/// same function, different spelling, different kernel.
+///
+/// This is asserted rather than merely documented because the difference is
+/// invisible at coarse sampling (the parity suite's 0.1 step misses it) and
+/// would otherwise resurface as a mystery. If aligning the kernels ever closes
+/// this, the test should fail — that is the point.
+#[test]
+fn evaluate_and_batch_still_differ_on_unaligned_kernels() {
+    let e = t("tan(x)");
+    let xs: Vec<f64> = (0..=2000).map(|i| -20.0 + 0.02 * i as f64).collect();
+    let batch = evaluate_many(&e, "x", &xs);
+    let differing = xs
+        .iter()
+        .enumerate()
+        .filter(|(i, x)| {
+            let one = evaluate(&e, &HashMap::from([("x".to_string(), **x)]))
+                .map_or(f64::NAN, |v| v.re);
+            batch[*i].is_finite() && one.is_finite() && batch[*i] != one
+        })
+        .count();
+    assert!(
+        differing > 0,
+        "tan agreed bit-for-bit everywhere — if the kernels were aligned, \
+         drop this test and tighten the parity suite to exact equality"
+    );
+    // Whatever the last bits do, both paths stay accurate in the sense that
+    // matters: relative agreement away from the poles, where `tan` is not
+    // catastrophically ill-conditioned.
+    for (i, x) in xs.iter().enumerate() {
+        let one = evaluate(&e, &HashMap::from([("x".to_string(), *x)])).map_or(f64::NAN, |v| v.re);
+        if !batch[i].is_finite() || !one.is_finite() || one.abs() > 1e3 {
+            continue;
+        }
         assert!(
-            (batch[i] - one).abs() <= tol,
-            "disagreement at x = {x}: batch {} vs point {one}",
+            (batch[i] - one).abs() <= 1e-9 * one.abs().max(1.0),
+            "tan disagreement beyond rounding at x = {x}: {} vs {one}",
             batch[i]
         );
     }

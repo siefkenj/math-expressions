@@ -15,12 +15,64 @@ use std::collections::HashMap;
 /// numerically meaningful, or the result is non-finite (`me.evaluate` returns
 /// `null` for e.g. `1/0`). Uses the complex principal branch, matching mathjs:
 /// `x^(1/3)` at `x = -8` is `1 + i√3`, not the real root `-2`.
+///
+/// Evaluation runs on the *canonical* tree. That is a rounding decision, not a
+/// semantic one — `canonicalize` rewrites `Div`/`Neg` and flattens `Add`/`Mul`
+/// without folding anything in the real domain, so the branch contract above is
+/// untouched — and it exists so this and [`evaluate_many`] associate their
+/// arithmetic identically. Sampling the same curve through the two entry points
+/// used to give answers a few ulp apart; on everything but the handful of
+/// functions noted in [`with_canonical`] it now gives the same bits.
 pub fn evaluate(e: &Expr, bindings: &HashMap<String, f64>) -> Option<Complex64> {
     let env: Env = bindings
         .iter()
         .map(|(k, v)| (k.clone(), Complex64::new(*v, 0.0)))
         .collect();
-    finite(eval_complex(e, &env)?)
+    with_canonical(e, |canon| finite(eval_complex(canon, &env)?))
+}
+
+/// Run `f` against the canonical form of `e`, reusing a recent result.
+///
+/// Canonicalizing costs far more than the evaluation it precedes — measured
+/// 2.7 µs against 0.4 µs on `x²−3x+1`, and 14 µs against 2 µs on a compound
+/// transcendental — so paying it per call made [`evaluate`] ~10× slower. The
+/// caller that cares is a sampler asking for the *same* expression at point
+/// after point, so memoizing turns "once per point" back into "once per curve".
+/// Capacity is shared with [`SAMPLER_CACHE_ENTRIES`] and justified there: the
+/// working set is the expressions a caller alternates between, which is rarely
+/// one and rarely more than a few.
+///
+/// This buys agreement on tree *shape* only. Where the two paths call different
+/// kernels for the same function they still differ, because the tape evaluates
+/// in `f64` while [`eval_complex`] dispatches through `Complex64` — `tan` is
+/// `Complex64::tan`, a complex sin/cos quotient, against the tape's real
+/// `tan`. Measured over a 33-expression corpus, canonicalizing here lifted
+/// bit-identical agreement from 78 % to 92 %; the remainder is `tan`, `e^x`,
+/// `x^x` and non-integer powers, and closing it means aligning the kernels
+/// rather than the trees.
+fn with_canonical<R>(e: &Expr, f: impl FnOnce(&Expr) -> R) -> R {
+    thread_local! {
+        /// Raw tree to its canonical form, most-recently-used last.
+        static CACHE: RefCell<Vec<(Expr, Expr)>> = const { RefCell::new(Vec::new()) };
+    }
+    CACHE.with(|c| {
+        let mut cache = c.borrow_mut();
+        match cache.iter().position(|(raw, _)| raw == e) {
+            // Re-seat the hit at the back, so eviction drops the coldest entry
+            // rather than whichever arrived first.
+            Some(i) => {
+                let entry = cache.remove(i);
+                cache.push(entry);
+            }
+            None => {
+                if cache.len() >= SAMPLER_CACHE_ENTRIES {
+                    cache.remove(0);
+                }
+                cache.push((e.clone(), crate::normalize::canonicalize(e)));
+            }
+        }
+        f(&cache.last().expect("inserted above").1)
+    })
 }
 
 /// Evaluate `e` at many values of a single variable, in one pass.
