@@ -416,24 +416,35 @@ class Expression {
     // throw here, which was worse than a missing feature — the Rust core calls
     // this mode and is built `panic = "abort"`, so the exception unwound into
     // it as a WASM trap and took the whole worker down.
-    // `max_digits` caps how many digits a folded value may occupy. The core
-    // folds exactly and never spends a digit budget, so `Infinity` — "no cap" —
-    // is genuinely satisfied and is accepted. A *finite* cap is a constraint we
-    // cannot meet, and silently ignoring it would round a student's value
-    // without saying so, which is the failure mode this whole audit is about.
-    if (opts && opts.max_digits !== undefined && opts.max_digits !== Infinity) {
+    // `max_digits` is how many significant digits the caller is willing to
+    // spend turning an exact value into a decimal. `Infinity` — spend as many
+    // as it takes — folds `π` and `1/3` too, which is what makes
+    // `2π + π + 6` comparable against a response typed as `15.42478`; it is
+    // what DoenetML's grading path passes. A *finite* cap is not implemented:
+    // it would have to decide per value whether the decimal fits the budget,
+    // and silently ignoring it would round a student's value without saying so.
+    const maxDigits = opts?.max_digits;
+    if (maxDigits !== undefined && maxDigits !== Infinity) {
       throw new Error(
-        `evaluate_numbers: 'max_digits' is only supported as Infinity (got ${opts.max_digits}). ` +
-          "The core folds exactly, so a finite digit cap cannot be honored here — " +
-          "use round_numbers_to_precision to control displayed digits.",
+        `evaluate_numbers: 'max_digits' is only supported as Infinity (got ${maxDigits}). ` +
+          "A finite digit budget is not implemented — pass Infinity to fold exact " +
+          "values to floats, or omit it to keep them exact.",
       );
     }
-    if (opts && opts.skip_ordering) {
-      return wrap(this._w.evaluate_numbers_preserve_order(), this.context);
-    }
+    const skipOrdering = Boolean(opts?.skip_ordering);
     // `evaluate_functions` additionally folds a function applied to a numeric
     // argument (`sin(0)+2` → `2`), which is what `simplify="full"` needs.
-    if (opts && opts.evaluate_functions) {
+    const evaluateFunctions = Boolean(opts?.evaluate_functions);
+    if (maxDigits === Infinity) {
+      return wrap(
+        this._w.evaluate_numbers_to_floats(skipOrdering, evaluateFunctions),
+        this.context,
+      );
+    }
+    if (skipOrdering) {
+      return wrap(this._w.evaluate_numbers_preserve_order(), this.context);
+    }
+    if (evaluateFunctions) {
       return wrap(this._w.evaluate_numbers_evaluate_functions(), this.context);
     }
     return wrap(this._w.evaluate_numbers(), this.context);

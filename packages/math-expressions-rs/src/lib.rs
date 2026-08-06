@@ -98,8 +98,10 @@ pub use num::Number;
 pub use ops::pm::{contains_pm, count_pm, expand_pm_signs, PmOverflow, MAX_PM_COUNT};
 pub use ops::{
     add_unit, altvectors_to_vectors, constants_to_floats, evaluate, evaluate_many, evaluate_numbers,
-    evaluate_numbers_evaluate_functions, evaluate_numbers_preserve_order, evaluate_to_constant,
-    functions, get_component, is_analytic,
+    evaluate_numbers_evaluate_functions, evaluate_numbers_evaluate_functions_with_digits,
+    evaluate_numbers_preserve_order, evaluate_numbers_preserve_order_with_digits,
+    evaluate_numbers_with_digits, evaluate_to_constant, functions, get_component, is_analytic,
+    MaxDigits,
     normalize_function_names, operators, perform_vector_matrix_additions_scalar_multiplications,
     reduce_rational, remove_scaling_units, remove_units, round_numbers_to_decimals,
     round_numbers_to_precision, round_numbers_to_precision_plus_decimals, set_small_zero,

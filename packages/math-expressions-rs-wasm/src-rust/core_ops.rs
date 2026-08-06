@@ -5,8 +5,9 @@ use super::Expression;
 use math_expressions::{
     constants_to_floats, derivative as rust_derivative, equals as rust_equals, evaluate_numbers,
     evaluate_numbers_evaluate_functions, evaluate_numbers_preserve_order,
-    evaluate_to_constant as rust_evc, expand as rust_expand, ops,
-    reduce_rational, round_numbers_to_decimals, round_numbers_to_precision,
+    evaluate_numbers_evaluate_functions_with_digits, evaluate_numbers_preserve_order_with_digits,
+    evaluate_numbers_with_digits, evaluate_to_constant as rust_evc, expand as rust_expand, ops,
+    reduce_rational, round_numbers_to_decimals, round_numbers_to_precision, MaxDigits,
     simplify as rust_simplify, simplify_with as rust_simplify_with, to_latex, to_text, Assumptions,
     EqOptions, Expr, LatexOpts, TextOpts, TextToAst, TextToAstOptions,
 };
@@ -279,6 +280,30 @@ impl Expression {
     /// backing DoenetML's `simplify="full"`.
     pub fn evaluate_numbers_evaluate_functions(&self) -> Expression {
         self.derive(evaluate_numbers_evaluate_functions(&self.0))
+    }
+
+    /// The three `evaluate_numbers` forms above with `max_digits: Infinity` —
+    /// exact leaves, `π` and `e` included, become floats before the fold, so a
+    /// variable-free subtree collapses to one number (`2π + π + 6` →
+    /// `15.42477796076938`).
+    ///
+    /// One entry point rather than three more, because the JS option object
+    /// crosses two independent flags and the product of them is not worth six
+    /// exports. `skip_ordering` wins over `evaluate_functions` if a caller
+    /// somehow passes both, matching the compat layer's dispatch order.
+    pub fn evaluate_numbers_to_floats(
+        &self,
+        skip_ordering: bool,
+        evaluate_functions: bool,
+    ) -> Expression {
+        let d = MaxDigits::Unlimited;
+        self.derive(if skip_ordering {
+            evaluate_numbers_preserve_order_with_digits(&self.0, d)
+        } else if evaluate_functions {
+            evaluate_numbers_evaluate_functions_with_digits(&self.0, d)
+        } else {
+            evaluate_numbers_with_digits(&self.0, d)
+        })
     }
 
     /// Cancel common polynomial factors in fractions

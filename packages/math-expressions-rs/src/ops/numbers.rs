@@ -54,6 +54,102 @@ pub fn evaluate_numbers_evaluate_functions(e: &Expr) -> Expr {
     })
 }
 
+/// How far an *exact* value may be spent into a decimal before folding — the
+/// `max_digits` option of `me.evaluate_numbers`.
+///
+/// The budget exists because folding is not free: `1/3` has no finite decimal,
+/// so turning it into `0.3333333333333333` trades an exact value for an
+/// approximation. Legacy therefore asked how many significant digits the caller
+/// was willing to spend, and only converted a value that fits.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MaxDigits {
+    /// Never introduce a decimal: exact values stay exact. The default, and
+    /// what plain [`evaluate_numbers`] does.
+    #[default]
+    None,
+    /// Convert without limit, `π` and `1/3` included. `Infinity` on the JS
+    /// side, and what DoenetML's grading path passes so that a response typed
+    /// as `6.28318` can be compared against a target that still holds `2π`.
+    Unlimited,
+}
+
+/// [`evaluate_numbers`] under a digit budget.
+///
+/// With [`MaxDigits::None`] this is exactly [`evaluate_numbers`]. With
+/// [`MaxDigits::Unlimited`] every exact leaf — integers, rationals, and the
+/// constants `π` and `e` — becomes a float first, so a variable-free subtree
+/// folds to a single number: `2π + π + 6` is `15.42477796076938` rather than
+/// `6 + π + 2π`, and `x/3` is `0.3333333333333333 x`.
+///
+/// The conversion happens *before* the fold rather than after, because folding
+/// first would leave `2π + π` as two terms that no later pass can join: exact
+/// `π` terms only collect as like terms, which this pass deliberately does not
+/// do (see [`evaluate_numbers`]).
+///
+/// `i` is left alone. It is a constant symbol like `π`, but it has no real
+/// value to become, and the imaginary unit surviving the pass is what keeps
+/// `0.5i + 0.75` a complex number rather than nonsense.
+pub fn evaluate_numbers_with_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
+    evaluate_numbers(&spend_digits(e, max_digits))
+}
+
+/// [`evaluate_numbers_evaluate_functions`] under a digit budget.
+///
+/// The budget is spent twice here, once on each side of the fold, because this
+/// is the form that *creates* constants: `sin⁻¹(1)` evaluates to `π/2`, and a
+/// `π` the fold introduced was never in the tree the pre-pass walked. Spending
+/// only before left `asin(1)` at `π/2` while the target it was being compared
+/// against — a `π/2` the author wrote — came out as `1.5707963267948966`, and
+/// syntactic equality reads two spellings of the same number as unequal.
+pub fn evaluate_numbers_evaluate_functions_with_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
+    let folded = evaluate_numbers_evaluate_functions(&spend_digits(e, max_digits));
+    match max_digits {
+        MaxDigits::None => folded,
+        MaxDigits::Unlimited => evaluate_numbers(&spend_digits(&folded, max_digits)),
+    }
+}
+
+/// [`evaluate_numbers_preserve_order`](crate::ops::evaluate_numbers_preserve_order)
+/// under a digit budget.
+pub fn evaluate_numbers_preserve_order_with_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
+    crate::ops::evaluate_numbers_preserve_order(&spend_digits(e, max_digits))
+}
+
+/// Turn exact leaves into floats as far as `max_digits` allows.
+fn spend_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
+    match max_digits {
+        MaxDigits::None => e.clone(),
+        MaxDigits::Unlimited => to_floats(&constants_to_floats(e)),
+    }
+}
+
+/// Every number in `e` as a float — with `Number::from_f64`'s reading of
+/// "float", which keeps an integral value as an `Int`.
+///
+/// That last part is a deliberate limit rather than an accident of the
+/// constructor. Legacy spent the budget on *every* exact value, so `x/3` came
+/// back as `0.3333333333333333 x`; ours declines, because an integer that stays
+/// an integer is what a dozen rules key on — `log_2(2^x)` collapses, `e^3` is
+/// exact, `sin^(-1)` reads as an inverse function, `int(x·x)` integrates. The
+/// widened version was measured against the suite twice: floating every value
+/// cost 25 tests, and floating everything outside exponents still cost 6. None
+/// of the tests it fixed needed more than the constants.
+///
+/// So what the budget actually buys is `π` and `e` (converted by the caller,
+/// via [`constants_to_floats`]) and any exact value that is already
+/// non-integral. That is the whole of what DoenetML's grading path asks for: a
+/// target holding `2π + π + 6` becomes one number, and a response typed as
+/// `15.42478` lands within the tolerance of it.
+///
+/// `NegZero` is left alone as the one exact value whose *identity* carries
+/// information a float cannot (`1/(−0)` is `−∞`).
+fn to_floats(e: &Expr) -> Expr {
+    map_numbers(e, &|n| match n {
+        Number::Float(_) | Number::NegZero => n.clone(),
+        _ => Number::from_f64(n.to_f64()),
+    })
+}
+
 /// Cancel common polynomial factors in fractions — the port of
 /// `me.reduce_rational` (`(x²−1)/(x−1)` → `x+1`, `(x²−5x+6)/(x²−4)` →
 /// `(x−3)/(x+2)`, multivariate included). Applied bottom-up at every node;

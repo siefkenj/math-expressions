@@ -172,7 +172,11 @@ fn division_by_zero_is_none() {
 fn integer_pow_rules() {
     assert_eq!(Number::Int(2).checked_pow_int(10), Some(Number::Int(1024)));
     assert_eq!(Number::Int(5).checked_pow_int(0), Some(Number::Int(1)));
-    assert_eq!(Number::Int(0).checked_pow_int(0), Some(Number::Int(1))); // 0^0 == 1
+    // `0^0` is `1` *here*, at the raw integer power, and that is not the answer
+    // the engine gives for the expression `0^0`: the `pow` constructor rejects
+    // the indeterminate forms before reaching this, so `simplify("0^0")` is
+    // `NaN`. Pinned by `doenet_round7::indeterminate_forms_do_not_fold_to_a_value`.
+    assert_eq!(Number::Int(0).checked_pow_int(0), Some(Number::Int(1)));
     assert_eq!(Number::Int(0).checked_pow_int(-1), None); // 1/0
     assert_eq!(Number::Int(2).checked_pow_int(-2), Some(Number::rat(1, 4)));
     assert_eq!(
