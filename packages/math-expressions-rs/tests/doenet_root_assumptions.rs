@@ -1,0 +1,153 @@
+//! Assumption-gated extraction of variable powers from a root.
+//!
+//! With no assumptions a variable radicand never folds (the settled root spec);
+//! these are the rows DoenetML's `simplify sqrt/cbrt/nth root of powers` tests
+//! exercise once `x > 0` / `x ∈ R` is in scope, plus the neighbours that must
+//! keep declining.
+
+use math_expressions::{expr, simplify, simplify_with, Assumptions, Expr, LatexToAst, TextToAst};
+
+fn t(s: &str) -> Expr {
+    TextToAst::new(Default::default()).convert(s).unwrap()
+}
+
+fn l(s: &str) -> Expr {
+    LatexToAst::new(Default::default()).convert(s).unwrap()
+}
+
+fn js(e: &Expr) -> String {
+    expr::serde::to_js(e).to_string()
+}
+
+fn assume(parts: &[&str]) -> Assumptions {
+    let mut a = Assumptions::new();
+    for p in parts {
+        a.add(&t(p));
+    }
+    a
+}
+
+fn under(parts: &[&str], s: &str) -> String {
+    js(&simplify_with(&t(s), &assume(parts)))
+}
+
+fn under_latex(parts: &[&str], s: &str) -> String {
+    js(&simplify_with(&l(s), &assume(parts)))
+}
+
+fn bare(s: &str) -> String {
+    js(&simplify(&t(s)))
+}
+
+#[test]
+fn odd_root_of_a_matching_power_reduces_under_real() {
+    // cbrt(x³) = x for every real x — an odd root has no sign ambiguity.
+    assert_eq!(under(&["x > 0"], "cbrt(x^3)"), r#""x""#);
+    assert_eq!(under(&["x elementof R"], "cbrt(x^3)"), r#""x""#);
+    assert_eq!(under(&["x > 0"], "nthroot(x^5, 5)"), r#""x""#);
+    assert_eq!(under(&["x elementof R"], "nthroot(x^5, 5)"), r#""x""#);
+}
+
+#[test]
+fn even_root_keeps_the_magnitude() {
+    // sqrt(x²) is |x|, and only drops the abs when the sign is pinned.
+    assert_eq!(under(&["x > 0"], "sqrt(x^2)"), r#""x""#);
+    assert_eq!(
+        under(&["x elementof R"], "sqrt(x^2)"),
+        r#"["apply","abs","x"]"#
+    );
+    // An even exponent on the way out is nonnegative by itself, so no abs.
+    assert_eq!(under(&["x elementof R"], "sqrt(x^4)"), r#"["^","x",2]"#);
+}
+
+#[test]
+fn a_partial_power_leaves_a_residual_under_the_radical() {
+    // y⁵ = y⁴·y under a square root; the numeric 32 = 2⁵ contributes 4.
+    assert_eq!(
+        under(&["x > 0", "y > 0"], "sqrt(32 x^2 y^5)"),
+        r#"["*",4,"x",["^","y",2],["apply","sqrt",["*",2,"y"]]]"#
+    );
+    // Same radicand under a cube root: 32 gives 2, y⁵ gives y, x² stays.
+    assert_eq!(
+        under(&["x > 0", "y > 0"], "cbrt(32 x^2 y^5)"),
+        r#"["*",2,"y",["apply","cbrt",["*",4,["^","x",2],["^","y",2]]]]"#
+    );
+    // a⁷b⁶c²⁸ under a fifth root: a, b and c⁵ come out; a²bc³ stays.
+    assert_eq!(
+        under(
+            &["a > 0", "b > 0", "c > 0"],
+            "nthroot(a^7 b^6 c^28, 5)"
+        ),
+        r#"["*","a","b",["^","c",5],["apply","nthroot",["tuple",["*",["^","a",2],"b",["^","c",3]],5]]]"#
+    );
+}
+
+#[test]
+fn a_negative_coefficient_still_takes_the_odd_root_sign() {
+    // The extracted `x²` joins the `−2` the odd root already pulled out. The
+    // sign rides on a `Neg` node rather than a `−2` coefficient — that is the
+    // presentation layer's doing (see `normalize::present`), not this rule's,
+    // and it is how every negative product prints.
+    assert_eq!(
+        under_latex(&["x > 0"], r"\sqrt[3]{-24x^6}"),
+        r#"["-",["*",2,["^","x",2],["apply","cbrt",3]]]"#
+    );
+    assert_eq!(
+        under_latex(&["x elementof R"], r"\sqrt[3]{-24x^6}"),
+        r#"["-",["*",2,["^","x",2],["apply","cbrt",3]]]"#
+    );
+}
+
+#[test]
+fn an_even_root_of_a_real_power_keeps_its_abs_beside_the_residual() {
+    // 128x⁶ under a sixth root: 128 = 2⁶·2, so 2 and |x| come out and 2 stays.
+    assert_eq!(
+        under_latex(&["x > 0"], r"\sqrt[6]{128x^6}"),
+        r#"["*",2,"x",["apply","nthroot",["tuple",2,6]]]"#
+    );
+    assert_eq!(
+        under_latex(&["x elementof R"], r"\sqrt[6]{128x^6}"),
+        r#"["*",2,["apply","abs","x"],["apply","nthroot",["tuple",2,6]]]"#
+    );
+}
+
+#[test]
+fn without_assumptions_a_variable_radicand_never_folds() {
+    // The settled root spec: only the numeric coefficient moves.
+    assert_eq!(bare("sqrt(x^2)"), r#"["apply","sqrt",["^","x",2]]"#);
+    assert_eq!(bare("cbrt(x^3)"), r#"["apply","cbrt",["^","x",3]]"#);
+    assert_eq!(
+        bare("nthroot(x^5, 5)"),
+        r#"["apply","nthroot",["tuple",["^","x",5],5]]"#
+    );
+    assert_eq!(
+        bare("sqrt(32 x^2 y^5)"),
+        r#"["*",4,["apply","sqrt",["*",2,["^","x",2],["^","y",5]]]]"#
+    );
+}
+
+#[test]
+fn an_unrelated_assumption_does_not_unlock_the_fold() {
+    // Knowing about `y` says nothing about `x`, so nothing moves.
+    assert_eq!(
+        under(&["y > 0"], "cbrt(x^3)"),
+        r#"["apply","cbrt",["^","x",3]]"#
+    );
+    assert_eq!(
+        under(&["y > 0"], "sqrt(x^2)"),
+        r#"["apply","sqrt",["^","x",2]]"#
+    );
+}
+
+#[test]
+fn an_exponent_below_the_root_degree_stays_put() {
+    // Nothing to extract: the rule must decline rather than churn.
+    assert_eq!(
+        under(&["x > 0"], "cbrt(x^2)"),
+        r#"["apply","cbrt",["^","x",2]]"#
+    );
+    assert_eq!(
+        under(&["x > 0"], "nthroot(x^4, 5)"),
+        r#"["apply","nthroot",["tuple",["^","x",4],5]]"#
+    );
+}

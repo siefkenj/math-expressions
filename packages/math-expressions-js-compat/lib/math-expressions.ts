@@ -183,6 +183,58 @@ function mapEqOptions(opts: EqualityOptions): Record<string, unknown> {
   return out;
 }
 
+/**
+ * Handles for *recurring* atomic trees, and their (primitive) `.tree` readback.
+ *
+ * Evaluating a function over a domain drives `fromAst` in a tight loop, and
+ * overwhelmingly on an atom: in one DoenetML `<evaluate>` test, 2.13M of 2.14M
+ * calls were a bare number or the blank `"＿"` a domain miss returns, and
+ * re-parsing those through `JSON.stringify` + `from_ast` was 40% of the run.
+ * The handles are immutable, so a repeated atom can be built once and shared.
+ *
+ * The catch is which atoms actually repeat. Symbols, the blank, and small
+ * integers do — 1.39M of those 2.13M calls were the single string `"＿"`. A
+ * *sampled coordinate* does not: an interpolated function is evaluated at
+ * millions of distinct floats, and caching those turns every call into a miss
+ * plus table churn and holds a wasm handle per sample alive until the next
+ * sweep. That is not merely a wash, it is a large loss: caching every atom
+ * took the interpolated-function test from 77s to 153s while taking the
+ * blank-driven one from 173s to 105s. Restricting the cache to strings and
+ * small integers gives 78s and 4s — both faster than either. So an arbitrary
+ * float goes straight to `from_ast`.
+ *
+ * `MAX_ATOMS` still bounds the table, since symbol names are unbounded over a
+ * long session; on overflow it is dropped wholesale rather than evicted one at
+ * a time, the working set being small and an atom cheap to re-parse.
+ */
+const ATOM_HANDLES = new Map<string, WasmExpression>();
+const ATOM_TREES = new WeakMap<WasmExpression, unknown>();
+/**
+ * Handles the atom cache owns. A shared handle outlives any one wrapper, so
+ * `free()` on a wrapper around one must not release it — see `free`.
+ */
+const ATOM_SHARED = new WeakSet<WasmExpression>();
+const MAX_ATOMS = 4096;
+/** Integers up to this magnitude are treated as recurring; see `atomKey`. */
+const MAX_CACHED_INT = 1024;
+
+/** Cache key for an atomic tree, or `undefined` if it is not worth caching. */
+function atomKey(ast: unknown): string | undefined {
+  if (typeof ast === "string") return "s" + ast;
+  if (
+    typeof ast === "number" &&
+    Number.isInteger(ast) &&
+    Math.abs(ast) <= MAX_CACHED_INT &&
+    // `-0` and `0` are distinct expressions (see `Number::NegZero`); rather
+    // than spell the sign into the key, leave `-0` uncached — it is rare, and
+    // an uncached atom is correct, just not free.
+    !Object.is(ast, -0)
+  ) {
+    return "n" + ast;
+  }
+  return undefined;
+}
+
 class Expression {
   _w: WasmExpression;
   context: Ctx;
@@ -199,7 +251,20 @@ class Expression {
    * `untagNonFinite`. `{"$":"None"}` stays tagged, having no scalar to become.
    */
   get tree() {
-    return jsonToAst(this._w.tree_json());
+    // Memoized only when the tree is a primitive (a number, or a symbol/blank
+    // string). A composite tree is handed out as a fresh array every read and
+    // callers are free to mutate what they get back, so those must not be
+    // shared; a primitive has nothing to mutate. Keyed on the wasm handle
+    // rather than the wrapper because handles are immutable and are shared by
+    // the atom cache below — `fromAst("＿")` is the single hottest call in
+    // a function-evaluation loop, and this makes its `.tree` free after the
+    // first read.
+    const cached = ATOM_TREES.get(this._w);
+    if (cached !== undefined) return cached;
+    const tree = jsonToAst(this._w.tree_json());
+    if (tree === null || typeof tree !== "object")
+      ATOM_TREES.set(this._w, tree);
+    return tree;
   }
   // Rendering honors the legacy render options (padToDigits, padToDecimals,
   // showBlanks, explicitMultiplicationSymbols, notation/unicode) by forwarding
@@ -407,7 +472,11 @@ class Expression {
   free() {
     const w = this._w as WasmExpression | undefined;
     if (w) {
-      w.free();
+      // A handle from the atom cache is shared by every wrapper `fromAst` has
+      // handed out for that atom and is deliberately retained; releasing it
+      // here would dangle the others. The wrapper still drops its reference,
+      // so `free()` remains "this Expression is done with" either way.
+      if (!ATOM_SHARED.has(w)) w.free();
       this._w = undefined as unknown as WasmExpression;
     }
   }
@@ -836,10 +905,23 @@ const Context = {
   parse_tex: parseLatex,
   fromMml: notImplemented("fromMml"),
   fromAst(ast) {
-    return new Expression(
-      wasm.from_ast(JSON.stringify(ast, astReplacer)),
-      Context,
-    );
+    const key = atomKey(ast);
+    if (key === undefined) {
+      return new Expression(
+        wasm.from_ast(JSON.stringify(ast, astReplacer)),
+        Context,
+      );
+    }
+    let handle = ATOM_HANDLES.get(key);
+    if (handle === undefined) {
+      handle = wasm.from_ast(JSON.stringify(ast, astReplacer));
+      if (ATOM_HANDLES.size >= MAX_ATOMS) ATOM_HANDLES.clear();
+      ATOM_HANDLES.set(key, handle);
+      ATOM_SHARED.add(handle);
+    }
+    // A fresh wrapper per call: the handle is immutable and safe to share, but
+    // the `Expression` around it carries a `context` and is what callers hold.
+    return new Expression(handle, Context);
   },
   reviver(key, value) {
     if (

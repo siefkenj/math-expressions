@@ -173,6 +173,10 @@ fn rewrite(e: &Expr, fired: &mut bool, assumptions: &Assumptions) -> Expr {
         *fired = true;
         return r;
     }
+    if let Some(r) = rule_distribute_sign(&e) {
+        *fired = true;
+        return r;
+    }
     e
 }
 
@@ -189,10 +193,13 @@ fn rule_assumptions(e: &Expr, a: &Assumptions) -> Option<Expr> {
     let Expr::Apply(head, args) = e else {
         return None;
     };
-    let (Expr::Sym(f), [arg]) = (&**head, args.as_slice()) else {
+    let Expr::Sym(f) = &**head else {
         return None;
     };
     if f.name() == "abs" {
+        let [arg] = args.as_slice() else {
+            return None;
+        };
         if is_nonnegative(arg, a) == Some(true) {
             return Some(arg.clone());
         }
@@ -201,42 +208,101 @@ fn rule_assumptions(e: &Expr, a: &Assumptions) -> Option<Expr> {
         }
         return None;
     }
-    if f.name() != "sqrt" {
-        return None;
-    }
-    // sqrt of an even power, or of a product of even powers.
-    let root = even_power_root(arg)?;
-    if is_nonnegative(&root, a) == Some(true) {
-        Some(root)
-    } else if is_real(&root, a) == Some(true) {
-        Some(Expr::Apply(Box::new(Expr::sym("abs")), vec![root]))
-    } else {
-        None
-    }
+    let (degree, radicand, root) = match (f.name().as_str(), args.as_slice()) {
+        ("sqrt", [r]) => (2i64, r, Root::Sqrt),
+        ("cbrt", [r]) => (3, r, Root::Cbrt),
+        ("nthroot", [r, Expr::Num(Number::Int(n))]) if *n >= 2 => (*n, r, Root::Nth(*n)),
+        _ => return None,
+    };
+    extract_powers_from_root(degree, radicand, root, a)
 }
 
-/// If `u` is `v^(2k)` or a product of such factors, the square root's
-/// magnitude candidate `v^k · …` (before sign resolution).
-fn even_power_root(u: &Expr) -> Option<Expr> {
-    fn factor_root(f: &Expr) -> Option<Expr> {
-        let Expr::Pow(base, exp) = f else {
-            return None;
+/// Pull whole `q`-th powers of a *variable* factor out from under a root:
+///
+/// ```text
+/// nthroot(∏ vᵢ^kᵢ · C, q)  →  ∏ vᵢ^⌊kᵢ/q⌋ · nthroot(∏ vᵢ^(kᵢ mod q) · C, q)
+/// ```
+///
+/// This is the assumption-gated companion to [`simplify_root`], which extracts
+/// only the perfect `q`-th-power part of the *numeric* coefficient. A variable
+/// factor needs a known sign, so it can only move under an [`Assumptions`]
+/// context — with none, `sqrt(x²)` and `cbrt(x³)` stay as written, per the
+/// settled root spec.
+///
+/// Soundness of the split, in the two cases the root degree forces apart:
+///
+/// * **Even `q`.** The extracted part `(∏ vᵢ^⌊kᵢ/q⌋)^q` is an even power of a
+///   real, hence `≥ 0`, and pulling a *nonnegative* factor out of a principal
+///   root is always valid — so the residual's sign does not matter and even a
+///   non-real residual is fine (`sqrt(x²·i) = |x|·sqrt(i)`). What comes out is
+///   the magnitude: `|∏ vᵢ^⌊kᵢ/q⌋|`, which drops its `abs` when the assumptions
+///   already put it at `≥ 0`. This subsumes the former `sqrt`-only rule, which
+///   handled just the case where every exponent was a multiple of 2.
+/// * **Odd `q`.** The extracted part keeps its sign, so the split needs the
+///   residual to stay on the real line — `cbrt(x³·i) ≠ x·cbrt(i)` for `x < 0`,
+///   the two principal branches differing by a third of a turn. Either a
+///   nonnegative extracted part or a real residual rules that out.
+///
+/// Returns `None` when no factor has a `q`-th power to give, so a residual that
+/// cannot reduce further does not re-fire the rule.
+fn extract_powers_from_root(q: i64, radicand: &Expr, root: Root, a: &Assumptions) -> Option<Expr> {
+    let q_even = u32::try_from(q).ok()? % 2 == 0;
+    let factors: Vec<&Expr> = match radicand {
+        Expr::Mul(fs) => fs.iter().collect(),
+        other => vec![other],
+    };
+
+    let mut outside = Vec::new();
+    let mut inside = Vec::new();
+    for f in factors {
+        // A numeric coefficient is `simplify_root`'s business; leave it under
+        // the radical and let that rule take its perfect-power part.
+        let (base, k) = match f {
+            Expr::Num(_) => (None, 0),
+            Expr::Pow(b, x) => match &**x {
+                Expr::Num(Number::Int(k)) if *k > 0 => (Some((**b).clone()), *k),
+                _ => (None, 0),
+            },
+            other => (Some(other.clone()), 1),
         };
-        let Expr::Num(Number::Int(k)) = &**exp else {
-            return None;
+        let Some(base) = base.filter(|_| k / q > 0) else {
+            inside.push(f.clone());
+            continue;
         };
-        if *k <= 0 || k % 2 != 0 {
+        // Splitting the root across factors needs each moved base to be real.
+        if is_real(&base, a) != Some(true) {
             return None;
         }
-        Some(super::pow((**base).clone(), Expr::Num(Number::Int(k / 2))))
+        outside.push(super::pow(base.clone(), Expr::Num(Number::Int(k / q))));
+        if k % q > 0 {
+            inside.push(super::pow(base, Expr::Num(Number::Int(k % q))));
+        }
     }
-    match u {
-        Expr::Pow(..) => factor_root(u),
-        Expr::Mul(fs) => {
-            let roots = fs.iter().map(factor_root).collect::<Option<Vec<_>>>()?;
-            Some(super::mul(roots))
-        }
-        _ => None,
+    if outside.is_empty() {
+        return None;
+    }
+
+    let outside = super::mul(outside);
+    let nonneg = is_nonnegative(&outside, a) == Some(true);
+    // An empty residual is the empty product, not `Mul([])`.
+    let inner = if inside.is_empty() {
+        Expr::int(1)
+    } else {
+        super::mul(inside)
+    };
+    if !q_even && !nonneg && is_real(&inner, a) != Some(true) {
+        return None;
+    }
+    let outside = if q_even && !nonneg {
+        Expr::Apply(Box::new(Expr::sym("abs")), vec![outside])
+    } else {
+        outside
+    };
+
+    if matches!(&inner, Expr::Num(n) if n.is_one()) {
+        Some(outside)
+    } else {
+        Some(super::mul(vec![outside, root.rebuild(inner)]))
     }
 }
 
@@ -736,6 +802,129 @@ fn combine_seqs_in_add(terms: &[Expr]) -> Option<Expr> {
         }
     }
     Some(add(out))
+}
+
+// ---- Cluster: sign normalization ----
+//
+// `−(1 − x)` is `x − 1`, and a reader expects to see it written that way. The
+// canonical form spells a leading minus as a negative numeric coefficient, so
+// what arrives here is `Mul(−1, Add(…))`; pushing that sign into the sum is the
+// only way the outer minus can disappear.
+//
+// Two things are easy to conflate here and are *not* the same operation:
+//
+//   * moving the **sign** of a product into one of its factors — `−2·(1 − x)`
+//     is `2·(x − 1)`, and the `2` never moves;
+//   * distributing the **coefficient** — `2·(1 − x)` to `2 − 2x`, which is
+//     `expand`'s job and not done here.
+//
+// So the rule is about the sign alone, and it applies to any product whose
+// coefficient is negative, not only to a bare `−1` with a sum beside it. The
+// sign goes into exactly *one* factor (moving it into two would cancel it), so
+// where several factors could take it we pick the one that sheds the most
+// signs.
+//
+// **Which factors can take a sign.** A sum can: negate every term. A power can
+// when its exponent is an odd integer, since `(−b)^m = −(b^m)` there — and that
+// includes `m = −1`, so `−1/(1 − x)` reaches `1/(x − 1)`. An even exponent
+// cannot: `−(1 − x)²` is not `(x − 1)²`. A non-integer exponent cannot either,
+// which keeps the rule away from `−√(1 − x)`.
+//
+// **When it is worth doing.** Count minus signs. For a candidate sum of `k`
+// terms of which `n` are negated, the product costs `1 + n` signs as written
+// and `k − n` with the sign pushed in, so it is worth doing iff
+// `1 + n > k − n`, i.e. `2n ≥ k`. Writing `saving = 2n − k`, the rule fires iff
+// the best candidate has `saving ≥ 0`:
+//
+// | input | n / k | result |
+// | --- | --- | --- |
+// | `−(1 − x)` | 1 / 2 | `x − 1` — the tie, and still one sign fewer |
+// | `−(−x − 1)` | 2 / 2 | `x + 1` |
+// | `−(x − y − z)` | 2 / 3 | `−x + y + z` |
+// | `−2(1 − x)` | 1 / 2 | `2(x − 1)` — the sign moves, the `2` does not |
+// | `−y(1 − x)` | 1 / 2 | `y(x − 1)` |
+// | `−(1 − x)(1 − y)` | 1 / 2 each | `(x − 1)(1 − y)` — one factor takes it |
+// | `−(1 − x)³` | 1 / 2 | `(x − 1)³` — odd exponent |
+// | `−(1 − x)²` | — | unchanged — even exponent cannot take a sign |
+// | `−(x + y)` | 0 / 2 | unchanged — distributing would *add* a sign |
+// | `−(x + y − z)` | 1 / 3 | unchanged |
+//
+// Counting signs rather than reading the leading term keeps the rule
+// independent of how the sum happens to be ordered, so it fires the same way on
+// `−(1 − x)` and `−(−x + 1)`. The rewrite always leaves a positive coefficient
+// behind, so it cannot fire on its own output.
+
+/// Whether a term of a sum carries a minus sign — a negative number, or a
+/// product whose numeric coefficient is negative (the canonical spelling of a
+/// negated term; `split_coeff` reads the coefficient from the same position).
+fn is_negated_term(t: &Expr) -> bool {
+    match t {
+        Expr::Num(n) => n.is_negative(),
+        Expr::Mul(fs) => matches!(fs.first(), Some(Expr::Num(n)) if n.is_negative()),
+        _ => false,
+    }
+}
+
+/// Net minus signs removed by pushing a sign into `f`, or `None` if `f` cannot
+/// take one at all. Negative means pushing the sign in would *add* signs.
+fn sign_absorption(f: &Expr) -> Option<i64> {
+    match f {
+        Expr::Add(terms) => {
+            let negated = terms.iter().filter(|t| is_negated_term(t)).count();
+            Some(2 * negated as i64 - terms.len() as i64)
+        }
+        // `(−b)^m = −(b^m)` for odd integer `m`, so the sign passes straight
+        // through to the base. Even and non-integer exponents cannot.
+        Expr::Pow(b, x) => match &**x {
+            Expr::Num(Number::Int(m)) if m % 2 != 0 => sign_absorption(b),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Push a sign into `f`. Mirrors [`sign_absorption`] case for case; call only
+/// where that returned `Some`.
+fn absorb_sign(f: &Expr) -> Expr {
+    match f {
+        Expr::Add(terms) => add(terms
+            .iter()
+            .map(|t| mul(vec![Expr::int(-1), t.clone()]))
+            .collect()),
+        Expr::Pow(b, x) => super::pow(absorb_sign(b), (**x).clone()),
+        // `sign_absorption` returned `None` for everything else.
+        other => other.clone(),
+    }
+}
+
+fn rule_distribute_sign(e: &Expr) -> Option<Expr> {
+    let Expr::Mul(factors) = e else { return None };
+    // The sign lives on the numeric coefficient, which canonical form keeps
+    // first (see `split_coeff`). A zero coefficient is not a sign to move —
+    // the product is zero and canonicalize collapses it.
+    let Some(Expr::Num(coeff)) = factors.first() else {
+        return None;
+    };
+    if !coeff.is_negative() || coeff.is_zero() {
+        return None;
+    }
+    // The sign can go into exactly one factor — into two it would cancel — so
+    // take the one that sheds the most signs. Ties go to the earliest factor,
+    // which canonical ordering makes deterministic.
+    let (idx, saving) = factors
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter_map(|(i, f)| sign_absorption(f).map(|s| (i, s)))
+        .max_by_key(|&(i, s)| (s, std::cmp::Reverse(i)))?;
+    // Dropping the outer sign saves one; taking it costs `-saving` inside.
+    if saving < 0 {
+        return None;
+    }
+    let mut out = factors.clone();
+    out[0] = Expr::Num(coeff.neg());
+    out[idx] = absorb_sign(&factors[idx]);
+    Some(mul(out))
 }
 
 // ---- Cluster: radical simplification ----
