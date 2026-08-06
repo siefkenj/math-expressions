@@ -51,10 +51,24 @@ fn same_skeleton(a: &Expr, b: &Expr) -> bool {
         (Expr::Seq(k1, _), Expr::Seq(k2, _)) => k1 == k2,
         (Expr::OtherOp(n1, _), Expr::OtherOp(n2, _)) => n1 == n2,
         (Expr::Relation { ops: o1, .. }, Expr::Relation { ops: o2, .. }) => o1 == o2,
-        (Expr::Matrix(m1), Expr::Matrix(m2)) => {
-            m1.rows() == m2.rows() && m1.cols() == m2.cols()
-        }
+        (Expr::Matrix(m1), Expr::Matrix(m2)) => m1.rows() == m2.rows() && m1.cols() == m2.cols(),
         (Expr::Interval { closed: cl1, .. }, Expr::Interval { closed: cl2, .. }) => cl1 == cl2,
+        // Leaves whose entire content is the payload. They have no children,
+        // so leaving them to `_ => true` made them compare equal to each other
+        // unconditionally: with any tolerance set, `["and", true, false]`
+        // matched `["and", false, true]`, and `rootof(p, 0)` matched
+        // `rootof(p, 1)` — √2 grading equal to −√2.
+        (Expr::Bool(x), Expr::Bool(y)) => x == y,
+        (
+            Expr::RootOf {
+                poly: p1,
+                index: i1,
+            },
+            Expr::RootOf {
+                poly: p2,
+                index: i2,
+            },
+        ) => p1 == p2 && i1 == i2,
         _ => true,
     }
 }

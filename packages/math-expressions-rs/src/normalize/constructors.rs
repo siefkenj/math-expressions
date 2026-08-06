@@ -319,10 +319,13 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         }
     }
     if coeff.is_zero() {
-        return annihilate(&coeff, out.iter().cloned().any(|f| {
-            let (b, x) = split_pow(f);
-            is_infinite_factor(&b, &x)
-        }));
+        return annihilate(
+            &coeff,
+            out.iter().cloned().any(|f| {
+                let (b, x) = split_pow(f);
+                is_infinite_factor(&b, &x)
+            }),
+        );
     }
     // Re-run the combining pass so distributed factors pair up with the rest
     // (e.g. an existing `x⁻²` cancels the distributed `x²`). Terminates: the
@@ -352,23 +355,122 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
 /// Build a canonical power, applying the identities and constant folding that
 /// hold without assumptions. `0` to a negative power is left unfolded (an
 /// exact division by zero).
+/// See through the wrappers that multiply by a nonzero constant: negation and
+/// a scaling unit. A value behind them is zero, infinite or `NaN` exactly when
+/// what they wrap is.
+///
+/// `equals` runs `desugar_units` before it evaluates, so it reads `(0 deg)^0`
+/// as `0^0`; a predicate here that matched only a bare `Num(0)` let `simplify`
+/// fold that to `1` while `equals` called the same tree `NaN`, making
+/// `equals(full_simplify(e), e)` false — the invariant `normalize/full.rs`
+/// documents as holding by construction. Negation is peeled for the same
+/// reason one step further out: `-1/0` is `Neg(Pow(0, -1))`, so `(-1/0)^0`
+/// would otherwise fold to `1` beside `(-Infinity)^0 → NaN`.
+///
+/// Only the units `desugar_units` actually rewrites are peeled, so `circ` (a
+/// unit symbol with no scaling rule) is left alone here for the same reason it
+/// is left alone there.
+fn peel_nonzero_scaling(e: &Expr) -> &Expr {
+    let mut cur = e;
+    loop {
+        match cur {
+            Expr::Neg(inner) => cur = inner,
+            Expr::OtherOp(name, args) if name.name() == "unit" => {
+                match crate::normalize::units::desugarable_unit_body(args) {
+                    Some(inner) => cur = inner,
+                    None => return cur,
+                }
+            }
+            _ => return cur,
+        }
+    }
+}
+
 /// Is `e` one of the non-finite constants (`±∞`, `NaN`)?
 fn is_nonfinite_const(e: &Expr) -> bool {
     matches!(
-        e,
+        peel_nonzero_scaling(e),
         Expr::Const(MathConst::Inf) | Expr::Const(MathConst::NegInf) | Expr::Const(MathConst::NaN)
     )
 }
 
+/// An unfolded *literal pole*: `1/0` is `Pow(0, -1)` and `1/∞` is
+/// `Pow(∞, -1)`, which are `∞` and `0` respectively.
+///
+/// `pow`'s fast paths run before those fold, so matching only the folded
+/// spellings made the rules non-confluent: `Infinity^0` gave `NaN` while
+/// `(1/0)^0` — the same value, written the way a student writes it — gave `1`.
+fn is_pole(e: &Expr) -> bool {
+    let Expr::Pow(base, exp) = peel_nonzero_scaling(e) else {
+        return false;
+    };
+    if !matches!(exp.as_ref(), Expr::Num(n) if n.is_negative()) {
+        return false;
+    }
+    let base = peel_nonzero_scaling(base);
+    is_nonfinite_const(base) || matches!(base, Expr::Num(n) if n.is_zero())
+}
+
+/// Is `e` provably infinite or `NaN`?
+///
+/// The exponent counterpart of [`is_indeterminate_power_base`], and
+/// deliberately *narrower*: it excludes zero, because `1^0` is `1` while
+/// `1^∞` is not. Using the base predicate here would have turned `1^(0 deg)`
+/// into `NaN`.
+fn is_nonfinite_value(e: &Expr) -> bool {
+    let e = peel_nonzero_scaling(e);
+    if is_nonfinite_const(e) {
+        return true;
+    }
+    // `0^negative` is ±∞. `∞^negative` is `0`, so unlike [`is_pole`] only the
+    // zero base counts here.
+    if let Expr::Pow(base, exp) = e {
+        if matches!(exp.as_ref(), Expr::Num(n) if n.is_negative())
+            && matches!(peel_nonzero_scaling(base), Expr::Num(n) if n.is_zero())
+        {
+            return true;
+        }
+    }
+    // One infinite factor makes the product infinite — or `NaN`, if another is
+    // zero. Either way `1^e` must not collapse, so both answers are handled by
+    // the same test.
+    match e {
+        Expr::Mul(factors) => factors.iter().any(is_nonfinite_value),
+        Expr::Div(num, den) => {
+            is_nonfinite_value(num)
+                || matches!(peel_nonzero_scaling(den), Expr::Num(n) if n.is_zero())
+        }
+        _ => false,
+    }
+}
+
 /// Bases for which `base^0` is an indeterminate form rather than 1: zero and
-/// the non-finite constants.
+/// the non-finite constants, under any spelling that reaches `pow` unfolded.
 ///
 /// `0^0` is the debatable one — combinatorics and power series take it as 1,
 /// and IEEE `pow(0,0)` is 1. As a *limit* form it is indeterminate (`x^0 → 1`
 /// but `0^x → 0`), which is the reading a mathematics course teaches and the
 /// one this engine reports, alongside `∞ − ∞` and `0 · ∞`.
 fn is_indeterminate_power_base(e: &Expr) -> bool {
-    is_nonfinite_const(e) || matches!(e, Expr::Num(n) if n.is_zero())
+    let peeled = peel_nonzero_scaling(e);
+    if is_nonfinite_const(peeled)
+        || matches!(peeled, Expr::Num(n) if n.is_zero())
+        || is_pole(peeled)
+    {
+        return true;
+    }
+    // Products and quotients inherit it. A factor that is zero, infinite or
+    // `NaN` leaves the whole expression zero, infinite or `NaN`; no other
+    // operand can return it to the finite nonzero value that `base^0 → 1`
+    // needs. This is the path `-1/0` actually arrives on — canonicalization
+    // rewrites the negation as a `-1` *factor*, so the base reaching `pow` is
+    // `Mul[-1, Pow(0, -1)]` rather than anything `peel_nonzero_scaling` can
+    // unwrap, which is what kept `(-1/0)^0 → 1` beside `(-Infinity)^0 → NaN`.
+    match peeled {
+        Expr::Mul(factors) => factors.iter().any(is_indeterminate_power_base),
+        Expr::Div(num, den) => is_indeterminate_power_base(num) || is_indeterminate_power_base(den),
+        _ => false,
+    }
 }
 
 pub(crate) fn pow(base: Expr, exp: Expr) -> Expr {
@@ -474,7 +576,10 @@ pub(crate) fn pow(base: Expr, exp: Expr) -> Expr {
             // `1^x = 1` for every finite `x`, including a free variable — but
             // `1^∞` is the classic indeterminate form (it is the shape behind
             // `(1 + 1/n)^n → e`), so an infinite or NaN exponent must not fold.
-            if is_nonfinite_const(&exp) {
+            // `is_nonfinite_value` covers the unfolded spellings of the same
+            // thing — `1^(1/0)` and `1^(-1/0)`, where canonicalization has left
+            // a pole, or a `-1` factor over one, in place of the constant.
+            if is_nonfinite_value(&exp) {
                 return Expr::Const(MathConst::NaN);
             }
             return Expr::Num(Number::one()); // 1^x = 1

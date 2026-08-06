@@ -37,6 +37,17 @@ pub(crate) fn unit_body(args: &[Expr]) -> Option<&Expr> {
     unit_parts(args).map(|(_, value)| value)
 }
 
+/// The value operand, but only for a unit [`desugar_units`] can actually
+/// rewrite — everything [`unit_body`] accepts except the `circ` spelling.
+///
+/// Any pass that has to agree with `equals` must use *this* set, because
+/// `equals` desugars first and simply leaves a `circ` node standing. Folding
+/// `30 circ + 60 circ → 90 circ` while `equals` treats the nodes as opaque
+/// produced a `simplify` result its own equality oracle rejected.
+pub(crate) fn desugarable_unit_body(args: &[Expr]) -> Option<&Expr> {
+    unit_value(args).map(|(_, value)| value)
+}
+
 /// The three scaling units from lib/expression/units.js.
 enum Unit {
     /// `$` — a `prefix` unit that only marks its value (`scale: x => x`), so it
@@ -133,8 +144,13 @@ fn make_unit(unit: &Expr, value: Expr) -> Expr {
 /// meaning here) and returns `None`.
 fn as_unit_quantity(e: &Expr) -> Option<(Expr, Expr)> {
     match e {
+        // Gated on `unit_value`, not `unit_parts`: only a unit `desugar_units`
+        // rewrites may be folded, or `simplify` and `equals` disagree — see
+        // [`desugarable_unit_body`]. `circ` is a unit symbol with no scaling
+        // rule, so it is opaque to both.
         Expr::OtherOp(name, args) if name.name() == "unit" => {
-            let (unit, value) = unit_parts(args)?;
+            let (unit, _) = unit_parts(args)?;
+            let value = desugarable_unit_body(args)?;
             Some((unit.clone(), value.clone()))
         }
         Expr::Neg(x) => {
@@ -186,12 +202,10 @@ pub(crate) fn fold_units(e: &Expr) -> Expr {
             let mut others: Vec<Expr> = Vec::new();
             for t in terms {
                 match as_unit_quantity(t) {
-                    Some((unit, value)) => {
-                        match groups.iter_mut().find(|(u, _)| *u == unit) {
-                            Some((_, vs)) => vs.push(value),
-                            None => groups.push((unit, vec![value])),
-                        }
-                    }
+                    Some((unit, value)) => match groups.iter_mut().find(|(u, _)| *u == unit) {
+                        Some((_, vs)) => vs.push(value),
+                        None => groups.push((unit, vec![value])),
+                    },
                     None => others.push(t.clone()),
                 }
             }

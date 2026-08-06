@@ -50,15 +50,13 @@ describe("display rounding is exact at large magnitudes (08)", () => {
   it("passes non-finite values through untouched", () => {
     expect(
       me.round_numbers_to_precision_plus_decimals(Infinity, 3, 2).tree,
-    ).toEqual({ $: "Inf" });
+    ).toEqual(Infinity);
     expect(
       me
         .round_numbers_to_precision_plus_decimals(-Infinity, 3, 2)
         .evaluate_to_constant(),
     ).toBe(-Infinity);
-    expect(me.round_numbers_to_decimals(-Infinity, 2).tree).toEqual({
-      $: "-Inf",
-    });
+    expect(me.round_numbers_to_decimals(-Infinity, 2).tree).toEqual(-Infinity);
   });
 });
 

@@ -32,6 +32,7 @@
 //! canonical layer would change the trees being matched.
 
 use serde_json::{Map, Value};
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
 /// Is this operator associative in the JS tree sense (`flatten.is_associative`)?
@@ -119,30 +120,91 @@ pub struct MatchOptions {
     /// `*`) when the tree has no operand for them, so `a x + b` matches `x`
     /// with `a = 1`, `b = 0`.
     pub implicit_identities: HashSet<String>,
+    /// Every parameter may take an identity — the legacy `true` spelling.
+    ///
+    /// Separate from stuffing all the names into `implicit_identities` because
+    /// in default mode the parameters are the *pattern's* string leaves, which
+    /// a caller cannot enumerate; only the matcher knows them.
+    pub implicit_identities_all: bool,
 }
 
-/// Everything the recursion needs: the declared wildcards and the two flags.
+/// Everything the recursion needs: the declared wildcards, the two flags, and
+/// the step budget that keeps the search from running away.
 struct Ctx {
     wildcards: HashMap<String, VarKind>,
     allow_permutations: bool,
     implicit_identities: HashSet<String>,
+    implicit_identities_all: bool,
+    /// Steps left in this search, and whether one was ever refused.
+    ///
+    /// `Cell` rather than `&mut` because the recursion threads `&Ctx` through
+    /// `match_inner` → `match_operands` → `go` → `match_inner` and holds
+    /// overlapping borrows across those frames. wasm is single-threaded, so
+    /// the shared mutability costs nothing.
+    budget: Cell<u64>,
+    exhausted: Cell<bool>,
 }
 
 impl Ctx {
     fn kind_of(&self, name: &str) -> Option<VarKind> {
         self.wildcards.get(name).copied()
     }
+    /// Charge one step, or refuse once the budget is gone. A refusal unwinds
+    /// the whole search as "no match", and the `exhausted` flag is what turns
+    /// that into [`MatchBudgetExceeded`] at the entry point rather than a
+    /// silent — and wrong — "the tree did not match".
+    fn spend(&self) -> bool {
+        match self.budget.get() {
+            0 => {
+                self.exhausted.set(true);
+                false
+            }
+            n => {
+                self.budget.set(n - 1);
+                true
+            }
+        }
+    }
     fn is_implicit(&self, pattern: &Value) -> bool {
         matches!(pattern, Value::String(s)
-            if self.implicit_identities.contains(s) && self.wildcards.contains_key(s))
+            if (self.implicit_identities_all || self.implicit_identities.contains(s))
+                && self.wildcards.contains_key(s))
     }
 }
 
+/// The search ran past [`MAX_MATCH_STEPS`], so no answer was reached. Distinct
+/// from `Ok(None)` — "the tree does not match" — because on a grading path the
+/// two must never be confused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MatchBudgetExceeded;
+
+/// Ceiling on the steps (one per [`match_inner`] entry) that a single
+/// `match_template*` call may take.
+///
+/// [`MAX_PERMUTED_OPERANDS`] bounds the orderings tried at *one* node, but
+/// `match_operands` recurses back into `match_inner`, so with
+/// `allow_permutations` the costs of nested `+`/`*` levels **multiply**. A
+/// 341-character tree of 7 summands of 7 factors each ran past 90 s against a
+/// three-operand pattern; wasm cannot be interrupted and the grading call is
+/// synchronous, so that is a hung worker. A per-node cap cannot fix a product
+/// across nodes — only a budget for the search as a whole can.
+///
+/// Sized against measurement rather than taste: a real three-operand pattern
+/// against a quadratic settles in single-digit milliseconds, while the
+/// pathological trees above exhaust this in well under half a second. That is
+/// two orders of magnitude of headroom over legitimate use and still a bound a
+/// synchronous grading call can absorb — reaching it means the input is
+/// pathological, not merely large.
+pub const MAX_MATCH_STEPS: u64 = 250_000;
+
 /// Attempt to match `tree` against `pattern` (default mode — see module
-/// docs). `Some(bindings)` maps each pattern wildcard to the subtree it
-/// bound; `None` means no match. An exact variable-free match yields an
+/// docs). `Ok(Some(bindings))` maps each pattern wildcard to the subtree it
+/// bound; `Ok(None)` means no match. An exact variable-free match yields an
 /// empty map.
-pub fn match_template(tree: &Value, pattern: &Value) -> Option<Map<String, Value>> {
+pub fn match_template(
+    tree: &Value,
+    pattern: &Value,
+) -> Result<Option<Map<String, Value>>, MatchBudgetExceeded> {
     match_template_with_options(tree, pattern, &MatchOptions::default())
 }
 
@@ -151,7 +213,7 @@ pub fn match_template_with_options(
     tree: &Value,
     pattern: &Value,
     opts: &MatchOptions,
-) -> Option<Map<String, Value>> {
+) -> Result<Option<Map<String, Value>>, MatchBudgetExceeded> {
     let wildcards = match &opts.variables {
         Some(declared) => declared.clone(),
         None => {
@@ -164,8 +226,17 @@ pub fn match_template_with_options(
         wildcards,
         allow_permutations: opts.allow_permutations,
         implicit_identities: opts.implicit_identities.clone(),
+        implicit_identities_all: opts.implicit_identities_all,
+        budget: Cell::new(MAX_MATCH_STEPS),
+        exhausted: Cell::new(false),
     };
-    match_inner(tree, pattern, &ctx)
+    let found = match_inner(tree, pattern, &ctx);
+    // A refused step unwinds as `None`, so an exhausted search is
+    // indistinguishable from a genuine non-match here — report it as neither.
+    if ctx.exhausted.get() {
+        return Err(MatchBudgetExceeded);
+    }
+    Ok(found)
 }
 
 /// Does `tree` satisfy the declared kind for a parameter?
@@ -173,14 +244,15 @@ fn kind_admits(kind: VarKind, tree: &Value) -> bool {
     match kind {
         VarKind::Any => true,
         VarKind::Variable => tree.is_string(),
-        // Mirrors DoenetML's `isNumericConstant(fromAst(m).evaluate_to_constant())`:
-        // a real constant that is not NaN. `evaluate_to_constant` reports a
-        // *proven* NaN as a value, so NaN is excluded explicitly rather than by
-        // the `None` case.
+        // Mirrors DoenetML's `isNumericConstant(fromAst(m).evaluate_to_constant())`,
+        // which is a *finiteness* test. `evaluate_to_constant` deliberately
+        // reports a proven `NaN` or `±∞` as a value rather than declining, so
+        // both have to be excluded here rather than falling out of the `None`
+        // case — otherwise a `"number"` coefficient slot binds `1/0`.
         VarKind::Number => math_expressions::expr::serde::try_from_js(tree)
             .ok()
             .and_then(|e| math_expressions::evaluate_to_constant(&e))
-            .is_some_and(|c| !c.re.is_nan() && c.im == 0.0),
+            .is_some_and(|c| c.re.is_finite() && c.im == 0.0),
     }
 }
 
@@ -195,6 +267,13 @@ fn identity_of(op: &str) -> Option<Value> {
 }
 
 fn match_inner(tree: &Value, pattern: &Value, ctx: &Ctx) -> Option<Map<String, Value>> {
+    // Every branch of the search reaches here, so charging one step per entry
+    // bounds the whole thing — including the permutation loop below, whose
+    // cost multiplies across nested levels.
+    if !ctx.spend() {
+        return None;
+    }
+
     // A wildcard binds the whole tree, provided its declared kind admits it.
     if let Value::String(name) = pattern {
         if let Some(kind) = ctx.kind_of(name) {
@@ -292,10 +371,12 @@ fn match_inner(tree: &Value, pattern: &Value, ctx: &Ctx) -> Option<Map<String, V
     match_operands(op, &operands, pattern_operands, ctx)
 }
 
-/// Cap on how many tree operands will be permuted. `8! = 40_320` orderings is
-/// the most we will enumerate for one node; DoenetML's patterns are two or
-/// three operands wide, so this is far above real use and only bounds the
-/// pathological case.
+/// Cap on how many tree operands will be permuted **at one node**. `8! =
+/// 40_320` orderings is the most we will enumerate there.
+///
+/// This is not on its own a bound on the search: `match_operands` recurses
+/// back into `match_inner`, so a nested tree multiplies this cost level by
+/// level. [`MAX_MATCH_STEPS`] is what actually bounds the total.
 const MAX_PERMUTED_OPERANDS: usize = 8;
 
 /// All orderings of `0..n`, in lexicographic order.
@@ -303,7 +384,13 @@ fn permutations(n: usize) -> Vec<Vec<usize>> {
     let mut out = Vec::new();
     let mut cur: Vec<usize> = (0..n).collect();
     let mut used = vec![false; n];
-    fn go(n: usize, used: &mut Vec<bool>, cur: &mut Vec<usize>, depth: usize, out: &mut Vec<Vec<usize>>) {
+    fn go(
+        n: usize,
+        used: &mut Vec<bool>,
+        cur: &mut Vec<usize>,
+        depth: usize,
+        out: &mut Vec<Vec<usize>>,
+    ) {
         if depth == n {
             out.push(cur.clone());
             return;
@@ -396,7 +483,11 @@ fn match_operands(
                 let identity = identity_of(op)?;
                 match_inner(&identity, &pattern_operands[pat_ind], ctx)
             } else {
-                match_inner(&chunk(op, operands, start, size), &pattern_operands[pat_ind], ctx)
+                match_inner(
+                    &chunk(op, operands, start, size),
+                    &pattern_operands[pat_ind],
+                    ctx,
+                )
             };
             let Some(m) = m else { continue };
             if !consistent(&m, acc) {
@@ -501,7 +592,15 @@ mod tests {
     //! (`variables` kinds, `allow_permutations`, `allow_implicit_identities`)
     //! that `match_template_with_options` adds — see this file's module docs
     //! and JS_TEST_COVERAGE_AUDIT.md.
-    use super::{flatten_tree, match_template, unflatten_left, unflatten_right};
+    use super::{flatten_tree, unflatten_left, unflatten_right};
+    use serde_json::Map;
+
+    /// [`super::match_template`] with the step budget asserted away. These
+    /// fixtures are a handful of operands wide, so reaching the budget would
+    /// itself be the bug.
+    fn match_template(tree: &Value, pattern: &Value) -> Option<Map<String, Value>> {
+        super::match_template(tree, pattern).expect("fixture stays within the step budget")
+    }
     use math_expressions::expr::serde::to_js;
     use math_expressions::{equals, substitute, EqOptions, Expr, TextToAst, TextToAstOptions};
     use serde_json::{json, Value};
@@ -744,10 +843,26 @@ mod tests {
 
     // ---- the option surface -------------------------------------------
 
-    use super::{match_template_with_options, MatchOptions, VarKind};
+    use super::{MatchOptions, VarKind};
+
+    /// As with `match_template` above: the budget is far above what these
+    /// fixtures reach, so an exhausted search is a failure, not a case to
+    /// handle.
+    fn match_template_with_options(
+        tree: &Value,
+        pattern: &Value,
+        opts: &MatchOptions,
+    ) -> Option<Map<String, Value>> {
+        super::match_template_with_options(tree, pattern, opts)
+            .expect("fixture stays within the step budget")
+    }
 
     fn pattern_of(s: &str) -> Value {
-        to_js(&TextToAst::new(TextToAstOptions::default()).convert(s).unwrap())
+        to_js(
+            &TextToAst::new(TextToAstOptions::default())
+                .convert(s)
+                .unwrap(),
+        )
     }
 
     fn matched(tree: &str, pattern: &str, opts: &MatchOptions) -> String {
@@ -797,6 +912,57 @@ mod tests {
         assert_eq!(matched("ax+b", "a x + b", &var), r#"{"a":"a","b":"b"}"#);
         // `b` would have to bind `x+x`, which is not a bare variable.
         assert_eq!(matched("ax+x+x", "a x + b", &var), "false");
+    }
+
+    /// The permutation search multiplies across nesting levels, so a tree that
+    /// is unremarkable in size can run effectively forever. Before the budget,
+    /// this input did not finish in 90 s; wasm cannot be interrupted and the
+    /// grading call is synchronous, so that is a hung worker.
+    ///
+    /// The assertion is `Err`, not `Ok(None)`: giving up and not matching lead
+    /// to different grades, so they must not share a spelling.
+    #[test]
+    fn a_runaway_permutation_search_is_an_error_not_a_hang() {
+        let pattern = tree("a x^2 + b x + c");
+        let mut opts = declared(&[
+            ("a", VarKind::Number),
+            ("b", VarKind::Number),
+            ("c", VarKind::Number),
+            ("x", VarKind::Variable),
+        ]);
+        opts.allow_permutations = true;
+        opts.implicit_identities = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+
+        let wide: Vec<String> = (0..7)
+            .map(|i| {
+                (0..7)
+                    .map(|j| format!("z{i}{j}"))
+                    .collect::<Vec<_>>()
+                    .join("*")
+            })
+            .collect();
+        let hostile = tree(&wide.join("+"));
+        assert_eq!(
+            super::match_template_with_options(&hostile, &pattern, &opts),
+            Err(super::MatchBudgetExceeded)
+        );
+
+        // The budget must not fire on the shapes DoenetML actually sends.
+        assert_eq!(
+            super::match_template_with_options(&tree("3x^2+4x+5"), &pattern, &opts)
+                .expect("a real pattern stays far inside the budget"),
+            Some(
+                [
+                    ("a", json!(3)),
+                    ("b", json!(4)),
+                    ("c", json!(5)),
+                    ("x", json!("x"))
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect()
+            )
+        );
     }
 
     #[test]

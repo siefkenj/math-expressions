@@ -176,3 +176,20 @@ not yours: `me.round_numbers_to_decimals(-Infinity, 2).tree` is `{$: "-Inf"}`, w
 `-Infinity`. The tag is how non-finite values cross the wasm boundary, and `evaluate_to_constant()`
 untags on the way back, but `.tree` does not. If those 12 are that shape, send one and we will take
 it.
+
+**Resolved — `.tree` now untags.** It was ours. `.tree` hands back `Infinity`, `-Infinity` and `NaN`
+as JS scalars, matching legacy and what `typeof x === "number"` consumers test. The *wire* format
+stays tagged in both directions, because JSON cannot hold those three values; the replacer re-tags on
+the way in, so `fromAst(x).tree` is still a fixpoint — it just holds at the value level rather than
+the wire level. `{$: "None"}` is the one exception in both directions: it has no JS scalar to become,
+and you already emit and read it in that form.
+
+Two consequences worth flagging, since they change what a caller sees:
+
+- `me.utils.flatten` / `unflattenLeft` / `unflattenRight` / `match` take these untagged trees now, so
+  a `.tree` value can be fed straight back into them. Previously they went through a bare
+  `JSON.stringify`, which writes `null` for a non-finite — a silently wrong tree rather than an error.
+- `evaluate_to_constant()` reports an indeterminate form as `NaN` rather than `null`. `null` is now
+  reserved for what is genuinely undecided, i.e. a free variable. The distinction matters because
+  `null` coerces to `0` in JS, so the old spelling presented an undefined slope as a real point at
+  the origin.

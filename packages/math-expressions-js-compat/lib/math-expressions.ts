@@ -6,7 +6,13 @@
 // test fails cleanly (the suite still runs). See JS_TEST_COVERAGE_AUDIT.md.
 import wasm, { setWasmModule } from "./_wasm";
 import math from "./mathjs";
-import { match, flatten, unflattenLeft, unflattenRight } from "./trees/flatten";
+import {
+  match,
+  flatten,
+  unflattenLeft,
+  unflattenRight,
+  normalizeMatchOptions,
+} from "./trees/flatten";
 import * as converters from "./converters/index";
 import { jsonToAst, tagNonFinite } from "./converters/ast-json";
 import { compileRustExpr } from "math-expressions-rs-wasm";
@@ -587,43 +593,24 @@ class Expression {
   match(pattern, options?) {
     const tree = this._w.tree_json();
     const pat = toExpr(pattern, this.context)._w.tree_json();
+    // Bindings come back through `jsonToAst`, not bare `JSON.parse`: they are
+    // subtrees, and `.tree` hands subtrees out untagged, so returning
+    // `{a: {$: "Inf"}}` here would contradict the convention the rest of the
+    // surface follows — and break the `typeof m.a === "number"` consumers
+    // legacy supported.
     if (!hasOptions(options)) {
       const res = wasm.match_template(tree, pat);
-      return res === undefined ? false : JSON.parse(res);
+      return res === undefined ? false : jsonToAst(res);
     }
-    const opts: Record<string, unknown> = {};
-    if (options.variables !== undefined) {
-      const vars: Record<string, unknown> = {};
-      for (const [name, kind] of Object.entries(options.variables)) {
-        if (typeof kind === "function") {
-          throw new Error(
-            `match: 'variables.${name}' is a predicate function, which cannot cross ` +
-              'the wasm boundary. Declare a kind instead: "number", "variable", ' +
-              '"any" (or true).',
-          );
-        }
-        vars[name] = kind;
-      }
-      opts.variables = vars;
-    }
-    if (options.allow_permutations !== undefined) {
-      opts.allow_permutations = !!options.allow_permutations;
-    }
-    if (options.allow_implicit_identities !== undefined) {
-      const ii = options.allow_implicit_identities;
-      // Legacy accepts either a list of names or `true` for "all declared".
-      opts.allow_implicit_identities = Array.isArray(ii)
-        ? ii
-        : ii
-          ? Object.keys((opts.variables as Record<string, unknown>) ?? {})
-          : [];
-    }
+    // Shared with `me.utils.match` so the two entry points cannot drift; the
+    // `true` spelling of `allow_implicit_identities` is expanded by the
+    // matcher, which is the only side that knows the default parameter set.
     const res = wasm.match_template_with_options(
       tree,
       pat,
-      JSON.stringify(opts),
+      JSON.stringify(normalizeMatchOptions(options)),
     );
-    return res === undefined ? false : JSON.parse(res);
+    return res === undefined ? false : jsonToAst(res);
   }
 }
 

@@ -62,20 +62,25 @@ describe("item 2 — the {\"$\":\"None\"} special round-trips", () => {
 });
 
 describe("item 3a — NaN / Infinity survive fromAst", () => {
-  it("maps NaN and ±Infinity to their specials instead of null", () => {
-    expect(me.fromAst(NaN).tree).toEqual({ $: "NaN" });
-    expect(me.fromAst(Infinity).tree).toEqual({ $: "Inf" });
-    expect(me.fromAst(-Infinity).tree).toEqual({ $: "-Inf" });
+  it("survives as the JS scalar, not as null and not as a tag", () => {
+    // The tag is how these cross the wasm boundary — JSON cannot hold them —
+    // but it is not what a caller sees. `.tree` untags, because `Infinity` is
+    // what legacy returned and what `typeof x === "number"` consumers test.
+    expect(me.fromAst(NaN).tree).toEqual(NaN);
+    expect(me.fromAst(Infinity).tree).toEqual(Infinity);
+    expect(me.fromAst(-Infinity).tree).toEqual(-Infinity);
   });
 
   it("preserves a NaN nested in a tree", () => {
-    expect(me.fromAst(["tuple", NaN, 1]).tree).toEqual(["tuple", { $: "NaN" }, 1]);
+    expect(me.fromAst(["tuple", NaN, 1]).tree).toEqual(["tuple", NaN, 1]);
   });
 
-  it("is a fixpoint: the tagged form revives to itself", () => {
-    // The contract DOENET_INTEGRATION.md §4 documents — `.tree` stays tagged, so
-    // a value survives any number of save/revive cycles unchanged. Untagging on
-    // the way out would not extend to `None`, which has no JS scalar.
+  it("is a fixpoint: a revived value revives to itself", () => {
+    // The contract DOENET_INTEGRATION.md §4 documents — a value survives any
+    // number of save/revive cycles unchanged. It holds at the *value* level:
+    // `.tree` untags on the way out and the replacer re-tags on the way in, so
+    // the wire stays tagged while the caller never sees a tag. `{$:"None"}` is
+    // the exception in both directions, having no JS scalar to untag to.
     for (const v of [NaN, Infinity, -Infinity, { $: "None" }]) {
       const once = me.fromAst(v).tree;
       expect(me.fromAst(once).tree).toEqual(once);
@@ -169,16 +174,20 @@ describe("§4 — an indeterminate form is NaN, not 0", () => {
   it("does not annihilate 0/0 to zero", () => {
     // DoenetML computes an undefined slope this way; 0 would report a degenerate
     // line as horizontal — a wrong number on a grading path.
-    expect(me.fromText("0/0").simplify().tree).toEqual({ $: "NaN" });
-    expect(me.fromText("0*Infinity").simplify().tree).toEqual({ $: "NaN" });
-    expect(me.fromText("0*(1/0)").simplify().tree).toEqual({ $: "NaN" });
-    expect(me.fromText("0/0").evaluate_to_constant()).toBeNull();
+    expect(me.fromText("0/0").simplify().tree).toEqual(NaN);
+    expect(me.fromText("0*Infinity").simplify().tree).toEqual(NaN);
+    expect(me.fromText("0*(1/0)").simplify().tree).toEqual(NaN);
+    // `NaN`, not `null`: `evaluate_to_constant` reports an indeterminate form
+    // as the value it is. `null` crosses to JS and coerces to `0`, which would
+    // report an undefined slope as a real point at the origin — the same wrong
+    // number this test exists to rule out.
+    expect(me.fromText("0/0").evaluate_to_constant()).toBeNaN();
   });
 
   it("still annihilates when the other factor is merely of unknown finiteness", () => {
     // Legacy's `is_nonzero` had a third "undefined" state that fell through to 0.
     expect(me.fromText("0*x").simplify().tree).toEqual(0);
-    expect(me.fromText("1/0").simplify().tree).toEqual({ $: "Inf" });
+    expect(me.fromText("1/0").simplify().tree).toEqual(Infinity);
   });
 });
 

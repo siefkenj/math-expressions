@@ -18,7 +18,7 @@ describe("evaluate_to_constant reports an infinite value", () => {
 
   it("survives the round trip back into a tree", () => {
     const back = me.fromAst(me.fromAst(-Infinity).evaluate_to_constant());
-    expect(back.tree).toEqual({ $: "-Inf" });
+    expect(back.tree).toEqual(-Infinity);
   });
 
   it("reaches infinity through arithmetic too", () => {
@@ -27,11 +27,13 @@ describe("evaluate_to_constant reports an infinite value", () => {
     expect(me.fromText("1/Infinity").evaluate_to_constant()).toBe(0);
   });
 
-  // What still declines is what is genuinely undecided. An indeterminate form
-  // is not a number and must not come back as one.
-  it("still declines an indeterminate form", () => {
-    expect(me.fromText("Infinity-Infinity").evaluate_to_constant()).toBe(null);
-    expect(me.fromText("0/0").evaluate_to_constant()).toBe(null);
+  // `null` is reserved for what is genuinely *undecided* — a free variable.
+  // An indeterminate form is decided: the answer is `NaN`, and reporting it as
+  // `null` loses that, because `null` coerces to `0` on the JS side and would
+  // present an undefined result as a real value.
+  it("reports an indeterminate form as NaN, and only a free variable as null", () => {
+    expect(me.fromText("Infinity-Infinity").evaluate_to_constant()).toBeNaN();
+    expect(me.fromText("0/0").evaluate_to_constant()).toBeNaN();
     expect(me.fromText("x+1").evaluate_to_constant()).toBe(null);
   });
 

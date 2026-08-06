@@ -174,7 +174,7 @@ describe("numeric edges that returned confident wrong answers", () => {
       ["*", 0, { $: "Inf" }],
       ["*", 0, { $: "None" }],
     ]) {
-      expect(me.fromAst(ast).simplify().tree).toEqual({ $: "NaN" });
+      expect(me.fromAst(ast).simplify().tree).toEqual(NaN);
     }
   });
 
