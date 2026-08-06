@@ -59,7 +59,7 @@ pub(crate) fn is_identically_zero(e: &Expr) -> bool {
 
 /// The reduced `(numerator, denominator)` pair as canonical, kernel-restored
 /// expressions, or `None` when the input is outside the caps.
-fn rational_normal(e: &Expr) -> Option<(Expr, Expr)> {
+pub(crate) fn rational_normal(e: &Expr) -> Option<(Expr, Expr)> {
     let canon = crate::normalize::canonicalize(e);
 
     // Replace opaque (non-rational) subtrees with fresh kernel symbols.

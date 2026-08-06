@@ -64,6 +64,7 @@ pub use assumptions::{
     is_complex, is_integer, is_negative, is_nonnegative, is_nonpositive, is_nonzero, is_positive,
     is_real, Assumptions,
 };
+pub use calculus::critical::critical_points;
 pub use calculus::diff::derivative;
 pub use calculus::integrate::integrate;
 pub use equality::discrete_infinite::{create_discrete_infinite_set, match_discrete_infinite};
@@ -96,7 +97,7 @@ pub use notation::{Digits, Grouping, NumberNotation};
 pub use num::Number;
 pub use ops::pm::{contains_pm, count_pm, expand_pm_signs, PmOverflow, MAX_PM_COUNT};
 pub use ops::{
-    add_unit, altvectors_to_vectors, constants_to_floats, evaluate, evaluate_numbers,
+    add_unit, altvectors_to_vectors, constants_to_floats, evaluate, evaluate_many, evaluate_numbers,
     evaluate_numbers_evaluate_functions, evaluate_numbers_preserve_order, evaluate_to_constant,
     functions, get_component, is_analytic,
     normalize_function_names, operators, perform_vector_matrix_additions_scalar_multiplications,

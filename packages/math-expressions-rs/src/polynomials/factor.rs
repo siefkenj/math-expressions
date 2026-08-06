@@ -128,7 +128,7 @@ fn with_exponent(base: Expr, n: u32) -> Expr {
 /// of those). `None` if any term is not a monomial in `var`, or if the degree
 /// exceeds `max_factor_degree` (the dense vector below allocates one entry per
 /// degree, so an adversarial `x^10^9` must be refused, not sized).
-fn extract_upoly(e: &Expr, var: &str) -> Option<univariate::UPoly> {
+pub(crate) fn extract_upoly(e: &Expr, var: &str) -> Option<univariate::UPoly> {
     let cap = crate::resource_limits::current().max_factor_degree;
     fn monomial(e: &Expr, var: &str, cap: usize) -> Option<(usize, BigRational)> {
         match e {

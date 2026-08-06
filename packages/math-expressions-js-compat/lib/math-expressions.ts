@@ -551,6 +551,31 @@ class Expression {
     return (bindings = {}) => compiled.evaluate(bindings);
   }
 
+  /**
+   * The critical points with respect to `variable` — the real solutions of
+   * `d/dvariable = 0` — exactly, in increasing order.
+   *
+   * Three outcomes, and a caller that keeps a numerical fallback needs to tell
+   * them apart: an array of points; an **empty** array, meaning there are
+   * provably none; and `null`, meaning undecided — sample instead. Undecided
+   * is a derivative that is not a rational function of `variable` (`cos(x)`,
+   * which has infinitely many roots anyway), one carrying a free parameter
+   * (`d/dx a·x²`, whose roots depend on `a`), or a constant-zero derivative,
+   * where every point is critical and no finite list says so.
+   *
+   * Exact means exact: a rational root comes back as a number, an algebraic one
+   * as the `rootof` form carrying its defining polynomial, and a repeated root
+   * is listed once. Points where the derivative does not *exist* — the corner
+   * of `|x|` — are not reported; they are critical in the textbook sense, but
+   * finding them is not rational root-finding.
+   */
+  critical_points(variable) {
+    const pts = this._w.critical_points(variable);
+    return pts === undefined
+      ? null
+      : pts.map((p) => new Expression(p, this.context));
+  }
+
   // ---- units ----
   remove_units(scaleBasedOnUnit) {
     return wrap(this._w.remove_units(!!scaleBasedOnUnit), this.context);
@@ -603,6 +628,27 @@ class Expression {
     const vals = Float64Array.from(vars.map((k) => Number(bindings[k])));
     const r = this._w.evaluate(vars, vals);
     return r === undefined ? NaN : r;
+  }
+  /**
+   * Evaluate at many values of one variable in a single crossing.
+   *
+   * `evaluate` marshals the variable names on every call, which costs far more
+   * than the arithmetic — measured at ~1.2µs a point against ~6ns of actual
+   * work on `x²−3x+1`. Sampling a curve, scanning for extremum brackets or
+   * hunting a root asks the same question thousands of times, and this pays
+   * that overhead once.
+   *
+   * Any other variable is left unbound; `substitute` it first. The result is a
+   * `Float64Array` the same length as `values`, with `NaN` wherever there is no
+   * finite real value — a pole, a complex branch, an unbound variable — so it
+   * lines up index-for-index with what was asked and the gaps carry the marker
+   * consumers already test for.
+   */
+  evaluate_many(variable, values) {
+    return this._w.evaluate_many(
+      variable,
+      values instanceof Float64Array ? values : Float64Array.from(values),
+    );
   }
   substitute(bindings) {
     let cur = this._w;

@@ -43,6 +43,8 @@ export interface WasmExpression {
   ): boolean;
 
   derivative(variable: string): WasmExpression;
+  /** Exact real solutions of `d/dvariable = 0`, ascending; `undefined` if undecided. */
+  critical_points(variable: string): WasmExpression[] | undefined;
   integrate(variable: string): WasmExpression | undefined;
   /** Numeric definite integral over `[lower, upper]`, backed by certified
    * quadrature; `undefined` when it cannot be certified (never a wrong value). */
@@ -91,6 +93,8 @@ export interface WasmExpression {
   evaluate_to_constant(): number | undefined;
   evaluate_to_complex(): Float64Array | undefined;
   evaluate(vars: string[], values: Float64Array): number | undefined;
+  /** One call, many points of a single variable; `NaN` where there is no finite real value. */
+  evaluate_many(variable: string, values: Float64Array): Float64Array;
   substitute_var(variable: string, value: WasmExpression): WasmExpression;
 
   /** Operand path into the tree spelling, 0-based; `undefined` if out of range. */

@@ -182,6 +182,23 @@ impl Expression {
         self.derive(rust_derivative(&self.0, var))
     }
 
+    /// The critical points with respect to `var` — the real solutions of
+    /// `d/dvar = 0` — exactly, in increasing order, or `undefined` where the
+    /// method does not reach.
+    ///
+    /// The three outcomes are distinct and a caller holding a numerical
+    /// fallback needs all three: an array of points, an *empty* array meaning
+    /// provably none, and `undefined` meaning undecided — sample instead.
+    /// Undecided covers a derivative that is not rational in `var` (`cos(x)`),
+    /// one carrying a free parameter (`d/dx a·x²`), and a constant-zero
+    /// derivative, where every point is critical. Points where `f'` does not
+    /// exist (the corner of `|x|`) are not reported; they are critical in the
+    /// textbook sense but are not roots of a polynomial.
+    pub fn critical_points(&self, var: &str) -> Option<Vec<Expression>> {
+        math_expressions::critical_points(&self.0, var)
+            .map(|pts| pts.into_iter().map(|e| self.derive(e)).collect())
+    }
+
     /// The free variable names, in first-appearance order.
     pub fn variables(&self) -> Vec<String> {
         ops::variables(&self.0)
@@ -282,6 +299,22 @@ impl Expression {
     pub fn substitute_var(&self, var: &str, value: &Expression) -> Expression {
         let map = std::collections::HashMap::from([(var.to_string(), value.0.clone())]);
         self.derive(ops::substitute(&self.0, &map))
+    }
+
+    /// Evaluate at many values of one variable in a single call.
+    ///
+    /// Sampling — plotting a curve, bracketing an extremum, hunting a root —
+    /// asks for the same expression at thousands of points, and paying the
+    /// boundary crossing and the variable-name marshalling per point dominates
+    /// the arithmetic by orders of magnitude. This pays both once and returns a
+    /// `Float64Array` of the same length as `values`.
+    ///
+    /// Any other variable is left unbound; `substitute` it first. A point that
+    /// does not evaluate to a finite real — unbound variable, pole, complex
+    /// value — comes back as `NaN`, so the result lines up index-for-index with
+    /// the input and gaps carry the marker consumers already handle.
+    pub fn evaluate_many(&self, var: &str, values: Vec<f64>) -> Vec<f64> {
+        ops::evaluate_many(&self.0, var, &values)
     }
 
     /// Evaluate at real bindings given as parallel arrays; `undefined` on an
