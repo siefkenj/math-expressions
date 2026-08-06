@@ -20,6 +20,27 @@ pub type Env = HashMap<String, Complex64>;
 /// keyed by their structure, so `f(a)` takes the same value on both sides of a
 /// comparison. This lets `(f(a)-f(b))·x` and `(f(b)-f(a))·(-x)` agree.
 pub fn eval_complex(e: &Expr, env: &Env) -> Option<Complex64> {
+    Some(real_axis_from_above(eval_complex_inner(e, env)?))
+}
+
+/// Force a zero imaginary part to `+0.0`.
+///
+/// Negating a real produces `im = -0.0` (`-(0.25 + 0i)` is `-0.25 - 0i`), which
+/// puts the value on the *underside* of the branch cut: `arg` comes back `-π`
+/// instead of `+π`, so `sqrt(-1/4)` evaluated as `sqrt(-(1/4))` gave `-i/2`
+/// while the same number spelled `sqrt(-0.25)` gave `+i/2`. Every root and log
+/// rule here assumes the principal branch, where a negative real is approached
+/// from above. The *real* part keeps its sign — that one is load-bearing, since
+/// `1/(-0)` is `-∞` while `1/0` is `+∞` (see `Number::NegZero`).
+fn real_axis_from_above(z: Complex64) -> Complex64 {
+    if z.im == 0.0 {
+        Complex64::new(z.re, 0.0)
+    } else {
+        z
+    }
+}
+
+fn eval_complex_inner(e: &Expr, env: &Env) -> Option<Complex64> {
     if is_opaque_atom(e) {
         return env.get(&opaque_key(e)).copied();
     }

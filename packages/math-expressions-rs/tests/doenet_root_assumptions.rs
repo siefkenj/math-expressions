@@ -5,7 +5,11 @@
 //! exercise once `x > 0` / `x ∈ R` is in scope, plus the neighbours that must
 //! keep declining.
 
-use math_expressions::{expr, simplify, simplify_with, Assumptions, Expr, LatexToAst, TextToAst};
+use math_expressions::{
+    evaluate, evaluate_to_constant, expr, simplify, simplify_with, substitute, Assumptions, Expr,
+    LatexToAst, TextToAst,
+};
+use std::collections::HashMap;
 
 fn t(s: &str) -> Expr {
     TextToAst::new(Default::default()).convert(s).unwrap()
@@ -74,10 +78,7 @@ fn a_partial_power_leaves_a_residual_under_the_radical() {
     );
     // a⁷b⁶c²⁸ under a fifth root: a, b and c⁵ come out; a²bc³ stays.
     assert_eq!(
-        under(
-            &["a > 0", "b > 0", "c > 0"],
-            "nthroot(a^7 b^6 c^28, 5)"
-        ),
+        under(&["a > 0", "b > 0", "c > 0"], "nthroot(a^7 b^6 c^28, 5)"),
         r#"["*","a","b",["^","c",5],["apply","nthroot",["tuple",["*",["^","a",2],"b",["^","c",3]],5]]]"#
     );
 }
@@ -150,4 +151,197 @@ fn an_exponent_below_the_root_degree_stays_put() {
         under(&["x > 0"], "nthroot(x^4, 5)"),
         r#"["apply","nthroot",["tuple",["^","x",4],5]]"#
     );
+}
+
+// ---- meaning preservation ----
+//
+// Every assertion above pins an output *shape*. A rule that extracted the
+// wrong power, dropped a factor or flipped a sign would still produce some
+// shape, so the shapes are re-derived here as numbers: substitute concrete
+// values for the variables and check the two forms agree.
+
+/// Bind each variable to a literal and evaluate — `evaluate_to_constant`, which
+/// simplifies first and so reads odd roots of negatives on the **real** branch
+/// (`cbrt(-8)` is `-2`, not `1 + i√3`; see `ops::evaluate`). That is the
+/// convention these rules extract under, so it is the one they are checked
+/// against. Returned as a pair to keep `num_complex` out of the test's
+/// dependencies.
+fn value_at(e: &Expr, bindings: &[(&str, &str)]) -> Option<(f64, f64)> {
+    let subs: HashMap<String, Expr> = bindings
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), t(v)))
+        .collect();
+    evaluate_to_constant(&substitute(e, &subs)).map(|z| (z.re, z.im))
+}
+
+/// The same substitution evaluated *without* simplifying first — the principal
+/// complex branch, straight off the tree. Independent of every rule under test,
+/// but only usable where the two branches coincide (see below).
+fn principal_value_at(e: &Expr, bindings: &[(&str, &str)]) -> Option<(f64, f64)> {
+    let subs: HashMap<String, Expr> = bindings
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), t(v)))
+        .collect();
+    evaluate(&substitute(e, &subs), &HashMap::new()).map(|z| (z.re, z.im))
+}
+
+/// One substitution: `variable` → the literal to bind it to.
+type Binding = [(&'static str, &'static str)];
+/// A row of the value table: assumptions, expression, and the samples to try.
+type ValueRow = (
+    &'static [&'static str],
+    &'static str,
+    &'static [&'static Binding],
+);
+
+fn assert_agrees(what: &str, a: Option<(f64, f64)>, b: Option<(f64, f64)>) {
+    match (a, b) {
+        (Some((ar, ai)), Some((br, bi))) => assert!(
+            (ar - br).abs() < 1e-9 && (ai - bi).abs() < 1e-9,
+            "{what}: {a:?} vs {b:?}",
+        ),
+        _ => panic!("{what}: did not evaluate — {a:?} vs {b:?}"),
+    }
+}
+
+#[test]
+fn the_value_is_unchanged_under_the_assumptions() {
+    // (assumptions, expression, sample bindings). The samples obey the
+    // assumptions — that is the whole contract, so feeding `x > 0` a negative
+    // would test nothing.
+    let rows: &[ValueRow] = &[
+        (&["x > 0"], "cbrt(x^3)", &[&[("x", "2")], &[("x", "1/8")]]),
+        (
+            &["x elementof R"],
+            "cbrt(x^3)",
+            &[&[("x", "2")], &[("x", "-3")], &[("x", "-1/2")]],
+        ),
+        (&["x > 0"], "nthroot(x^5, 5)", &[&[("x", "2")]]),
+        (
+            &["x elementof R"],
+            "nthroot(x^5, 5)",
+            &[&[("x", "2")], &[("x", "-3")]],
+        ),
+        (&["x > 0"], "sqrt(x^2)", &[&[("x", "5")], &[("x", "1/4")]]),
+        (
+            &["x elementof R"],
+            "sqrt(x^2)",
+            &[&[("x", "5")], &[("x", "-7")]],
+        ),
+        (
+            &["x elementof R"],
+            "sqrt(x^4)",
+            &[&[("x", "3")], &[("x", "-3")]],
+        ),
+        (
+            &["x > 0", "y > 0"],
+            "sqrt(32 x^2 y^5)",
+            &[&[("x", "2"), ("y", "3")]],
+        ),
+        (
+            &["x > 0", "y > 0"],
+            "cbrt(32 x^2 y^5)",
+            &[&[("x", "2"), ("y", "3")]],
+        ),
+        (
+            &["a > 0", "b > 0", "c > 0"],
+            "nthroot(a^7 b^6 c^28, 5)",
+            &[&[("a", "2"), ("b", "3"), ("c", "2")]],
+        ),
+        (
+            &["x > 0"],
+            "cbrt(-24 x^6)",
+            &[&[("x", "1")], &[("x", "2")], &[("x", "1/2")]],
+        ),
+        (
+            &["x elementof R"],
+            "cbrt(-24 x^6)",
+            &[&[("x", "2")], &[("x", "-2")]],
+        ),
+        (
+            &["x elementof R"],
+            "nthroot(128 x^6, 6)",
+            &[&[("x", "2")], &[("x", "-2")]],
+        ),
+        // The rows that must *not* fold still have to hold their value.
+        (&["y > 0"], "cbrt(x^3)", &[&[("x", "-2")]]),
+        (&["x > 0"], "cbrt(x^2)", &[&[("x", "3")]]),
+        (&["x > 0"], "nthroot(x^4, 5)", &[&[("x", "3")]]),
+    ];
+
+    for (asm, src, samples) in rows {
+        let original = t(src);
+        let simplified = simplify_with(&original, &assume(asm));
+        for binding in *samples {
+            assert_agrees(
+                &format!("{src} under {asm:?} at {binding:?}"),
+                value_at(&original, binding),
+                value_at(&simplified, binding),
+            );
+        }
+    }
+}
+
+#[test]
+fn the_extracted_form_holds_up_against_an_unsimplified_evaluation() {
+    // `value_at` above simplifies both sides, so it cannot by itself rule out
+    // a rule that is wrong in the same way twice. These rows re-check the
+    // extraction against the raw principal-branch evaluator, which shares no
+    // code with the rewrite. They are restricted to radicands that land
+    // nonnegative, where the real and principal branches agree and the
+    // comparison therefore means something — the odd-root-of-a-negative rows
+    // are deliberately absent, since there the two branches differ *by design*
+    // and only `value_at` speaks the right convention.
+    let rows: &[(&'static [&'static str], &'static str, &'static Binding)] = &[
+        (&["x > 0"], "cbrt(x^3)", &[("x", "2")]),
+        (&["x > 0"], "nthroot(x^5, 5)", &[("x", "2")]),
+        (&["x > 0"], "sqrt(x^2)", &[("x", "5")]),
+        (&["x elementof R"], "sqrt(x^2)", &[("x", "-7")]),
+        (&["x elementof R"], "sqrt(x^4)", &[("x", "-3")]),
+        (
+            &["x > 0", "y > 0"],
+            "sqrt(32 x^2 y^5)",
+            &[("x", "2"), ("y", "3")],
+        ),
+        (
+            &["x > 0", "y > 0"],
+            "cbrt(32 x^2 y^5)",
+            &[("x", "2"), ("y", "3")],
+        ),
+        (
+            &["a > 0", "b > 0", "c > 0"],
+            "nthroot(a^7 b^6 c^28, 5)",
+            &[("a", "2"), ("b", "3"), ("c", "2")],
+        ),
+        (&["x elementof R"], "nthroot(128 x^6, 6)", &[("x", "-2")]),
+    ];
+
+    for (asm, src, binding) in rows {
+        let original = t(src);
+        let simplified = simplify_with(&original, &assume(asm));
+        assert_agrees(
+            &format!("{src} under {asm:?} at {binding:?}"),
+            principal_value_at(&original, binding),
+            principal_value_at(&simplified, binding),
+        );
+    }
+}
+
+#[test]
+fn the_extraction_reaches_a_fixpoint() {
+    // A rule that re-fires on its own output would spin the rewrite loop.
+    for (asm, src) in [
+        (&["x > 0"][..], "cbrt(x^3)"),
+        (&["x elementof R"], "sqrt(x^2)"),
+        (&["x elementof R"], "sqrt(x^4)"),
+        (&["x > 0", "y > 0"], "sqrt(32 x^2 y^5)"),
+        (&["x > 0"], "cbrt(-24 x^6)"),
+        (&["x elementof R"], "nthroot(128 x^6, 6)"),
+        (&["x > 0"], "cbrt(x^2)"),
+    ] {
+        let a = assume(asm);
+        let once = simplify_with(&t(src), &a);
+        let twice = simplify_with(&once, &a);
+        assert_eq!(js(&once), js(&twice), "{src} under {asm:?} did not settle");
+    }
 }

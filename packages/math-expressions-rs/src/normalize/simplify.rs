@@ -13,13 +13,27 @@
 //! runs out. Because every round ends in `canonicalize`, the result is always a
 //! valid canonical tree, and reducedness is just "another round is a no-op".
 //!
-//! Rules live in three clusters: ∞/NaN folding, tuple/vector componentwise
-//! arithmetic, and radical simplification. Each is assumption-free; the equality
-//! path needs only that subset, and full assumption-aware rewriting is deferred.
+//! **Rule clusters**, applied in this order at every node:
+//!
+//! 1. `rule_assumptions` — the only assumption-aware cluster, and skipped
+//!    outright when no facts are in scope (`sqrt(x²) → |x|` under `x ∈ R`,
+//!    `|u| → u` under `u ≥ 0`).
+//! 2. `rule_infnan` — ∞/NaN folding.
+//! 3. `rule_trig_pythagorean` — `sin²+cos² → 1` and its relatives.
+//! 4. `rule_seq_arith` — componentwise arithmetic on tuples/vectors.
+//! 5. `rule_radical` — numeric root extraction (`sqrt(8) → 2√2`, `cbrt(-8) → -2`).
+//! 6. `rule_distribute_sign` — moving a product's sign into one factor
+//!    (`-2(1-x) → 2(x-1)`), when doing so does not add minus signs.
+//!
+//! Only cluster 1 *needs* facts to do anything. Cluster 5 reads them to decline
+//! a rewrite it cannot justify (an odd root's sign stays put over a radicand
+//! known to be non-real), so an empty context makes it more eager, never wrong;
+//! the rest ignore them outright. That is what lets the equality path reuse the
+//! whole set with no assumptions in scope.
 
 use crate::assumptions::{is_nonnegative, is_real, Assumptions};
 use crate::expr::{Expr, MathConst, SeqKind};
-use crate::num::Number;
+use crate::num::{Number, Spelling};
 
 use super::{add, canonicalize, mul, split_coeff};
 use crate::expr::map_children;
@@ -169,7 +183,7 @@ fn rewrite(e: &Expr, fired: &mut bool, assumptions: &Assumptions) -> Expr {
         *fired = true;
         return r;
     }
-    if let Some(r) = rule_radical(&e) {
+    if let Some(r) = rule_radical(&e, assumptions) {
         *fired = true;
         return r;
     }
@@ -934,9 +948,12 @@ fn rule_distribute_sign(e: &Expr) -> Option<Expr> {
 // principal complex root — while a *variable* radicand never folds.
 //
 // - Odd root of a negative: the real root wins, so pull the sign out
-//   (`cbrt(-16x⁴) → -2·cbrt(2x⁴)`, `(-8)^(1/3) → -2`).
+//   (`cbrt(-16x⁴) → -2·cbrt(2x⁴)`, `(-8)^(1/3) → -2`). This is the *real*
+//   branch, and it only applies while the rest of the radicand could be real —
+//   see `simplify_root`.
 // - Perfect q-th-power factors of the numeric coefficient come out front
-//   (`sqrt(8) → 2·sqrt(2)`).
+//   (`sqrt(8) → 2·sqrt(2)`). The coefficient may be a fraction, which extracts
+//   independently in the numerator and the denominator (`sqrt(2/9) → sqrt(2)/3`).
 // - Even root of a *negative number*: no real value, so the principal complex
 //   root. Exact on the imaginary axis at q = 2 (`sqrt(-4) → 2i`,
 //   `sqrt(-2) → i·sqrt(2)`); higher even roots need the surd `cos(π/q)+i·sin(π/q)`
@@ -947,7 +964,7 @@ fn rule_distribute_sign(e: &Expr) -> Option<Expr> {
 // of a rest (`cbrt((-x)^3)`) need power-of-product expansion, a separate rule
 // not yet ported.
 
-fn rule_radical(e: &Expr) -> Option<Expr> {
+fn rule_radical(e: &Expr, assumptions: &Assumptions) -> Option<Expr> {
     match e {
         // Numeric power with a rational exponent: fold only when it reduces to
         // an exact number (base is a perfect q-th power). Partial extraction
@@ -967,7 +984,7 @@ fn rule_radical(e: &Expr) -> Option<Expr> {
                 ("nthroot", [r, Expr::Num(Number::Int(n))]) if *n >= 2 => (*n, r, Root::Nth(*n)),
                 _ => return None,
             };
-            simplify_root(degree, radicand, root)
+            simplify_root(degree, radicand, root, assumptions)
         }
         _ => None,
     }
@@ -997,9 +1014,10 @@ impl Root {
 /// perfect q-th power (root `m`), giving `sign · m^p` with the odd-root sign
 /// rule. Non-perfect bases and even roots of negatives return `None`.
 fn fold_numeric_radical(b: &Number, p: i64, q: i64) -> Option<Expr> {
-    let base = as_small_int(b)?;
+    let (bn, bd) = as_small_rational(b)?;
     let q = u32::try_from(q).ok()?;
-    let negative = base < 0;
+    let negative = bn < 0;
+    let spelling = b.spelling();
     if negative && q % 2 == 0 {
         // Even root of a negative — no real value. At q = 2 the principal value
         // is `m^p · i^p` when `|base| = m²` is a perfect square (this form does
@@ -1007,11 +1025,11 @@ fn fold_numeric_radical(b: &Number, p: i64, q: i64) -> Option<Expr> {
         // stays symbolic while `sqrt(8)` reduces). Higher even roots need a surd
         // form we don't build, so they stay symbolic.
         if q == 2 {
-            let (m, r) = extract_qth_power(base.unsigned_abs(), 2);
-            if r != 1 {
+            let (m, r) = extract_qth_power_rational(bn.unsigned_abs(), bd, 2, spelling)?;
+            if !r.is_one() {
                 return None;
             }
-            let mag = Number::Int(m as i64).checked_pow_int(p)?;
+            let mag = m.checked_pow_int(p)?;
             // p is odd (p/q is reduced, q = 2), so `i^p` is `±i`; fold the sign
             // into the magnitude.
             let mag = if p.rem_euclid(4) == 3 { mag.neg() } else { mag };
@@ -1019,28 +1037,34 @@ fn fold_numeric_radical(b: &Number, p: i64, q: i64) -> Option<Expr> {
         }
         return None;
     }
-    let (m, r) = extract_qth_power(base.unsigned_abs(), q);
-    if r != 1 {
+    let (m, r) = extract_qth_power_rational(bn.unsigned_abs(), bd, q, spelling)?;
+    if !r.is_one() {
         return None; // not a perfect q-th power
     }
     // value = (±m)^p, using the exact rational power.
-    let root = Number::Int(if negative { -(m as i64) } else { m as i64 });
+    let root = if negative { m.neg() } else { m };
     let value = root.checked_pow_int(p)?;
     Some(Expr::Num(value))
 }
 
 /// Simplify `root_degree( radicand )`: pull the odd-root sign of a negative
-/// coefficient and any perfect q-th-power factor of the (integer) coefficient
+/// coefficient and any perfect q-th-power factor of the (rational) coefficient
 /// out front. Returns `None` when nothing can be pulled.
-fn simplify_root(degree: i64, radicand: &Expr, root: Root) -> Option<Expr> {
+fn simplify_root(
+    degree: i64,
+    radicand: &Expr,
+    root: Root,
+    assumptions: &Assumptions,
+) -> Option<Expr> {
     let q = u32::try_from(degree).ok()?;
     let (coeff, rest) = split_coeff(radicand.clone());
-    let c = as_small_int(&coeff)?;
-    if c == 0 {
+    let (cn, cd) = as_small_rational(&coeff)?;
+    if cn == 0 {
         return None; // a zero radicand is canonicalized elsewhere
     }
+    let spelling = coeff.spelling();
 
-    let negative = c < 0;
+    let negative = cn < 0;
     if negative && q % 2 == 0 {
         // No real even root of a negative. For a *purely numeric* radicand the
         // principal value is exact on the imaginary axis at q = 2
@@ -1048,29 +1072,45 @@ fn simplify_root(degree: i64, radicand: &Expr, root: Root) -> Option<Expr> {
         // sign and never folds. Higher even roots (q ≥ 4) need the exact
         // `cos(π/q) + i·sin(π/q)` surd form we don't build for roots yet.
         if q == 2 && rest.is_none() {
-            return Some(principal_imaginary_sqrt(c.unsigned_abs()));
+            return principal_imaginary_sqrt(cn.unsigned_abs(), cd, spelling);
         }
         return None;
     }
-    let sign: i64 = if negative { -1 } else { 1 };
-    let (m, r) = extract_qth_power(c.unsigned_abs(), q);
 
-    // Nothing to do: positive coefficient and no perfect-power factor.
-    if sign == 1 && m == 1 {
+    // Pulling the sign out of an odd root picks the *real* branch:
+    // `cbrt(-u) = -cbrt(u)` holds for real `u`, but not on the principal
+    // complex branch — `cbrt(-i)` is `e^(-iπ/6)` while `-cbrt(i)` is
+    // `e^(-i5π/6)`, a different number. A residual of unknown sign still
+    // counts as real, since that is the same convention that lets `cbrt(-8)`
+    // fold to `-2`; only a residual *known* to be non-real declines. When it
+    // does, the sign stays under the radical and just the perfect power comes
+    // out (`cbrt(-8i) → 2·cbrt(-i)`), which holds on either branch because a
+    // positive real factor does not move the argument.
+    let sign_is_real = rest
+        .as_ref()
+        .is_none_or(|r| is_real(r, assumptions) != Some(false));
+    let sign: i64 = if negative && sign_is_real { -1 } else { 1 };
+    let inner_negated = negative && !sign_is_real;
+    let (m, r) = extract_qth_power_rational(cn.unsigned_abs(), cd, q, spelling)?;
+
+    // Nothing to do: the sign is staying where it is and there is no
+    // perfect-power factor to pull out.
+    if sign == 1 && m.is_one() {
         return None;
     }
 
     // Residual radicand: r · rest (r == 1 drops out; rest may be absent).
+    let r = if inner_negated { r.neg() } else { r };
     let mut inner_factors = Vec::new();
-    if r != 1 {
-        inner_factors.push(Expr::Num(Number::Int(r as i64)));
+    if !r.is_one() {
+        inner_factors.push(Expr::Num(r));
     }
     if let Some(rest) = rest {
         inner_factors.push(rest);
     }
     let inner = mul(inner_factors);
 
-    let coeff_out = Expr::Num(Number::Int(sign * m as i64));
+    let coeff_out = Expr::Num(if sign < 0 { m.neg() } else { m });
     // If the radicand fully reduced to 1, the root vanishes; otherwise wrap the
     // residual back in the same root function.
     if matches!(&inner, Expr::Num(n) if n.is_one()) {
@@ -1080,25 +1120,44 @@ fn simplify_root(degree: i64, radicand: &Expr, root: Root) -> Option<Expr> {
     }
 }
 
-/// The principal square root of a negative integer whose magnitude is `c`:
-/// `sqrt(-c) = sqrt(c)·i`, with the perfect-square part pulled out so the result
-/// is fully reduced — `sqrt(-1) → i`, `sqrt(-4) → 2i`, `sqrt(-2) → i·sqrt(2)`,
-/// `sqrt(-8) → 2·i·sqrt(2)`. The factor order is normalized by the surrounding
-/// canonicalization.
-fn principal_imaginary_sqrt(c: u64) -> Expr {
-    let (m, r) = extract_qth_power(c, 2);
+/// The principal square root of a negative rational whose magnitude is
+/// `num/den`: `sqrt(-c) = sqrt(c)·i`, with the perfect-square part pulled out
+/// so the result is fully reduced — `sqrt(-1) → i`, `sqrt(-4) → 2i`,
+/// `sqrt(-2) → i·sqrt(2)`, `sqrt(-8) → 2·i·sqrt(2)`, `sqrt(-1/4) → i/2`. The
+/// factor order is normalized by the surrounding canonicalization.
+fn principal_imaginary_sqrt(num: u64, den: i64, spelling: Spelling) -> Option<Expr> {
+    let (m, r) = extract_qth_power_rational(num, den, 2, spelling)?;
     let mut factors = Vec::new();
-    if m != 1 {
-        factors.push(Expr::Num(Number::Int(m as i64)));
+    if !m.is_one() {
+        factors.push(Expr::Num(m));
     }
     factors.push(Expr::sym("i"));
-    if r != 1 {
-        factors.push(Expr::Apply(
-            Box::new(Expr::sym("sqrt")),
-            vec![Expr::Num(Number::Int(r as i64))],
-        ));
+    if !r.is_one() {
+        factors.push(Expr::Apply(Box::new(Expr::sym("sqrt")), vec![Expr::Num(r)]));
     }
-    mul(factors)
+    Some(mul(factors))
+}
+
+/// Split a positive rational `num/den` into `(m, r)` with `num/den = m^q · r`:
+/// `m` is the largest rational whose q-th power divides out and `r` the
+/// q-th-power-free remainder. `num` and `den` are coprime, so the two sides
+/// extract independently. `None` if either piece leaves `i64`.
+fn extract_qth_power_rational(
+    num: u64,
+    den: i64,
+    q: u32,
+    spelling: Spelling,
+) -> Option<(Number, Number)> {
+    let (m_num, r_num) = extract_qth_power(num, q);
+    let (m_den, r_den) = extract_qth_power(den.unsigned_abs(), q);
+    let to_rat = |n: u64, d: u64| {
+        Some(Number::rat_spelled(
+            i64::try_from(n).ok()?,
+            i64::try_from(d).ok()?,
+            spelling,
+        ))
+    };
+    Some((to_rat(m_num, m_den)?, to_rat(r_num, r_den)?))
 }
 
 /// Largest `m` such that `m^q` divides `c`, with `r = c / m^q` the
@@ -1155,12 +1214,15 @@ fn integer_nth_root(c: u64, q: u32) -> u64 {
     r
 }
 
-/// A `Number` that is an integer fitting in `i64`, else `None` (the radical
-/// rules only handle small integer coefficients — the whole simplify corpus is
-/// within this range; larger/rational coefficients are left unsimplified).
-fn as_small_int(n: &Number) -> Option<i64> {
+/// A `Number` as an exact rational `(num, den)` in lowest terms with `den > 0`,
+/// both fitting in `i64`; else `None`. The radical rules stay on small exact
+/// rationals — the whole simplify corpus is within this range, and bignum or
+/// float coefficients are left unsimplified. A decimal literal parses to `Rat`,
+/// so `sqrt(0.25)` reduces here too and keeps its decimal spelling.
+fn as_small_rational(n: &Number) -> Option<(i64, i64)> {
     match n {
-        Number::Int(i) => Some(*i),
+        Number::Int(i) => Some((*i, 1)),
+        Number::Rat(num, den, _) => Some((*num, *den)),
         _ => None,
     }
 }

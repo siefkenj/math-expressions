@@ -31,11 +31,28 @@ import type { WasmModule } from "math-expressions-rs-wasm";
 
 /** `process.getBuiltinModule` — Node ≥ 20.16 / ≥ 22.3, absent in browsers. */
 type BuiltinModuleHost = {
-  getBuiltinModule?: (id: string) => { createRequire(path: string): (id: string) => unknown };
+  getBuiltinModule?: (id: string) => {
+    createRequire(path: string): (id: string) => unknown;
+  };
 };
 
 let injected: WasmModule | undefined;
 let nodeFallback: WasmModule | undefined;
+const swapListeners: Array<() => void> = [];
+
+/**
+ * Register a callback to run when {@link setWasmModule} swaps in a different
+ * module.
+ *
+ * Anything that caches a wasm *handle* has to drop it here: a handle belongs to
+ * the module that minted it, and handing one to a different module's function
+ * fails with "expected instance of Expression". The listener seam (rather than
+ * this file reaching into the caches) keeps the dependency one-way —
+ * `math-expressions.ts` imports `_wasm`, never the reverse.
+ */
+export function onWasmModuleChange(fn: () => void): void {
+  swapListeners.push(fn);
+}
 
 /**
  * Inject the wasm module to use — an initialized `--target web` wasm-bindgen
@@ -44,7 +61,12 @@ let nodeFallback: WasmModule | undefined;
  * fallback for every subsequent call.
  */
 export function setWasmModule(mod: WasmModule): void {
+  const changed = injected !== mod;
   injected = mod;
+  // Re-injecting the *same* module is a no-op, so caches keep their entries.
+  if (changed) {
+    for (const fn of swapListeners) fn();
+  }
 }
 
 /**

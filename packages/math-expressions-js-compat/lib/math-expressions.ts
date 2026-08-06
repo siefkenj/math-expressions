@@ -4,7 +4,7 @@
 // Not every legacy method exists on the Rust side; those that don't are either
 // approximated, or throw a clear "not implemented in js-compat" so the calling
 // test fails cleanly (the suite still runs). See JS_TEST_COVERAGE_AUDIT.md.
-import wasm, { setWasmModule } from "./_wasm";
+import wasm, { onWasmModuleChange, setWasmModule } from "./_wasm";
 import math from "./mathjs";
 import {
   match,
@@ -214,7 +214,30 @@ const ATOM_TREES = new WeakMap<WasmExpression, unknown>();
  * `free()` on a wrapper around one must not release it — see `free`.
  */
 const ATOM_SHARED = new WeakSet<WasmExpression>();
+/**
+ * Live wrappers per shared handle, and the key each was cached under.
+ *
+ * Together these let `free()` release a handle the cache has since dropped
+ * (`MAX_ATOMS` overflow, or a wasm-module swap) instead of leaving it to the
+ * GC. Counting happens in the `Expression` constructor rather than in
+ * `fromAst`, so a wrapper minted by any other route — `wrap`, the reviver, a
+ * wasm call that hands back the same handle — is counted too; miss one and
+ * `free()` would release a handle another live wrapper still points at.
+ *
+ * A wrapper that is garbage-collected without `free()` never decrements, which
+ * only ever *inhibits* the release. The FinalizationRegistry is still the
+ * backstop, so the failure direction is "freed late", never "freed early".
+ */
+const ATOM_REFS = new WeakMap<WasmExpression, number>();
+const ATOM_KEYS = new WeakMap<WasmExpression, string>();
 const MAX_ATOMS = 4096;
+
+// Handles belong to the module that minted them, so a swap invalidates every
+// cached one — passing a stale handle to the new module's `from_ast` fails with
+// "expected instance of Expression". Dropping the table is enough: wrappers
+// already handed out keep working against their own module, and the orphaned
+// handles are released by `free()` or the GC as usual.
+onWasmModuleChange(() => ATOM_HANDLES.clear());
 /** Integers up to this magnitude are treated as recurring; see `atomKey`. */
 const MAX_CACHED_INT = 1024;
 
@@ -242,6 +265,9 @@ class Expression {
   constructor(handle: WasmExpression, context?: Ctx) {
     this._w = handle;
     this.context = context || Context;
+    if (ATOM_SHARED.has(handle)) {
+      ATOM_REFS.set(handle, (ATOM_REFS.get(handle) ?? 0) + 1);
+    }
   }
 
   // ---- inspection / rendering ----
@@ -471,13 +497,25 @@ class Expression {
   // instead of reading through a dangling pointer.
   free() {
     const w = this._w as WasmExpression | undefined;
-    if (w) {
-      // A handle from the atom cache is shared by every wrapper `fromAst` has
-      // handed out for that atom and is deliberately retained; releasing it
-      // here would dangle the others. The wrapper still drops its reference,
-      // so `free()` remains "this Expression is done with" either way.
-      if (!ATOM_SHARED.has(w)) w.free();
-      this._w = undefined as unknown as WasmExpression;
+    if (!w) return;
+    this._w = undefined as unknown as WasmExpression;
+    if (!ATOM_SHARED.has(w)) {
+      w.free();
+      return;
+    }
+    // A handle from the atom cache is shared by every wrapper `fromAst` has
+    // handed out for that atom, so releasing it on the first `free()` would
+    // dangle the others. Release it only once this is the last live wrapper
+    // *and* the cache itself has let go — after a `MAX_ATOMS` sweep or a wasm
+    // swap the handle is an orphan nothing will hand out again, and leaving it
+    // to the GC is what made `free()` a silent no-op for atoms. While the
+    // handle is still cached it stays alive by design.
+    const refs = (ATOM_REFS.get(w) ?? 0) - 1;
+    ATOM_REFS.set(w, refs);
+    const key = ATOM_KEYS.get(w);
+    if (refs <= 0 && (key === undefined || ATOM_HANDLES.get(key) !== w)) {
+      ATOM_SHARED.delete(w);
+      w.free();
     }
   }
   // Aliases: `dispose()` and the `using`-statement protocol.
@@ -918,6 +956,7 @@ const Context = {
       if (ATOM_HANDLES.size >= MAX_ATOMS) ATOM_HANDLES.clear();
       ATOM_HANDLES.set(key, handle);
       ATOM_SHARED.add(handle);
+      ATOM_KEYS.set(handle, key);
     }
     // A fresh wrapper per call: the handle is immutable and safe to share, but
     // the `Expression` around it carries a `context` and is what callers hold.
