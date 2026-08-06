@@ -60,6 +60,73 @@ fn fold_nodes(e: &Expr) -> Expr {
     fold_application(head, args).map_or(e, Expr::Num)
 }
 
+/// [`fold_numeric_applications`], but a function of numeric arguments that has
+/// no *exact* value folds to a float instead of staying symbolic
+/// (`log(31) → 3.4339…`, where the exact pass leaves it alone because 31 is not
+/// a power of e).
+///
+/// Lossy by construction, so it is deliberately not part of `simplify` and not
+/// reachable from `equals`. It exists for one caller: the `evaluate_functions`
+/// option of `evaluate_numbers`, whose entire purpose is to turn function
+/// applications into numbers — `<round>log(31)</round>` has to get a float
+/// before it can round it.
+pub fn fold_numeric_applications_approx(e: &Expr) -> Expr {
+    let canon = super::canonicalize(e);
+    let folded = fold_nodes_approx(&canon);
+    if folded == canon {
+        canon
+    } else {
+        super::canonicalize(&folded)
+    }
+}
+
+fn fold_nodes_approx(e: &Expr) -> Expr {
+    let e = map_children(e, fold_nodes_approx);
+    let Expr::Apply(head, args) = &e else {
+        return e;
+    };
+    // Exact first: `floor(55.33)` must stay the integer 55, and `mean(1,2)` the
+    // rational 3/2, rather than picking up a float spelling on this path.
+    if let Some(n) = fold_application(head, args) {
+        return Expr::Num(n);
+    }
+    let args = effective_args(head, args);
+    // Only when every argument is already numeric — otherwise `f(x)` with a
+    // free variable would be "evaluated" at whatever the sampler happened to
+    // pick.
+    if !args.iter().all(|a| matches!(a, Expr::Num(_))) {
+        return e;
+    }
+    fold_approximately(head, &args).map_or(e, Expr::Num)
+}
+
+/// The argument list a fold should actually reduce over: an aggregate called on
+/// a single list is spread into that list's elements, everything else is left
+/// alone. See the comment in [`fold_application`] for why this is limited to
+/// the variadic family.
+fn effective_args(head: &Expr, args: &[Expr]) -> Vec<Expr> {
+    match args {
+        [Expr::Seq(kind, xs)] if is_list_like(*kind) && is_variadic(head) => xs.clone(),
+        _ => args.to_vec(),
+    }
+}
+
+/// Sequence kinds that stand for "these values", so an aggregate over one of
+/// them reduces over its elements. `Set` is excluded: a set is unordered and
+/// deduplicated, so `count({1,1,2})` is a question about the *set*, not a
+/// three-element sample.
+fn is_list_like(kind: crate::expr::SeqKind) -> bool {
+    use crate::expr::SeqKind::*;
+    matches!(kind, Tuple | Array | List | Vector | AltVector)
+}
+
+/// Is this head one of the variadic aggregates (`sum`, `count`, `mean`, …)?
+/// Those are the only functions defined at every arity, and so the only ones a
+/// list argument can legitimately be spread into.
+fn is_variadic(head: &Expr) -> bool {
+    matches!(head, Expr::Sym(s) if fold_exact(&s.name()).is_some())
+}
+
 /// Whether [`fold_numeric_applications`] would replace this application with a
 /// literal. Read by the change-of-base rewrite in
 /// [`special_values`](super::special_values), which runs *earlier* in the
@@ -69,6 +136,9 @@ pub(super) fn folds_to_a_number(head: &Expr, args: &[Expr]) -> bool {
 }
 
 fn fold_application(head: &Expr, args: &[Expr]) -> Option<Number> {
+    let spread = effective_args(head, args);
+    let args = &spread[..];
+
     // Nothing folds unless every argument is already a number.
     let numbers: Vec<&Number> = args
         .iter()
