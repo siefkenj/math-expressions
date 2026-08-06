@@ -31,15 +31,26 @@ pub fn evaluate_numbers(e: &Expr) -> Expr {
 /// `evaluate_functions` option of the JS `evaluate_numbers`, and what
 /// DoenetML's `simplify="full"` needs.
 ///
-/// Only [`fold_special_values`](crate::normalize::fold_special_values) is
-/// added, so every fold here is an exact identity — no float fallback, and
-/// nothing folds that was not already true. Like-term collection stays
-/// suppressed for the same reason [`evaluate_numbers`] suppresses it: the
-/// difference between this and plain `evaluate_numbers` should be function
-/// evaluation and nothing else.
+/// Two passes are added on top of [`evaluate_numbers`]:
+/// [`fold_special_values`](crate::normalize::fold_special_values) for the exact
+/// identities (`sin(0) → 0`), then
+/// [`fold_numeric_applications_approx`](crate::normalize::fold_numeric_applications_approx)
+/// for the rest, which evaluates a function of numeric arguments to a float
+/// when it has no exact value (`log(31) → 3.4339…`).
+///
+/// The float step is what "evaluate functions" means to the callers — `<round>`
+/// asks for this precisely so it has a number to round — and it is why this
+/// pass is *not* part of `simplify`, which must not trade an exact value for a
+/// float. Nothing with a free variable is touched: every argument has to be a
+/// number already, so `f(x)` is never "evaluated" at a guessed point.
+///
+/// Like-term collection stays suppressed for the same reason
+/// [`evaluate_numbers`] suppresses it: the difference between this and plain
+/// `evaluate_numbers` should be function evaluation and nothing else.
 pub fn evaluate_numbers_evaluate_functions(e: &Expr) -> Expr {
     crate::normalize::without_like_term_collection(|| {
-        present(&crate::normalize::fold_special_values(e))
+        let folded = crate::normalize::fold_special_values(e);
+        present(&crate::normalize::fold_numeric_applications_approx(&folded))
     })
 }
 
