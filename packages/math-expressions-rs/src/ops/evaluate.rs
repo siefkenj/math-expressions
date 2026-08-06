@@ -37,10 +37,14 @@ pub fn evaluate(e: &Expr, bindings: &HashMap<String, f64>) -> Option<Complex64> 
 /// and `NaN` is the gap marker its consumers already handle.
 pub fn evaluate_many(e: &Expr, var: &str, values: &[f64]) -> Vec<f64> {
     let mut env = Env::new();
+    // The binding's key never changes, so insert it once and overwrite its
+    // value each point — the loop this feature exists to speed up should not
+    // allocate a fresh `String` per point.
+    env.insert(var.to_string(), Complex64::new(0.0, 0.0));
     values
         .iter()
         .map(|&x| {
-            env.insert(var.to_string(), Complex64::new(x, 0.0));
+            *env.get_mut(var).expect("inserted above") = Complex64::new(x, 0.0);
             match eval_complex(e, &env).and_then(finite) {
                 // The imaginary part is compared against the real one's scale,
                 // the same tolerance the single-point wasm entry point applies.

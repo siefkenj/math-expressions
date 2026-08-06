@@ -52,9 +52,11 @@ pub fn critical_points(e: &Expr, var: &str) -> Option<Vec<Expr>> {
     // numerator and denominator is already gone.
     let (num, _den) = rational_normal(&d)?;
 
-    // Every remaining variable must be `var`. A free parameter would make the
-    // answer symbolic, and a kernel symbol (what `rational_normal` leaves in
-    // place of `sin(x)`) means the derivative was never rational to begin with.
+    // Every remaining variable must be `var`: a free parameter would make the
+    // answer symbolic (`d/dx a·x² = 2ax`), so decline. A non-rational subtree
+    // (`sin(x)`) is not caught here — `rational_normal` restores it rather than
+    // leaving a bare kernel symbol, so it reads as a function of `var` — but
+    // `extract_upoly` below rejects it, which is where that case is decided.
     if variables(&num)
         .iter()
         .any(|v| v != var && !is_constant_symbol(v))
