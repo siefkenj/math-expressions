@@ -283,7 +283,9 @@ mod tests {
     /// is reached through the body at `[1, row, col]` — not `[row, col]`.
     #[test]
     fn indexes_a_matrix_through_its_js_spelling() {
-        let m = Expr::Matrix(Mat::new(2, 2, vec![p("x1"), p("x2"), p("x3"), p("x4")]).expect("test matrix shape"));
+        let m = Expr::Matrix(
+            Mat::new(2, 2, vec![p("x1"), p("x2"), p("x3"), p("x4")]).expect("test matrix shape"),
+        );
         assert_eq!(txt(&get_component(&m, &[0]).unwrap()), "(2, 2)");
         assert_eq!(got_expr(&m, &[1, 0, 1]), "x2");
         assert_eq!(got_expr(&m, &[1, 1, 0]), "x3");
@@ -319,11 +321,15 @@ mod tests {
     /// `Matrix`, not the tuple-of-tuples it was decomposed into.
     #[test]
     fn substitutes_a_matrix_entry() {
-        let m = Expr::Matrix(Mat::new(2, 2, vec![p("x1"), p("x2"), p("x3"), p("x4")]).expect("test matrix shape"));
+        let m = Expr::Matrix(
+            Mat::new(2, 2, vec![p("x1"), p("x2"), p("x3"), p("x4")]).expect("test matrix shape"),
+        );
         let subbed = substitute_component(&m, &[1, 1, 0], &p("q")).unwrap();
         assert_eq!(
             subbed,
-            Expr::Matrix(Mat::new(2, 2, vec![p("x1"), p("x2"), p("q"), p("x4")]).expect("test matrix shape"))
+            Expr::Matrix(
+                Mat::new(2, 2, vec![p("x1"), p("x2"), p("q"), p("x4")]).expect("test matrix shape")
+            )
         );
     }
 

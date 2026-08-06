@@ -143,7 +143,7 @@ fn adversarial_corpus_terminates() {
 fn superscript_nesting_is_charged_against_depth_cap() {
     // A chain far past the cap must be a clean error, never a would-be trap.
     let chains = [
-        "^".repeat(50_000),               // \blank^\blank^… (Pow spine)
+        "^".repeat(50_000),                 // \blank^\blank^… (Pow spine)
         format!("x{}", "!".repeat(50_000)), // x!!!… (factorial spine)
         format!("x{}", "'".repeat(50_000)), // x'''… (prime spine)
     ];

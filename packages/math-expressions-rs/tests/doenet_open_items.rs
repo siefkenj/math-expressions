@@ -153,12 +153,16 @@ fn sqrt_of_negative_folds_to_principal_imaginary() {
     assert_eq!(tree(&simp("sqrt(-4)")), r#"["*",2,"i"]"#); // 2i
     assert_eq!(tree(&simp("sqrt(-2)")), r#"["*","i",["apply","sqrt",2]]"#); // i√2
     assert_eq!(tree(&simp("sqrt(-8)")), r#"["*",2,"i",["apply","sqrt",2]]"#); // 2i√2
-    // the `^(1/2)` power form agrees with the `sqrt` application
+                                                                              // the `^(1/2)` power form agrees with the `sqrt` application
     assert_eq!(tree(&simp("(-4)^(1/2)")), r#"["*",2,"i"]"#);
     // whatever it folds to must equal the value the numeric evaluator gives
     use math_expressions::equals;
     let o = Default::default();
-    let p = |s: &str| math_expressions::TextToAst::new(Default::default()).convert(s).unwrap();
+    let p = |s: &str| {
+        math_expressions::TextToAst::new(Default::default())
+            .convert(s)
+            .unwrap()
+    };
     assert!(equals(&simp("sqrt(-4)"), &p("2i"), &o));
     assert!(equals(&simp("sqrt(-8)"), &p("2i sqrt(2)"), &o));
 }

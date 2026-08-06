@@ -32,7 +32,10 @@ fn subst_t(p: &Expr, v: &Expr) -> Expr {
 /// Build a literal matrix from entry strings (row-major).
 fn mat(rows: u32, cols: u32, entries: &[&str]) -> Expr {
     assert_eq!(entries.len() as u32, rows * cols);
-    Expr::Matrix(Mat::new(rows, cols, entries.iter().map(|s| parse(s)).collect()).expect("test matrix shape"))
+    Expr::Matrix(
+        Mat::new(rows, cols, entries.iter().map(|s| parse(s)).collect())
+            .expect("test matrix shape"),
+    )
 }
 
 fn column(entries: &[Expr]) -> Expr {

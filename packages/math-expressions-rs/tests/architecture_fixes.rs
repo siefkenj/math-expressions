@@ -97,7 +97,8 @@ fn symbolic_zero_entry_is_not_a_pivot() {
     let m = Expr::Matrix(Mat::new(1, 1, vec![zero_entry]).expect("test matrix shape"));
     assert_eq!(rank(&m, &Assumptions::new()), Some(0));
     // Sanity: a genuinely nonzero surd entry still has rank 1.
-    let m1 = Expr::Matrix(Mat::new(1, 1, vec![parse("sqrt(8) - sqrt(2)")]).expect("test matrix shape"));
+    let m1 =
+        Expr::Matrix(Mat::new(1, 1, vec![parse("sqrt(8) - sqrt(2)")]).expect("test matrix shape"));
     assert_eq!(rank(&m1, &Assumptions::new()), Some(1));
 }
 

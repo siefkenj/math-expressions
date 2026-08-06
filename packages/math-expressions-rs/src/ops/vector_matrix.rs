@@ -78,10 +78,7 @@ fn vector_kind(e: &Expr) -> Option<SeqKind> {
 /// A factor that is not one of these is a scalar and gets folded into the
 /// container's components.
 fn is_container(e: &Expr) -> bool {
-    matches!(
-        e,
-        Expr::Seq(..) | Expr::Matrix(_) | Expr::Interval { .. }
-    )
+    matches!(e, Expr::Seq(..) | Expr::Matrix(_) | Expr::Interval { .. })
 }
 
 // ---- scalar × vector -------------------------------------------------------

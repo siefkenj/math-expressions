@@ -2,7 +2,9 @@
 //! `evaluate_to_constant` (simplify-then-eval). Expected values verified against
 //! `me.evaluate` / `me.evaluate_to_constant`.
 
-use math_expressions::{evaluate, evaluate_to_constant, Expr, TextToAst, TextToAstOptions};
+use math_expressions::{
+    evaluate_fast_f64, evaluate_to_constant, Expr, TextToAst, TextToAstOptions,
+};
 use std::collections::HashMap;
 
 fn parse(s: &str) -> Expr {
@@ -26,27 +28,43 @@ fn approx(got: Option<num_complex::Complex64>, re: f64, im: f64) {
 
 #[test]
 fn evaluate_real() {
-    approx(evaluate(&parse("x^2"), &binds(&[("x", 3.0)])), 9.0, 0.0);
     approx(
-        evaluate(&parse("x + y"), &binds(&[("x", 1.0), ("y", 2.0)])),
+        evaluate_fast_f64(&parse("x^2"), &binds(&[("x", 3.0)])),
+        9.0,
+        0.0,
+    );
+    approx(
+        evaluate_fast_f64(&parse("x + y"), &binds(&[("x", 1.0), ("y", 2.0)])),
         3.0,
         0.0,
     );
-    approx(evaluate(&parse("sin(x)"), &binds(&[("x", 0.0)])), 0.0, 0.0);
-    approx(evaluate(&parse("abs(x)"), &binds(&[("x", -3.0)])), 3.0, 0.0);
-    approx(evaluate(&parse("exp(x)"), &binds(&[("x", 0.0)])), 1.0, 0.0);
+    approx(
+        evaluate_fast_f64(&parse("sin(x)"), &binds(&[("x", 0.0)])),
+        0.0,
+        0.0,
+    );
+    approx(
+        evaluate_fast_f64(&parse("abs(x)"), &binds(&[("x", -3.0)])),
+        3.0,
+        0.0,
+    );
+    approx(
+        evaluate_fast_f64(&parse("exp(x)"), &binds(&[("x", 0.0)])),
+        1.0,
+        0.0,
+    );
 }
 
 #[test]
 fn evaluate_complex_principal_branch() {
     // Matches mathjs: complex principal value, not the real root.
     approx(
-        evaluate(&parse("x^(1/3)"), &binds(&[("x", -8.0)])),
+        evaluate_fast_f64(&parse("x^(1/3)"), &binds(&[("x", -8.0)])),
         1.0,
         3f64.sqrt(),
     );
     approx(
-        evaluate(&parse("sqrt(x)"), &binds(&[("x", -4.0)])),
+        evaluate_fast_f64(&parse("sqrt(x)"), &binds(&[("x", -4.0)])),
         0.0,
         2.0,
     );
@@ -54,8 +72,8 @@ fn evaluate_complex_principal_branch() {
 
 #[test]
 fn evaluate_none_cases() {
-    assert!(evaluate(&parse("x^2"), &binds(&[])).is_none()); // unbound
-    assert!(evaluate(&parse("x/y"), &binds(&[("x", 1.0), ("y", 0.0)])).is_none());
+    assert!(evaluate_fast_f64(&parse("x^2"), &binds(&[])).is_none()); // unbound
+    assert!(evaluate_fast_f64(&parse("x/y"), &binds(&[("x", 1.0), ("y", 0.0)])).is_none());
     // 1/0
 }
 
@@ -63,12 +81,32 @@ fn evaluate_none_cases() {
 fn evaluate_mod_floored_matches_mathjs() {
     // mathjs `mod` is floored division: the result takes the sign of the
     // divisor, unlike Rust `rem_euclid` (always non-negative).
-    approx(evaluate(&parse("mod(5, -3)"), &binds(&[])), -1.0, 0.0);
-    approx(evaluate(&parse("mod(-5, 3)"), &binds(&[])), 1.0, 0.0);
-    approx(evaluate(&parse("mod(5, 3)"), &binds(&[])), 2.0, 0.0);
-    approx(evaluate(&parse("mod(-5, -3)"), &binds(&[])), -2.0, 0.0);
+    approx(
+        evaluate_fast_f64(&parse("mod(5, -3)"), &binds(&[])),
+        -1.0,
+        0.0,
+    );
+    approx(
+        evaluate_fast_f64(&parse("mod(-5, 3)"), &binds(&[])),
+        1.0,
+        0.0,
+    );
+    approx(
+        evaluate_fast_f64(&parse("mod(5, 3)"), &binds(&[])),
+        2.0,
+        0.0,
+    );
+    approx(
+        evaluate_fast_f64(&parse("mod(-5, -3)"), &binds(&[])),
+        -2.0,
+        0.0,
+    );
     // mathjs defines `mod(x, 0) = x` (not NaN).
-    approx(evaluate(&parse("mod(5, 0)"), &binds(&[])), 5.0, 0.0);
+    approx(
+        evaluate_fast_f64(&parse("mod(5, 0)"), &binds(&[])),
+        5.0,
+        0.0,
+    );
 }
 
 #[test]

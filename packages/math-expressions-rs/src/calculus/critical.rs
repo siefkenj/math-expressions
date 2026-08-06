@@ -64,7 +64,10 @@ pub fn critical_points(e: &Expr, var: &str) -> Option<Vec<Expr>> {
         return None;
     }
 
-    let poly = extract_upoly(&crate::normalize::canonicalize(&crate::normalize::expand(&num)), var)?;
+    let poly = extract_upoly(
+        &crate::normalize::canonicalize(&crate::normalize::expand(&num)),
+        var,
+    )?;
     match univariate::degree(&poly) {
         // A zero derivative is a constant function: every point is critical,
         // which no finite list can report.

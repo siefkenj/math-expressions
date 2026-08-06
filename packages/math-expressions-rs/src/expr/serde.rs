@@ -176,9 +176,7 @@ fn from_js_array(arr: &[Value]) -> Result<Expr, String> {
             // `Mat::new` re-checks the entry count that the loop above just
             // built, so the shape is validated by the type rather than by this
             // function getting the loop right.
-            Expr::Matrix(
-                crate::expr::Mat::new(rows, cols, entries).ok_or("matrix shape mismatch")?,
-            )
+            Expr::Matrix(crate::expr::Mat::new(rows, cols, entries).ok_or("matrix shape mismatch")?)
         }
         // everything else (unit, pm, angle, binom, vec, linesegment,
         // derivative_leibniz, forall, arrows, implies, iff, perp, ":", "|", d)
@@ -312,11 +310,7 @@ fn to_js_rec(expr: &Expr) -> Value {
                 }
                 body.push(Value::Array(row));
             }
-            json!([
-                "matrix",
-                ["tuple", m.rows(), m.cols()],
-                Value::Array(body)
-            ])
+            json!(["matrix", ["tuple", m.rows(), m.cols()], Value::Array(body)])
         }
 
         Expr::OtherOp(name, args) => {

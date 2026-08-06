@@ -10,11 +10,30 @@ use num_complex::Complex64;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-/// Evaluate `e` at real variable bindings, returning its (possibly complex)
-/// numeric value. `None` if a needed variable is unbound, the expression is not
-/// numerically meaningful, or the result is non-finite (`me.evaluate` returns
-/// `null` for e.g. `1/0`). Uses the complex principal branch, matching mathjs:
-/// `x^(1/3)` at `x = -8` is `1 + i√3`, not the real root `-2`.
+/// Evaluate `e` at real variable bindings in `f64`, returning its (possibly
+/// complex) numeric value. `None` if a needed variable is unbound, the
+/// expression is not numerically meaningful, or the result is non-finite
+/// (`me.evaluate` returns `null` for e.g. `1/0`). Uses the complex principal
+/// branch, matching mathjs: `x^(1/3)` at `x = -8` is `1 + i√3`, not `-2`.
+///
+/// **None of the returned digits are certified.** This is a plain `Complex64`
+/// tree walk: every operation rounds, the errors compound, and nothing here
+/// tracks how far the answer has drifted — so the value can be wrong in any
+/// digit, including the first. That is not hypothetical. At `x` within `1e-8`
+/// of `π/2` this returns `9.007e7` for `tan(x)`, where the true value is
+/// `1.000e8`; the loss comes from `Complex64::tan`'s double-angle formula, and
+/// nothing in this path can notice it happening. Cancellation, poles, and large
+/// trigonometric arguments are the usual triggers.
+///
+/// Use it where a wrong last digit is cheaper than a slow answer — plotting,
+/// bracketing, sampling — and *not* where the digits are the product. The
+/// alternatives, in order of increasing trust:
+///
+/// - [`evaluate_many`] for sampling one variable: same precision class, ~4×
+///   faster per point, and better-conditioned kernels on several functions.
+/// - [`crate::evaluate_to_precision`] when the digits matter: it returns as
+///   many *certified* significant digits as asked or says it cannot, at 8–75×
+///   the cost, and refuses free variables.
 ///
 /// Evaluation runs on the *canonical* tree. That is a rounding decision, not a
 /// semantic one — `canonicalize` rewrites `Div`/`Neg` and flattens `Add`/`Mul`
@@ -23,7 +42,7 @@ use std::collections::HashMap;
 /// arithmetic identically. Sampling the same curve through the two entry points
 /// used to give answers a few ulp apart; on everything but the handful of
 /// functions noted in [`with_canonical`] it now gives the same bits.
-pub fn evaluate(e: &Expr, bindings: &HashMap<String, f64>) -> Option<Complex64> {
+pub fn evaluate_fast_f64(e: &Expr, bindings: &HashMap<String, f64>) -> Option<Complex64> {
     let env: Env = bindings
         .iter()
         .map(|(k, v)| (k.clone(), Complex64::new(*v, 0.0)))
@@ -35,7 +54,7 @@ pub fn evaluate(e: &Expr, bindings: &HashMap<String, f64>) -> Option<Complex64> 
 ///
 /// Canonicalizing costs far more than the evaluation it precedes — measured
 /// 2.7 µs against 0.4 µs on `x²−3x+1`, and 14 µs against 2 µs on a compound
-/// transcendental — so paying it per call made [`evaluate`] ~10× slower. The
+/// transcendental — so paying it per call made [`evaluate_fast_f64`] ~10× slower. The
 /// caller that cares is a sampler asking for the *same* expression at point
 /// after point, so memoizing turns "once per point" back into "once per curve".
 /// Capacity is shared with [`SAMPLER_CACHE_ENTRIES`] and justified there: the
@@ -43,13 +62,17 @@ pub fn evaluate(e: &Expr, bindings: &HashMap<String, f64>) -> Option<Complex64> 
 /// one and rarely more than a few.
 ///
 /// This buys agreement on tree *shape* only. Where the two paths call different
-/// kernels for the same function they still differ, because the tape evaluates
-/// in `f64` while [`eval_complex`] dispatches through `Complex64` — `tan` is
-/// `Complex64::tan`, a complex sin/cos quotient, against the tape's real
-/// `tan`. Measured over a 33-expression corpus, canonicalizing here lifted
+/// kernels for the same function they still differ: the tape evaluates in `f64`
+/// while [`eval_complex`] dispatches through `Complex64`, and on the real axis
+/// those are not always the same algorithm. `Complex64::tan` is the double-angle
+/// form `sin(2x)/(1 + cos 2x)`, whose denominator cancels, against the tape's
+/// `f64::tan`; `e^x` is `exp(x)` here against the tape's generic `powf(e, x)`.
+/// Measured over a 33-expression corpus, canonicalizing here lifted
 /// bit-identical agreement from 78 % to 92 %; the remainder is `tan`, `e^x`,
 /// `x^x` and non-integer powers, and closing it means aligning the kernels
-/// rather than the trees.
+/// rather than the trees. `tan` is not a tie-break — see
+/// `evaluate_and_batch_still_differ_on_unaligned_kernels`, where this path is
+/// the inaccurate one.
 fn with_canonical<R>(e: &Expr, f: impl FnOnce(&Expr) -> R) -> R {
     thread_local! {
         /// Raw tree to its canonical form, most-recently-used last.
@@ -78,7 +101,7 @@ fn with_canonical<R>(e: &Expr, f: impl FnOnce(&Expr) -> R) -> R {
 /// Evaluate `e` at many values of a single variable, in one pass.
 ///
 /// Sampling a function — plotting it, bracketing its extrema, hunting a root —
-/// asks for the same expression at thousands of points, and [`evaluate`] is the
+/// asks for the same expression at thousands of points, and [`evaluate_fast_f64`] is the
 /// wrong shape for that: it rebuilds the environment per point, and across the
 /// wasm boundary each call also marshals the variable names. Measured on
 /// `x²−3x+1`, that overhead is ~1.2µs a point against ~6ns of actual
@@ -205,7 +228,7 @@ fn with_sampler<R>(e: &Expr, var: &str, f: impl FnOnce(&CompiledExpr) -> R) -> O
 ///    (see `tape::compile`), which a raw parse tree is not. `canonicalize` is
 ///    the pass that gets it there — deliberately *not* [`simplify_core`], which
 ///    additionally folds constants in the real domain and would answer `-2` for
-///    `(-8)^(1/3)` where [`evaluate`] answers `1 + i√3` (hence `NaN`).
+///    `(-8)^(1/3)` where [`evaluate_fast_f64`] answers `1 + i√3` (hence `NaN`).
 ///
 /// 2. **Positional bindings.** The tape's slots are positional, so the fast
 ///    path is only sound when its one slot *is* the variable being swept. An
@@ -225,7 +248,7 @@ fn compile_sampler(e: &Expr, var: &str) -> Option<CompiledExpr> {
 /// `me.evaluate_to_constant`: `None` if the *original* expression mentions any
 /// genuine free variable (the constants `pi`/`e`/`i` don't count, and it does
 /// NOT cancel first — so `x − x` is `None`, not `0`); otherwise simplify (real-
-/// domain reductions apply, `(-8)^(1/3)` → `-2` — contrast [`evaluate`]'s
+/// domain reductions apply, `(-8)^(1/3)` → `-2` — contrast [`evaluate_fast_f64`]'s
 /// complex-principal branch) and evaluate.
 ///
 /// `±∞` is a value here, not a failure: an unbounded interval endpoint is
@@ -256,7 +279,61 @@ pub fn evaluate_to_constant(e: &Expr) -> Option<Complex64> {
     if is_nan_constant(&simplified) {
         return Some(Complex64::new(f64::NAN, 0.0));
     }
+    // Certified digits first. This is the one evaluation entry point that can
+    // afford them: the expression is closed, the call is a one-shot readout
+    // rather than a per-point sampler, and [`certified_constant`] escalates
+    // precision only where `f64` cannot carry the answer — see its note for the
+    // measured cost. Falls through on `Unknown`, so nothing this used to answer
+    // becomes `None`.
+    if let Some(v) = certified_constant(&simplified) {
+        return finite(v);
+    }
     finite(eval_complex(&simplified, &Env::new())?)
+}
+
+/// Significant digits demanded of the certified pipeline.
+///
+/// Twenty, and the margin over `f64`'s ~15.95 is the whole reason. Certifying
+/// *d* decimal digits bounds the decimal expansion, which is not the same thing
+/// as resolving which `f64` the true value is nearest: a value lying close to
+/// the midpoint between two `f64`s needs the certified interval narrower than
+/// half an ulp before the rounding is decided. `tan(π/2 − 10⁻⁸)` is such a
+/// value — it is `9.9999999999999996…e7`, a hair under `1e8` — and it converts
+/// to the wrong `f64` at 15 digits (off by ~1070 ulp) and still at 17 (off by
+/// ~7). At 20 it lands on `1e8`, which is correct.
+///
+/// That margin is what makes this safe to do at all: measured over an
+/// 18-constant corpus against a 35-digit reference, every value that certifies
+/// comes back as the correctly-rounded `f64`, so this can only ever *fix* a
+/// value, never move one sideways. Lower settings lack that property — fifteen
+/// was tried and returned `e^2` 1 ulp *worse* than the naive walk it replaced,
+/// and trading an already-correct value for a differently-wrong one is churn,
+/// not improvement. In a library whose corpus compares against mathjs digit for
+/// digit, churn is pure risk.
+///
+/// The cost is a cliff rather than a slope, because Tier 0 (`f64` carrying
+/// certified error bounds) is capped at 15 digits by construction and anything
+/// past it lands in `MpFix` and the Ziv loop. It is affordable *here*, and only
+/// here. Measured against the uncertified walk: `2+3`, `sqrt(2)` and `pi+e`
+/// unchanged (0.4/3.0/4.4 µs — [`simplify_core`] already dominates this path),
+/// `sin(10^20)` 27.1 → 31.1 µs, and the worst case, a compound transcendental,
+/// 9.5 → 46.6 µs. These are one-shot readouts of a closed expression, not
+/// per-point sampling, which is why [`evaluate_fast_f64`] must not do this and
+/// this may.
+const CONSTANT_DIGITS: usize = 20;
+
+/// The certified value of a closed, already-simplified expression, or `None`
+/// when the pipeline declines and the caller must fall back.
+///
+/// `None` is routine, not exceptional. Certified digits are *relative*, so a
+/// value that is exactly zero has none to certify and the Ziv loop exhausts
+/// `max_ziv_rounds` trying — `sin(0)` reports
+/// `Unknown("did not stabilize within max_ziv_rounds")`. Poles decline too.
+/// Every such case falls back to the `eval_complex` walk below, which is why
+/// adding this can only improve an answer, never remove one.
+fn certified_constant(simplified: &Expr) -> Option<Complex64> {
+    let (re, im) = crate::evaluate_to_precision(simplified, CONSTANT_DIGITS).to_complex_f64()?;
+    Some(Complex64::new(re, im))
 }
 
 /// `±∞` when `e` *is* an infinite constant, after simplification has done the
@@ -331,6 +408,53 @@ mod tests {
     fn ordinary_constants_still_evaluate() {
         assert_eq!(evaluate_to_constant(&p("2+3")).unwrap().re, 5.0);
         assert_eq!(evaluate_to_constant(&p("cos(0)")).unwrap().re, 1.0);
+    }
+
+    /// A closed constant comes back correctly rounded, even where evaluating it
+    /// in `f64` destroys the answer — that is what [`CONSTANT_DIGITS`] buys.
+    ///
+    /// Both cases are catastrophic cancellation, and the uncertified walk that
+    /// [`evaluate_fast_f64`] still uses gets them wrong in the *first* digit:
+    /// `tan(π/2 − 10⁻⁸)` came back `9.0072e7` against a true `1.0e8`, and
+    /// `log(1 + 10⁻¹⁵)` came back `1.1102e-15` against a true `1.0e-15`. The
+    /// certified pipeline escalates past `f64` exactly where `f64` cannot carry
+    /// the intermediate, so both are now the nearest `f64` to the true value.
+    ///
+    /// Asserted as exact bit equality against an independent 35-digit run,
+    /// because "close" is what the old behaviour already achieved on one of
+    /// these and the claim being pinned is stronger than that.
+    #[test]
+    fn a_constant_that_f64_cannot_carry_is_still_correctly_rounded() {
+        for src in [
+            "tan(pi/2 - 10^(-8))",
+            "log(1+10^(-15))",
+            "exp(pi*sqrt(163))",
+        ] {
+            let got = evaluate_to_constant(&p(src)).expect(src).re;
+            let want = crate::evaluate_to_precision(&p(src), 35)
+                .to_f64()
+                .expect("reference certifies");
+            assert_eq!(got, want, "{src}: got {got:e}, want {want:e}");
+        }
+    }
+
+    /// Certified digits are *relative*, so a value that is exactly zero has none
+    /// to certify: the Ziv loop escalates until it gives up and reports
+    /// `Unknown`. Those cases must fall back rather than disappear — adding
+    /// certification may not cost an answer that used to exist.
+    ///
+    /// The values here are the `eval_complex` walk's float noise (`sin(π)` is
+    /// `1.2e-16`, not `0`), which is what these returned before and still do.
+    /// Improving *that* would take a symbolic zero test, not more precision.
+    #[test]
+    fn a_value_that_cannot_be_certified_falls_back_rather_than_vanishing() {
+        for src in ["sin(pi)", "sqrt(2)^2 - 2"] {
+            let got = evaluate_to_constant(&p(src));
+            assert!(got.is_some(), "{src} lost its answer to certification");
+            assert!(got.unwrap().re.abs() < 1e-15, "{src} should be near zero");
+        }
+        // A pole declines certification too, and `±∞` stays a value.
+        assert_eq!(evaluate_to_constant(&p("1/0")).unwrap().re, f64::INFINITY);
     }
 
     /// An infinite endpoint reports as `±∞`, not as "no value" — the caller

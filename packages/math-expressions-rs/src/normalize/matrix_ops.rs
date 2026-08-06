@@ -31,11 +31,7 @@ pub(crate) fn matmul_literal(a: &Expr, b: &Expr) -> Option<Expr> {
     if ma.cols() != mb.rows() {
         return None;
     }
-    let (r1, c1, c2) = (
-        ma.rows() as usize,
-        ma.cols() as usize,
-        mb.cols() as usize,
-    );
+    let (r1, c1, c2) = (ma.rows() as usize, ma.cols() as usize, mb.cols() as usize);
     if r1.saturating_mul(c1).saturating_mul(c2) > crate::resource_limits::current().max_expand_terms
     {
         return None;

@@ -7,8 +7,8 @@
 //! is rational.
 
 use math_expressions::{
-    critical_points, derivative, evaluate, evaluate_many, evaluate_to_constant, expr, Expr,
-    TextToAst,
+    critical_points, derivative, evaluate_fast_f64, evaluate_many, evaluate_to_constant, expr,
+    Expr, TextToAst,
 };
 use std::collections::HashMap;
 
@@ -38,12 +38,12 @@ fn value_of(e: &Expr) -> f64 {
 /// is now a property rather than a coincidence.
 ///
 /// It started as a coincidence: `evaluate_many` ran the same `eval_complex`
-/// walk as `evaluate`, so identical bits came from identical code. Putting a
+/// walk as `evaluate_fast_f64`, so identical bits came from identical code. Putting a
 /// compiled Tier-0 tape behind `evaluate_many` broke it — the tape consumes
 /// canonical form, which reorders an `Add`'s terms and so reassociates the sum,
 /// and this very expression at `x = −4/7` came back 1 ulp apart.
 ///
-/// `evaluate` now canonicalizes too, so both sides associate alike and the bits
+/// `evaluate_fast_f64` now canonicalizes too, so both sides associate alike and the bits
 /// agree by construction wherever the two share arithmetic kernels. That covers
 /// `+`, `*`, integer powers and most named functions; it does *not* cover the
 /// handful where the tape's real kernel and `eval_complex`'s complex one differ
@@ -55,7 +55,9 @@ fn batched_sampling_agrees_with_point_by_point() {
     let batch = evaluate_many(&e, "x", &xs);
     assert_eq!(batch.len(), xs.len(), "one result per point asked about");
     for (i, x) in xs.iter().enumerate() {
-        let one = evaluate(&e, &HashMap::from([("x".to_string(), *x)])).unwrap().re;
+        let one = evaluate_fast_f64(&e, &HashMap::from([("x".to_string(), *x)]))
+            .unwrap()
+            .re;
         assert_eq!(batch[i], one, "disagreement at x = {x}");
     }
 }
@@ -63,10 +65,17 @@ fn batched_sampling_agrees_with_point_by_point() {
 /// The known limit of the agreement above, pinned so it stays known.
 ///
 /// Canonicalizing both sides aligns the *tree*; it cannot align the *kernels*.
-/// `eval_complex` dispatches `tan` to `Complex64::tan` — a complex sin/cos
-/// quotient — while the tape calls the real `tan`, and the two round
-/// differently. The tell is that `exp(x)` agrees exactly while `e^x` does not:
-/// same function, different spelling, different kernel.
+/// `eval_complex` dispatches `tan` to `Complex64::tan`, which num-complex
+/// implements as the double-angle formula `(sin 2a + i·sinh 2b)/(cos 2a +
+/// cosh 2b)`. On the real axis that is `sin(2x)/(1 + cos 2x)`, while the tape
+/// calls `f64::tan` — algebraically the same, numerically not.
+///
+/// The denominator `1 + cos 2x` is `2cos²x` computed by cancellation, so the
+/// gap is not a tie-break in the last bit: it reaches 10⁵ ulp over a routine
+/// sweep, and within 10⁻⁸ of a pole `Complex64::tan` has *no* correct digits
+/// (9.007e7 against 1.000e8). Of the two, `evaluate_many` is the accurate one.
+/// That is what the loose bound and the `|y| > 1e3` skip below are for — they
+/// are conceding `eval_complex`'s error, not the tape's.
 ///
 /// This is asserted rather than merely documented because the difference is
 /// invisible at coarse sampling (the parity suite's 0.1 step misses it) and
@@ -81,7 +90,7 @@ fn evaluate_and_batch_still_differ_on_unaligned_kernels() {
         .iter()
         .enumerate()
         .filter(|(i, x)| {
-            let one = evaluate(&e, &HashMap::from([("x".to_string(), **x)]))
+            let one = evaluate_fast_f64(&e, &HashMap::from([("x".to_string(), **x)]))
                 .map_or(f64::NAN, |v| v.re);
             batch[*i].is_finite() && one.is_finite() && batch[*i] != one
         })
@@ -95,7 +104,8 @@ fn evaluate_and_batch_still_differ_on_unaligned_kernels() {
     // matters: relative agreement away from the poles, where `tan` is not
     // catastrophically ill-conditioned.
     for (i, x) in xs.iter().enumerate() {
-        let one = evaluate(&e, &HashMap::from([("x".to_string(), *x)])).map_or(f64::NAN, |v| v.re);
+        let one = evaluate_fast_f64(&e, &HashMap::from([("x".to_string(), *x)]))
+            .map_or(f64::NAN, |v| v.re);
         if !batch[i].is_finite() || !one.is_finite() || one.abs() > 1e3 {
             continue;
         }

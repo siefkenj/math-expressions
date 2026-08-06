@@ -7,8 +7,8 @@
 
 use math_expressions::{
     evaluate_numbers, evaluate_numbers_evaluate_functions_with_digits,
-    evaluate_numbers_preserve_order_with_digits, evaluate_numbers_with_digits, expr, simplify, Expr,
-    MaxDigits, TextToAst,
+    evaluate_numbers_preserve_order_with_digits, evaluate_numbers_with_digits, expr, simplify,
+    Expr, MaxDigits, TextToAst,
 };
 
 fn t(s: &str) -> Expr {

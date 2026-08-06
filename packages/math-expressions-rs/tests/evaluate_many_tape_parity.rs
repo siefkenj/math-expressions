@@ -10,7 +10,7 @@
 //! and a complex-principal-branch walk are most likely to part ways: negative
 //! bases under fractional powers, poles, log/sqrt domain edges, and overflow.
 
-use math_expressions::{evaluate, evaluate_many, Expr, TextToAst};
+use math_expressions::{evaluate_fast_f64, evaluate_many, Expr, TextToAst};
 use std::collections::HashMap;
 
 fn t(s: &str) -> Expr {
@@ -23,7 +23,7 @@ fn t(s: &str) -> Expr {
 fn reference(e: &Expr, var: &str, x: f64) -> f64 {
     let mut bindings = HashMap::new();
     bindings.insert(var.to_string(), x);
-    match evaluate(e, &bindings) {
+    match evaluate_fast_f64(e, &bindings) {
         Some(v) if v.im.abs() <= 1e-10 * v.re.abs().max(1.0) => v.re,
         _ => f64::NAN,
     }
@@ -217,7 +217,9 @@ fn interleaved_curves_past_cache_capacity_stay_correct() {
     let xs: Vec<f64> = (-30..=30).map(|i| i as f64 / 3.0).collect();
     // Each curve carries its index into its value, so a stale tape shows up as
     // a wrong number rather than a coincidence.
-    let curves: Vec<(usize, Expr)> = (1..=20).map(|k| (k, t(&format!("{k}*x^2 + {k}")))).collect();
+    let curves: Vec<(usize, Expr)> = (1..=20)
+        .map(|k| (k, t(&format!("{k}*x^2 + {k}"))))
+        .collect();
     for _ in 0..3 {
         for (k, e) in &curves {
             let got = evaluate_many(e, "x", &xs);
@@ -234,7 +236,7 @@ fn interleaved_curves_past_cache_capacity_stay_correct() {
 }
 
 /// `ln` is a registered alias of `log`, and both evaluators now resolve it.
-/// This used to be a silent `null`/`NaN` for every input — `evaluate(ln(2))`
+/// This used to be a silent `null`/`NaN` for every input — `evaluate_fast_f64(ln(2))`
 /// returned `None` while `log(2)` evaluated — because the registry matches
 /// evaluation rules on the canonical spelling and neither entry point
 /// normalized first. The batch and single-point paths must agree, and both
@@ -259,7 +261,10 @@ fn alias_spellings_evaluate() {
                 ba[i],
                 bc[i]
             );
-            assert!(agrees(ba[i], reference(&a, "x", xs[i])), "{alias} batch/point");
+            assert!(
+                agrees(ba[i], reference(&a, "x", xs[i])),
+                "{alias} batch/point"
+            );
         }
     }
     // The concrete regression: a real value, not a gap.

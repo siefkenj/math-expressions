@@ -6,8 +6,8 @@
 //! keep declining.
 
 use math_expressions::{
-    evaluate, evaluate_to_constant, expr, simplify, simplify_with, substitute, Assumptions, Expr,
-    LatexToAst, TextToAst,
+    evaluate_fast_f64, evaluate_to_constant, expr, simplify, simplify_with, substitute,
+    Assumptions, Expr, LatexToAst, TextToAst,
 };
 use std::collections::HashMap;
 
@@ -182,7 +182,7 @@ fn principal_value_at(e: &Expr, bindings: &[(&str, &str)]) -> Option<(f64, f64)>
         .iter()
         .map(|(k, v)| ((*k).to_string(), t(v)))
         .collect();
-    evaluate(&substitute(e, &subs), &HashMap::new()).map(|z| (z.re, z.im))
+    evaluate_fast_f64(&substitute(e, &subs), &HashMap::new()).map(|z| (z.re, z.im))
 }
 
 /// One substitution: `variable` → the literal to bind it to.

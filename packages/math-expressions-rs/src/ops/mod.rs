@@ -9,7 +9,7 @@
 //! - [`vector_matrix`] — move `+`/scalar-`*` inside vector & matrix containers
 //! - [`units`] — unit annotation stripping / adding
 //! - [`analytic`] — the `isAnalytic` predicate
-//! - [`evaluate`] — numeric evaluation at bindings
+//! - [`evaluate_fast_f64`] — uncertified f64 evaluation at bindings
 //! - [`pm`] — the plus-minus (`±`) operator helpers
 
 mod analytic;
@@ -25,12 +25,13 @@ mod vector_matrix;
 
 pub use analytic::{is_analytic, AnalyticOpts};
 pub use components::{get_component, substitute_component};
-pub use evaluate::{evaluate, evaluate_many, evaluate_to_constant};
+pub use evaluate::{evaluate_fast_f64, evaluate_many, evaluate_to_constant};
 pub use numbers::{
     constants_to_floats, evaluate_numbers, evaluate_numbers_evaluate_functions,
     evaluate_numbers_evaluate_functions_with_digits, evaluate_numbers_preserve_order_with_digits,
     evaluate_numbers_with_digits, reduce_rational, round_numbers_to_decimals,
-    round_numbers_to_precision, round_numbers_to_precision_plus_decimals, set_small_zero, MaxDigits,
+    round_numbers_to_precision, round_numbers_to_precision_plus_decimals, set_small_zero,
+    MaxDigits,
 };
 pub use preserve_order::evaluate_numbers_preserve_order;
 pub use query::{functions, operators, variables};

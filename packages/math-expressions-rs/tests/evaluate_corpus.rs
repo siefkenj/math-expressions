@@ -7,7 +7,9 @@
 
 mod common;
 
-use math_expressions::{evaluate, evaluate_to_constant, Expr, TextToAst, TextToAstOptions};
+use math_expressions::{
+    evaluate_fast_f64, evaluate_to_constant, Expr, TextToAst, TextToAstOptions,
+};
 use num_complex::Complex64;
 use std::collections::{BTreeSet, HashMap};
 
@@ -55,7 +57,7 @@ fn collect_failures() -> BTreeSet<String> {
     let mut failures = BTreeSet::new();
     for c in &cases {
         let Some(e) = parse(&c.input) else { continue };
-        let ev = catch(|| evaluate(&e, &c.binds)).flatten();
+        let ev = catch(|| evaluate_fast_f64(&e, &c.binds)).flatten();
         let ct = catch(|| evaluate_to_constant(&e)).flatten();
         if !agree(ev, &c.evaluated) {
             failures.insert(format!("evaluate {}", c.input));

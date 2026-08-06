@@ -64,8 +64,7 @@ pub fn matrix_inverse(e: &Expr, assumptions: &Assumptions) -> Expr {
                     let dinv = pow(d, Expr::int(-1));
                     return Expr::Matrix(Mat::generate(m.rows(), m.cols(), |i, j| {
                         // Adjugate: cofactor C(j, i) (transposed).
-                        let cof =
-                            super::elimination::cofactor(entries, n, j as usize, i as usize);
+                        let cof = super::elimination::cofactor(entries, n, j as usize, i as usize);
                         mul(vec![dinv.clone(), cof])
                     }));
                 }
@@ -82,9 +81,12 @@ pub fn matrix_inverse(e: &Expr, assumptions: &Assumptions) -> Expr {
 pub fn rref(e: &Expr, assumptions: &Assumptions) -> Expr {
     let c = canonicalize(e);
     if let Expr::Matrix(m) = &c {
-        if let Some((reduced, _)) =
-            rref_core(m.entries(), m.rows() as usize, m.cols() as usize, assumptions)
-        {
+        if let Some((reduced, _)) = rref_core(
+            m.entries(),
+            m.rows() as usize,
+            m.cols() as usize,
+            assumptions,
+        ) {
             // `rref_core` returns a same-shape matrix; if it ever did not, the
             // opaque `rref(e)` node below is the graceful answer.
             if let Some(out) = Mat::new(m.rows(), m.cols(), reduced) {
@@ -102,7 +104,12 @@ pub fn rank(e: &Expr, assumptions: &Assumptions) -> Option<u32> {
     let Expr::Matrix(m) = &c else {
         return None;
     };
-    let (_, pivots) = rref_core(m.entries(), m.rows() as usize, m.cols() as usize, assumptions)?;
+    let (_, pivots) = rref_core(
+        m.entries(),
+        m.rows() as usize,
+        m.cols() as usize,
+        assumptions,
+    )?;
     Some(pivots.len() as u32)
 }
 

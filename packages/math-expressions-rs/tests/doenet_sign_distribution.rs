@@ -82,10 +82,7 @@ fn a_power_takes_a_sign_only_at_an_odd_integer_exponent() {
     // … including `m = −1`, the reciprocal.
     assert_eq!(simplified("1/(-(1-x))"), r#"["/",1,["+","x",-1]]"#);
     // An even exponent must not: `−(1−x)²` is not `(x−1)²`.
-    assert_eq!(
-        simplified("-(1-x)^2"),
-        r#"["-",["^",["+",["-","x"],1],2]]"#
-    );
+    assert_eq!(simplified("-(1-x)^2"), r#"["-",["^",["+",["-","x"],1],2]]"#);
     // Nor a non-integer one, which keeps this away from `−√(1−x)`.
     assert_eq!(
         simplified("-(1-x)^(1/2)"),

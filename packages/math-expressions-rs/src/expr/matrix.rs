@@ -101,7 +101,8 @@ impl Mat {
         if r >= self.rows || c >= self.cols {
             return None;
         }
-        self.entries.get(r as usize * self.cols as usize + c as usize)
+        self.entries
+            .get(r as usize * self.cols as usize + c as usize)
     }
 
     pub fn is_square(&self) -> bool {

@@ -4,12 +4,12 @@
 use super::Expression;
 use math_expressions::{
     constants_to_floats, derivative as rust_derivative, equals as rust_equals, evaluate_numbers,
-    evaluate_numbers_evaluate_functions, evaluate_numbers_preserve_order,
-    evaluate_numbers_evaluate_functions_with_digits, evaluate_numbers_preserve_order_with_digits,
+    evaluate_numbers_evaluate_functions, evaluate_numbers_evaluate_functions_with_digits,
+    evaluate_numbers_preserve_order, evaluate_numbers_preserve_order_with_digits,
     evaluate_numbers_with_digits, evaluate_to_constant as rust_evc, expand as rust_expand, ops,
-    reduce_rational, round_numbers_to_decimals, round_numbers_to_precision, MaxDigits,
+    reduce_rational, round_numbers_to_decimals, round_numbers_to_precision,
     simplify as rust_simplify, simplify_with as rust_simplify_with, to_latex, to_text, Assumptions,
-    EqOptions, Expr, LatexOpts, TextOpts, TextToAst, TextToAstOptions,
+    EqOptions, Expr, LatexOpts, MaxDigits, TextOpts, TextToAst, TextToAstOptions,
 };
 use wasm_bindgen::prelude::*;
 
@@ -350,7 +350,7 @@ impl Expression {
         }
         let bindings: std::collections::HashMap<String, f64> =
             vars.into_iter().zip(values).collect();
-        let v = ops::evaluate(&self.0, &bindings)?;
+        let v = ops::evaluate_fast_f64(&self.0, &bindings)?;
         (v.im.abs() <= 1e-10 * v.re.abs().max(1.0)).then_some(v.re)
     }
 
