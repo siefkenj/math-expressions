@@ -34,6 +34,22 @@ fn value_of(e: &Expr) -> f64 {
 
 // ============================ evaluate_many ============================
 
+/// Agreement is to within a few ulp, **not** bit-for-bit.
+///
+/// This assertion used to be `assert_eq!`, and held while `evaluate_many` ran
+/// the same `eval_complex` walk as `evaluate`. It now runs a compiled Tier-0
+/// tape, which flattens `Add`/`Mul` and so associates the arithmetic
+/// differently: measured over a 13-expression corpus at 2001 points each,
+/// 85 % of results are still bit-identical, 12 % differ by 1 ulp, and the tail
+/// reaches ~500 ulp where the expression very nearly cancels — there the
+/// *absolute* error is 1.7e-16 against a true value of 2.07e-3, i.e. both
+/// evaluators are at the f64 noise floor and the ulp count is an artifact of
+/// measuring a small difference of large terms.
+///
+/// The tolerance is relative-with-an-absolute-floor for exactly that reason: a
+/// pure relative bound is meaningless near a zero. A sampler bracketing a root
+/// to 1e-6 cannot see any of this; if a caller ever needs the last bit,
+/// `evaluate` point-by-point is still the exact-agreement path.
 #[test]
 fn batched_sampling_agrees_with_point_by_point() {
     let e = t("x^2-3x+1");
@@ -41,8 +57,13 @@ fn batched_sampling_agrees_with_point_by_point() {
     let batch = evaluate_many(&e, "x", &xs);
     assert_eq!(batch.len(), xs.len(), "one result per point asked about");
     for (i, x) in xs.iter().enumerate() {
-        let one = evaluate(&e, &HashMap::from([("x".to_string(), *x)])).unwrap();
-        assert_eq!(batch[i], one.re, "disagreement at x = {x}");
+        let one = evaluate(&e, &HashMap::from([("x".to_string(), *x)])).unwrap().re;
+        let tol = 1e-13 * one.abs().max(1.0);
+        assert!(
+            (batch[i] - one).abs() <= tol,
+            "disagreement at x = {x}: batch {} vs point {one}",
+            batch[i]
+        );
     }
 }
 

@@ -832,6 +832,31 @@ impl CompiledExpr {
         }
     }
 
+    /// The Tier-0 fast path at many points of a single variable, allocation-
+    /// free after the first: `out[i]` is `Some(value)` where the f64 tier
+    /// certified a finite result and `None` where it escalated (domain edge,
+    /// overflow, unbound slot) and a caller must decide what to do.
+    ///
+    /// This is [`Self::eval_f64`] hoisted for sampling. It does **not**
+    /// escalate to the bignum tiers — a sampler wants a value or a gap, not a
+    /// certified digit — which is what separates it from [`Self::eval_batch`].
+    pub fn eval_f64_many(&self, points: &[f64], out: &mut Vec<Option<f64>>) {
+        out.clear();
+        out.reserve(points.len());
+        let mut record = Vec::with_capacity(self.ops.len());
+        let mut stack = Vec::with_capacity(self.max_stack);
+        let mut binding = [0.0f64; 1];
+        for &x in points {
+            binding[0] = x;
+            out.push(
+                match float_bounds::run_with(self, &binding, &mut record, &mut stack) {
+                    float_bounds::Tier0Outcome::Ok(a) => Some(a.val),
+                    float_bounds::Tier0Outcome::Escalate(_) => None,
+                },
+            );
+        }
+    }
+
     /// Evaluate a single-variable tape at many points to `digits` significant
     /// digits — the adaptive-quadrature entry point: each point pays the f64
     /// tier only, escalating to the bignum tiers per point as needed.

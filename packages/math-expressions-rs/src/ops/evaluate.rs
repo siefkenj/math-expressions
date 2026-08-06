@@ -1,11 +1,13 @@
 //! Numeric evaluation of an expression at variable bindings, port of
 //! `me.evaluate` / `me.evaluate_to_constant`.
 
+use crate::eval_numeric::certified_digits::tape::CompiledExpr;
 use crate::eval_numeric::complex::{eval_complex, Env};
 use crate::expr::Expr;
 use crate::normalize::simplify_core;
 use crate::ops::variables;
 use num_complex::Complex64;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// Evaluate `e` at real variable bindings, returning its (possibly complex)
@@ -36,6 +38,19 @@ pub fn evaluate(e: &Expr, bindings: &HashMap<String, f64>) -> Option<Complex64> 
 /// being dropped, because a sampler wants one result per point it asked about
 /// and `NaN` is the gap marker its consumers already handle.
 pub fn evaluate_many(e: &Expr, var: &str, values: &[f64]) -> Vec<f64> {
+    // Fast path: compile once to the Tier-0 tape (the same flat program the
+    // quadrature and ODE paths already sample through) and run its f64 sweep
+    // per point. Measured 2–6× against the `eval_complex` tree walk below.
+    //
+    // The tape is a *fast path*, never a replacement: it only speaks real f64,
+    // so wherever it escalates — a domain edge, an overflow, anything off the
+    // real branch — that point falls back to `eval_complex`, which decides in
+    // ℂ exactly as it always did. So the complex-principal-branch contract
+    // that `x^(1/3)` at `x = -8` is `1 + i√3` (hence `NaN` here, not `-2`)
+    // survives: the tape returns `None` there rather than a real root.
+    let mut fast: Vec<Option<f64>> = Vec::new();
+    with_sampler(e, var, |t| t.eval_f64_many(values, &mut fast));
+
     let mut env = Env::new();
     // The binding's key never changes, so insert it once and overwrite its
     // value each point — the loop this feature exists to speed up should not
@@ -43,7 +58,11 @@ pub fn evaluate_many(e: &Expr, var: &str, values: &[f64]) -> Vec<f64> {
     env.insert(var.to_string(), Complex64::new(0.0, 0.0));
     values
         .iter()
-        .map(|&x| {
+        .enumerate()
+        .map(|(i, &x)| {
+            if let Some(Some(v)) = fast.get(i) {
+                return *v;
+            }
             *env.get_mut(var).expect("inserted above") = Complex64::new(x, 0.0);
             match eval_complex(e, &env).and_then(finite) {
                 // The imaginary part is compared against the real one's scale,
@@ -53,6 +72,101 @@ pub fn evaluate_many(e: &Expr, var: &str, values: &[f64]) -> Vec<f64> {
             }
         })
         .collect()
+}
+
+/// How many compiled sampler tapes to keep.
+///
+/// The working set is "expressions a caller is sampling at once", which is
+/// rarely one: a scan that wants `f` and `f′` at every node alternates two, and
+/// a graph refining brackets across several curves alternates more. Measured
+/// round-robin over K expressions, one small batch each: at K=1 capacity does
+/// not matter (7.8 vs 7.2 µs a call), but at K=2 a single slot costs 27.1 µs
+/// against 4.2 µs here, and at K=8, 18.8 against 2.6 — the slot misses every
+/// time and pays the full ~40 µs compile.
+///
+/// Eight is where that curve has flattened, and eight tapes is a trivial amount
+/// of retained memory — which matters because memory retained here is
+/// permanent: wasm never returns linear memory to the OS.
+///
+/// Past capacity the guarantee is correctness, not speed. Round-robin over more
+/// than eight expressions is LRU's worst case — every entry is evicted just
+/// before its next use — and measured K=12 duly falls back to one-slot numbers
+/// (18.5 µs). That is the old behaviour, not a new cliff, and the answers stay
+/// right; a caller sampling a dozen curves in lockstep would want a larger
+/// capacity, not a different algorithm.
+const SAMPLER_CACHE_ENTRIES: usize = 8;
+
+/// Run `f` against the sampler tape for `(e, var)`, if there is one.
+///
+/// The tape is memoized because compiling one costs ~40 µs — two orders of
+/// magnitude more than the ~0.3 µs point it accelerates — and the loop this
+/// feature exists for calls back with the *same* expression over and over: a
+/// bisection refines 60 levels, each a fresh `evaluate_many` of a handful of
+/// midpoints. Recompiling per call made a measured 5.1× per-point win land as
+/// 1.3× end-to-end.
+///
+/// The cache is a small **LRU**, not a single slot: one slot is enough only if
+/// callers sweep one expression to completion, and alternating between two is
+/// enough to miss on every call. See [`SAMPLER_CACHE_ENTRIES`] for the measured
+/// cost of getting that wrong. Misses are recorded too (as `None`), so an
+/// expression the tape declines is not re-canonicalized and re-rejected on
+/// every batch.
+fn with_sampler<R>(e: &Expr, var: &str, f: impl FnOnce(&CompiledExpr) -> R) -> Option<R> {
+    thread_local! {
+        /// Most-recently-used last.
+        static CACHE: RefCell<Vec<(Expr, String, Option<CompiledExpr>)>> =
+            const { RefCell::new(Vec::new()) };
+    }
+    CACHE.with(|c| {
+        let mut cache = c.borrow_mut();
+        match cache.iter().position(|(ce, cv, _)| cv == var && ce == e) {
+            // Re-seat the hit at the back so the eviction below drops the
+            // genuinely coldest entry rather than whichever arrived first.
+            Some(i) => {
+                let entry = cache.remove(i);
+                cache.push(entry);
+            }
+            None => {
+                if cache.len() >= SAMPLER_CACHE_ENTRIES {
+                    cache.remove(0);
+                }
+                cache.push((e.clone(), var.to_string(), compile_sampler(e, var)));
+            }
+        }
+        cache.last().and_then(|(_, _, tape)| tape.as_ref()).map(f)
+    })
+}
+
+/// Compile `e` to a Tier-0 tape for sampling in `var`, or `None` when the tape
+/// cannot stand in for [`eval_complex`] and the slow path must carry the batch.
+///
+/// Two gates, each one a way the tape and the complex walk would otherwise
+/// disagree — and disagreement here is a behaviour change reaching JS callers,
+/// so both cost the fast path rather than the contract.
+///
+/// (There used to be a third, for alias spellings: the tape evaluates `ln`
+/// while `eval_complex` only knew the canonical `log`. That gap is now closed
+/// in `eval_complex` itself, so both paths agree on `ln` and neither needs to
+/// decline it.)
+///
+/// 1. **Canonical shape.** The tape wants no `Div`/`Neg` and flat `Add`/`Mul`
+///    (see `tape::compile`), which a raw parse tree is not. `canonicalize` is
+///    the pass that gets it there — deliberately *not* [`simplify_core`], which
+///    additionally folds constants in the real domain and would answer `-2` for
+///    `(-8)^(1/3)` where [`evaluate`] answers `1 + i√3` (hence `NaN`).
+///
+/// 2. **Positional bindings.** The tape's slots are positional, so the fast
+///    path is only sound when its one slot *is* the variable being swept. An
+///    expression in some other free variable must reach `eval_complex`, which
+///    reports the unbound variable as `NaN` per point.
+fn compile_sampler(e: &Expr, var: &str) -> Option<CompiledExpr> {
+    let canon = crate::normalize::canonicalize(e);
+    let tape = crate::eval_numeric::certified_digits::compile(&canon).ok()?;
+    match tape.vars() {
+        [] => Some(tape),
+        [only] if only == var => Some(tape),
+        _ => None,
+    }
 }
 
 /// Evaluate a closed expression to its numeric constant, or `None`. Matches

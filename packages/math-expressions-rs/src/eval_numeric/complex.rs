@@ -123,9 +123,16 @@ fn head_evaluable(head: &Expr, nargs: usize) -> bool {
 }
 
 /// Can the registry evaluate this head at this arity? (`FnDef::eval1`/
-/// `eval2`/`evaln` in `crate::special_functions` — canonical spellings only,
-/// matching the historical hardcoded list.)
+/// `eval2`/`evaln` in `crate::special_functions`.)
+///
+/// Alias spellings resolve to their canonical definition, exactly as
+/// [`eval_apply`] does — and they must, because this runs *first*: it is what
+/// [`is_opaque_atom`] consults, so a head judged unknown here is sampled as an
+/// opaque variable and never reaches the evaluator at all. Leaving the two out
+/// of step is what made `ln(x)` a variable named `Apply(ln, …)` rather than a
+/// logarithm. [`free_symbols`] mirrors the same decision through this function.
 fn known_function(name: &str, nargs: usize) -> bool {
+    let name = crate::special_functions::canonical_name(name).unwrap_or(name);
     // A variadic aggregate is evaluable at every arity, so it is checked
     // before the arity split. Without this an application like `sum(1,2,3)`
     // would be classified as an opaque atom and *sampled as a variable*,
@@ -167,7 +174,15 @@ fn eval_apply(head: &Expr, args: &[Expr], env: &Env) -> Option<Complex64> {
         }
     }
     let Expr::Sym(s) = head else { return None };
-    let name = s.name();
+    let spelling = s.name();
+    // Route alias spellings to their canonical definition. `eval1`/`eval2`
+    // match the canonical name only, on the premise that evaluation runs on
+    // canonicalized trees — but `ops::evaluate` is a public entry point taking
+    // whatever tree a caller parsed, so that premise does not hold here and
+    // `ln(2)` used to come back `None` while `log(2)` evaluated. Every alias in
+    // the registry is a pure spelling variant of the same function (`ln`/`log`,
+    // `arcsin`/`asin`, `cosec`/`csc`), so resolving one cannot change a value.
+    let name: &str = crate::special_functions::canonical_name(&spelling).unwrap_or(&spelling);
 
     // The per-function evaluation rules are `FnDef::eval1`/`eval2`/`evaln` in
     // `crate::special_functions`; this dispatch only routes by arity.
@@ -175,7 +190,7 @@ fn eval_apply(head: &Expr, args: &[Expr], env: &Env) -> Option<Complex64> {
     // The variadic rule comes first: an aggregate (`sum`, `mean`, `max`) is
     // the same function at every arity, so `mean(1,2)` must not be routed to
     // a two-argument rule it does not have.
-    if let Some(f) = crate::special_functions::evaln(&name) {
+    if let Some(f) = crate::special_functions::evaln(name) {
         let zs: Vec<Complex64> = args
             .iter()
             .map(|a| eval_complex(a, env))
@@ -183,12 +198,12 @@ fn eval_apply(head: &Expr, args: &[Expr], env: &Env) -> Option<Complex64> {
         return f(&zs);
     }
     if let [arg] = args {
-        let f = crate::special_functions::eval1(&name)?;
+        let f = crate::special_functions::eval1(name)?;
         let z = eval_complex(arg, env)?;
         return f(z);
     }
     if let [a, b] = args {
-        let f = crate::special_functions::eval2(&name)?;
+        let f = crate::special_functions::eval2(name)?;
         let (za, zb) = (eval_complex(a, env)?, eval_complex(b, env)?);
         return f(za, zb);
     }
