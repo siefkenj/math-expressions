@@ -2,11 +2,12 @@
 //! coercion they share.
 
 use super::fuzzy::fuzzy_tree_eq;
-use super::numeric::equals_numerical;
+use super::numeric::{close_numeric_fuzzy, equals_numerical};
 use super::relations::{as_comparison, relations_equal};
 use super::{discrete_infinite, finite_field, plus_minus, EqOptions};
 use crate::expr::{Expr, SeqKind};
 use crate::normalize::{canonicalize, desugar_units, normalize_syntactic, simplify_canonical};
+use num_complex::Complex64;
 
 /// Are `a` and `b` mathematically equal?
 pub fn equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
@@ -56,12 +57,32 @@ pub fn equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
         return true;
     }
 
-    // When both sides fold to a bare exact number, stage 1 is *definitive*:
-    // they are unequal, and the numerical stage must not override with f64
-    // slop (this is the §3a exactness win — `10^20+1` ≠ `10^20+2`). Structure
+    // When both sides fold to a bare number, stage 1 is *definitive*. Structure
     // that did not fully evaluate (roots, functions) still needs sampling.
-    if matches!(ca, Expr::Num(_)) && matches!(cb, Expr::Num(_)) {
-        return false;
+    //
+    // Exact against exact is decided exactly — the §3a exactness win, and the
+    // reason `10^20+1` ≠ `10^20+2` and `0.3` ≠ `0.30000000000000004` when both
+    // were *written* that way (decimal literals parse to rationals).
+    //
+    // A `Float` operand is different in kind: it is the mark of an inexact
+    // evaluation, and its low digits are an artifact of the route taken, not a
+    // claim about the value. `0.1 + 2·0.1` is `0.30000000000000004` in f64 and
+    // `3/10` exactly, and the JS library — which had no exact numbers at all —
+    // called both equal, comparing every numeric pair against a relative
+    // epsilon (`equality/numerical.js`, `1e-12`). Callers depend on that: a
+    // Doenet `<sequence type="math" from=".1" step=".1">` excludes `.3` by
+    // comparing generated terms to it. So when either side carries a float,
+    // compare within `relative_tolerance` rather than bit-for-bit.
+    if let (Expr::Num(na), Expr::Num(nb)) = (&ca, &cb) {
+        if !na.is_inexact() && !nb.is_inexact() {
+            return false;
+        }
+        return close_numeric_fuzzy(
+            Complex64::new(na.to_f64(), 0.0),
+            Complex64::new(nb.to_f64(), 0.0),
+            opts,
+            0.0,
+        );
     }
 
     // Plus-minus (±): a `pm` node denotes a two-element value set that the

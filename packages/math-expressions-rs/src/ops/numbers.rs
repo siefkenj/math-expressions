@@ -6,7 +6,7 @@
 use crate::expr::map_children;
 use crate::expr::Expr;
 use crate::normalize::{canonicalize, present};
-use crate::num::{Number, Spelling};
+use crate::num::{BigNumber, Number, Spelling};
 use std::collections::BTreeSet;
 
 /// Fold numeric subexpressions (`4 + x − 2` → `x + 2`) — the port of
@@ -279,9 +279,44 @@ pub fn constants_to_floats(e: &Expr) -> Expr {
     }
 }
 
+/// A rational the *author wrote as a fraction* — as opposed to one that is a
+/// decimal quantity ([`Spelling::Decimal`]) or an integer.
+///
+/// Display rounding leaves these alone. The JS library had no rational type, so
+/// a written `2/3` was the tree `["/", 2, 3]` and rounding — which maps over
+/// *numbers* — found two integers that were already whole and changed nothing.
+/// A fraction reached the reader as a fraction however few digits were asked
+/// for. Folding `2/3` into a single exact `Rat` is a strictly better
+/// representation, but it silently turned that display into `0.67`, and only
+/// for values that had been through `simplify`: `<math>2/3</math>` still showed
+/// the fraction while `<point>(2/3,3)</point>` did not, in the same document.
+///
+/// [`Spelling`] is exactly the distinction needed, and it is why it is carried:
+/// a `Fraction`-spelled rational is what legacy held as `["/", a, b]`, and a
+/// `Decimal`-spelled one (`0.5`, or anything a decimal took part in) is what it
+/// held as a float. So `<round>0.5</round>` still rounds, and the rule needs no
+/// separate display-only entry point.
+///
+/// Supersedes the narrower rule in upstream request 16 ("if rounding would not
+/// change the value, return it unchanged"), which kept `5/2` but could not keep
+/// `1/3` — it assumed legacy decimalized a non-terminating fraction, and legacy
+/// had no way to.
+fn is_written_as_fraction(n: &Number) -> bool {
+    match n {
+        Number::Rat(_, _, sp) => *sp == Spelling::Fraction,
+        Number::Big(b) => matches!(&**b, BigNumber::Rat(_, sp) if *sp == Spelling::Fraction),
+        _ => false,
+    }
+}
+
 /// Round every number in `e` to `decimals` decimal places (ties away from zero).
 pub fn round_numbers_to_decimals(e: &Expr, decimals: i32) -> Expr {
-    map_numbers(e, &|n| n.round_to_decimals(decimals))
+    map_numbers(e, &|n| {
+        if is_written_as_fraction(n) {
+            return n.clone();
+        }
+        n.round_to_decimals(decimals)
+    })
 }
 
 /// `me.set_small_zero`: replace every number whose magnitude is `< tolerance`
@@ -301,7 +336,7 @@ pub fn set_small_zero(e: &Expr, tolerance: f64) -> Expr {
 /// Round every number in `e` to `sig_figs` significant figures.
 pub fn round_numbers_to_precision(e: &Expr, sig_figs: i32) -> Expr {
     map_numbers(e, &|n| {
-        if sig_figs < 1 {
+        if sig_figs < 1 || is_written_as_fraction(n) {
             return n.clone();
         }
         // Decimal place of the leading significant digit, then round so that
@@ -337,6 +372,9 @@ pub fn round_numbers_to_precision_plus_decimals(e: &Expr, digits: f64, decimals:
 
     match (use_precision, use_decimals) {
         (true, true) => map_numbers(e, &|n| {
+            if is_written_as_fraction(n) {
+                return n.clone();
+            }
             let Some(k) = n.magnitude_log10() else {
                 return n.clone(); // zero / NaN
             };

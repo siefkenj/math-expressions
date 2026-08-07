@@ -1,5 +1,6 @@
 //! ODE numerics: the `numeric.dopri` replacement for Doenet's `ODESystem`.
-//! Dormand–Prince RK5(4) with the PI step-size controller, the free 4th-order
+//! Dormand–Prince RK5(4) with numeric's own step-size controller (absolute
+//! error against `tol`, `(tol/err)^¼`), the free 4th-order
 //! dense-output interpolant, and resource-limit guards (step caps,
 //! vanishing-step and non-finite detection → clean early termination at the
 //! last accepted point — never a hang, never NaN samples).
@@ -191,22 +192,10 @@ where
         return sol;
     }
 
-    // Initial step: conservative fraction of the span, scaled by the slope.
-    let mut h = {
-        let ynorm = y.iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1.0);
-        let fnorm = k[0].iter().fold(0.0f64, |m, v| m.max(v.abs()));
-        let by_slope = if fnorm > 0.0 {
-            0.01 * ynorm / fnorm
-        } else {
-            span
-        };
-        dir * by_slope.min(span / 10.0).max(span * 1e-8)
-    };
-
-    // PI controller state (Hairer's beta = 0.04).
-    let beta = 0.04;
-    let expo1 = 0.2 - beta * 0.75;
-    let mut facold = 1e-4f64;
+    // Initial step: a tenth of the span, exactly as `numeric.dopri` starts
+    // (`h = (x1-x0)/10`). See the step controller below for why this solver
+    // tracks that one rather than a nominally better heuristic.
+    let mut h = dir * span / 10.0;
 
     let mut ynew = vec![0.0f64; dim];
     let mut ystage = vec![0.0f64; dim];
@@ -256,18 +245,28 @@ where
             }
             ynew[i] = y[i] + h * acc;
         }
-        // Error estimate against the embedded 4th-order weights.
-        let mut err_sq = 0.0f64;
+        // Error estimate against the embedded 4th-order weights, measured the
+        // way `numeric.dopri` measures it: the ∞-norm of the *absolute* local
+        // error `h·Σ(B−B̂)ₖ`, tested against `tol` with no relative scaling.
+        //
+        // That absolute test is what Doenet's `<odeSystem>` was tuned against,
+        // and the difference is not cosmetic. Scaling by `tol·max(|y|,|ynew|)`
+        // — the usual, and on its own the better, choice — loosens the bound by
+        // the solution's own magnitude, so `y′ = y` integrated to `t = 10`
+        // (`y ≈ 2·10⁴`) accepted 46 steps where numeric took 145, and landed
+        // 1.4e-6 off the analytic solution against numeric's 1.2e-7. Doenet
+        // grades against `tol` as a *relative* accuracy on the answer, and
+        // exposes `maxIterations` as an authored knob whose documented values
+        // encode this step count, so tracking numeric here is the contract.
+        let mut erinf = 0.0f64;
         for i in 0..dim {
             let mut e = 0.0;
             for (j, kj) in k.iter().enumerate() {
                 e += (B[j] - BHAT[j]) * kj[i];
             }
-            let sc = tol + tol * y[i].abs().max(ynew[i].abs());
-            let r = h * e / sc;
-            err_sq += r * r;
+            erinf = erinf.max((h * e).abs());
         }
-        let err = (err_sq / dim as f64).sqrt();
+        let err = erinf / tol;
         if !err.is_finite() || !ynew.iter().all(|v| v.is_finite()) {
             h *= 0.5;
             if h.abs() < 16.0 * f64::EPSILON * t.abs().max(1.0) {
@@ -277,13 +276,20 @@ where
             continue;
         }
 
+        // `numeric.dopri`'s step update, in both directions: `(tol/erinf)^¼`,
+        // safety 0.8 and a 4× cap on growth when accepted, 0.2 when rejected.
+        // An exactly-zero error means the ratio is infinite; numeric's `min`
+        // lands on the 4× cap, so spell that out rather than raising 0 to a
+        // power.
+        let ratio = if err > 0.0 {
+            (1.0 / err).powf(0.25)
+        } else {
+            f64::INFINITY
+        };
+
         if err <= 1.0 {
             // Accept: build the dense segment, then advance (FSAL).
-            // PI controller (Hairer): growth = safety / (err^expo1 / facold^beta),
-            // clamped to [0.2, 5].
-            let fac_raw = err.max(1e-16).powf(expo1) / facold.powf(beta);
-            let growth = (0.9 / fac_raw).clamp(0.2, 5.0);
-            facold = err.max(1e-4);
+            let growth = (0.8 * ratio).min(4.0);
             if !f(t + h, &ynew, &mut k[6]) || !k[6].iter().all(|v| v.is_finite()) {
                 sol.terminated_early = true;
                 return sol;
@@ -306,9 +312,14 @@ where
             sol.ys.push(y.clone());
             h *= growth;
         } else {
-            // Reject: shrink (no PI history update on rejections).
-            let fac11 = err.powf(expo1);
-            h *= (1.0 / (fac11 / 0.9)).clamp(0.1, 1.0);
+            // Reject: shrink and retry from the same `t`.
+            h *= 0.2 * ratio;
+            // numeric's "step size became too small" exit: the shrunken step no
+            // longer moves `t`.
+            if t + h == t {
+                sol.terminated_early = true;
+                return sol;
+            }
         }
     }
     sol.terminated_early = true;

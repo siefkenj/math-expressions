@@ -237,32 +237,38 @@ impl Writer<'_> {
     }
 
     fn render_number(&self, n: &Number) -> (String, u8) {
-        // Integers, and decimal-spelled rationals whose expansion terminates,
-        // render positionally, as atoms. A *fraction*-spelled rational falls
-        // through to the `a/b` branch below even when it terminates, so `3/6`
-        // prints `1/2` rather than `0.5` (`Number::decimal_spelling`).
-        if let Some(dec) = n.decimal_spelling() {
-            let p = if dec.starts_with('-') {
-                prec::NEG
-            } else {
-                prec::ATOM
-            };
-            return (self.decimal(self.pad(dec)), p);
+        let decimal = n.decimal_spelling();
+        // A *fraction*-spelled rational renders as `a/b`, binding like the
+        // division it re-parses to. It is checked first so `3/6` prints `1/2`
+        // rather than `0.5` — `decimal_spelling` declines it for exactly that
+        // reason. Padding is a decimal-display option and does not apply here.
+        if decimal.is_none() {
+            if let Some((num, den)) = n.rational_parts() {
+                let p = if num.starts_with('-') {
+                    prec::NEG
+                } else {
+                    prec::MUL
+                };
+                return (format!("{}/{}", num, den), p);
+            }
         }
-        // A fraction renders as `a/b`, binding like the division it re-parses
-        // to. Padding is a decimal-display option and does not apply here.
-        if let Some((num, den)) = n.rational_parts() {
-            let p = if num.starts_with('-') {
-                prec::NEG
-            } else {
-                prec::MUL
-            };
-            return (format!("{}/{}", num, den), p);
-        }
-        // Float: a numerical-evaluation result, which past the ECMAScript
-        // magnitude threshold renders as `mantissa * 10^exponent` unless
-        // `avoid_scientific_notation` is set.
-        match self.render_float(n.to_f64()) {
+        // Everything else is positional-or-scientific. Integers and
+        // decimal-spelled rationals supply their own exact digits; a float
+        // supplies its shortest round-trip. Both then face the same ECMAScript
+        // magnitude threshold, so a typed `5.252E-13` reads `5.252 * 10^(-13)`
+        // just as a computed one does — unless `avoid_scientific_notation` is
+        // set.
+        let (pad_digits, pad_decimals) = self.pad_bounds();
+        let rendered = match decimal {
+            Some(dec) => super::render_exact_decimal(
+                &dec,
+                self.opts.avoid_scientific_notation,
+                pad_digits,
+                pad_decimals,
+            ),
+            None => self.render_float(n.to_f64()),
+        };
+        match rendered {
             super::FloatRender::Positional(s) => {
                 let p = if s.starts_with('-') {
                     prec::NEG
@@ -307,13 +313,6 @@ impl Writer<'_> {
             opts: self.opts,
             pad: self.pad && !super::is_integer_power(base, exp),
         }
-    }
-
-    /// Apply the `padToDigits`/`padToDecimals` render options to a positional
-    /// number string (before the decimal separator is localized).
-    fn pad(&self, s: String) -> String {
-        let (digits, decimals) = self.pad_bounds();
-        super::pad_number(&s, digits, decimals)
     }
 
     /// Apply the notation threshold and the `padToDigits`/`padToDecimals`

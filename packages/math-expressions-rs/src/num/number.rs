@@ -384,7 +384,7 @@ impl Number {
     pub fn to_f64(&self) -> f64 {
         match self {
             Number::Int(i) => *i as f64,
-            Number::Rat(n, d, _) => *n as f64 / *d as f64,
+            Number::Rat(n, d, _) => rat_to_f64(*n, *d),
             Number::Float(f) => f.get(),
             Number::Big(b) => match &**b {
                 BigNumber::Int(i) => i.to_f64().unwrap_or(f64::NAN),
@@ -515,6 +515,15 @@ impl Number {
 
     fn is_float(&self) -> bool {
         matches!(self, Number::Float(_))
+    }
+
+    /// Whether this value is the *result of* inexact arithmetic rather than an
+    /// exact quantity. Only [`Number::Float`] is — every other variant carries
+    /// its value exactly, including decimals, which parse to rationals. Read by
+    /// consumers that must not treat f64 low digits as meaningful, such as
+    /// equality's bare-number stage.
+    pub fn is_inexact(&self) -> bool {
+        self.is_float()
     }
 
     /// Exact binary op on two exact operands, or f64 arithmetic if either is a
@@ -661,6 +670,31 @@ impl Number {
 /// string proportional to `m`, not to `d`.
 fn float_from_scaled(m: &BigInt, d: i32) -> f64 {
     format!("{m}e{}", -i64::from(d)).parse().unwrap_or(f64::NAN)
+}
+
+/// The nearest f64 to the exact ratio `n/d`.
+///
+/// `n as f64 / d as f64` rounds *twice* once a part exceeds 2^53 — once
+/// converting the part, once dividing — and the two roundings compound into a
+/// result that is not the nearest f64 to `n/d`. A user-typed
+/// `35203423.02352343201` is `Rat(3520342302352343201, 10^11)`, whose numerator
+/// is past 2^53, and the naive division landed one ulp low: `.tree` carried
+/// `35203423.02352343` where JS reading the same literal gives
+/// `35203423.023523435`.
+///
+/// Within 2^53 both conversions are exact, so the single division is correctly
+/// rounded — that is the overwhelmingly common case and stays on the cheap
+/// path. Beyond it, `BigRational` converts correctly. (`Rat`'s normal form
+/// keeps `d > 0`; the zero guard is only so a violated invariant degrades to
+/// an IEEE infinity rather than panicking inside wasm.)
+fn rat_to_f64(n: i64, d: i64) -> f64 {
+    const EXACT: u64 = 1 << 53;
+    if d == 0 || (n.unsigned_abs() <= EXACT && d.unsigned_abs() <= EXACT) {
+        return n as f64 / d as f64;
+    }
+    BigRational::new(BigInt::from(n), BigInt::from(d))
+        .to_f64()
+        .unwrap_or(f64::NAN)
 }
 
 /// `base^n` by exponentiation-by-squaring (n unsigned; caller handles sign).

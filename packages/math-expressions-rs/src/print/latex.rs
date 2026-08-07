@@ -162,31 +162,41 @@ impl Writer<'_> {
 
     fn render_number(&self, n: &Number) -> (String, u8) {
         use prec::{ATOM, NEG};
-        // Integers, and decimal-spelled rationals whose expansion terminates,
-        // render positionally, so a typed `0.5` round-trips as `0.5` — emitting
-        // `\frac{1}{2}` there would re-parse to a `Div`.
-        if let Some(dec) = n.decimal_spelling() {
-            let p = if dec.starts_with('-') { NEG } else { ATOM };
-            return (self.decimal(self.pad(dec)), p);
+        let decimal = n.decimal_spelling();
+        // A fraction renders as `\frac` (self-delimiting, so an atom). It is
+        // checked first so `3/6` prints `\frac{1}{2}` rather than `0.5` —
+        // `decimal_spelling` declines it for exactly that reason. Padding is a
+        // decimal-display option and does not apply here.
+        if decimal.is_none() {
+            if let Some((num, den)) = n.rational_parts() {
+                return match num.strip_prefix('-') {
+                    Some(pos) => (format!("-\\frac{{{}}}{{{}}}", pos, den), NEG),
+                    None => (format!("\\frac{{{}}}{{{}}}", num, den), ATOM),
+                };
+            }
         }
-        // A fraction renders as `\frac` (self-delimiting, so an atom).
-        // Padding is a decimal-display option and does not apply here.
-        if let Some((num, den)) = n.rational_parts() {
-            return match num.strip_prefix('-') {
-                Some(pos) => (format!("-\\frac{{{}}}{{{}}}", pos, den), NEG),
-                None => (format!("\\frac{{{}}}{{{}}}", num, den), ATOM),
-            };
-        }
-        // Float: a numerical-evaluation result, which past the ECMAScript
-        // magnitude threshold renders as `mantissa \cdot 10^{exponent}` unless
+        // Everything else is positional-or-scientific. Integers and
+        // decimal-spelled rationals supply their own exact digits (so a typed
+        // `0.5` round-trips as `0.5`); a float supplies its shortest
+        // round-trip. Both then face the same ECMAScript magnitude threshold,
+        // rendering as `mantissa \cdot 10^{exponent}` past it unless
         // `avoid_scientific_notation` is set.
         let (digits, decimals) = self.pad_bounds();
-        match super::render_float(
-            n.to_f64(),
-            self.opts.avoid_scientific_notation,
-            digits,
-            decimals,
-        ) {
+        let rendered = match decimal {
+            Some(dec) => super::render_exact_decimal(
+                &dec,
+                self.opts.avoid_scientific_notation,
+                digits,
+                decimals,
+            ),
+            None => super::render_float(
+                n.to_f64(),
+                self.opts.avoid_scientific_notation,
+                digits,
+                decimals,
+            ),
+        };
+        match rendered {
             super::FloatRender::Positional(s) => {
                 let p = if s.starts_with('-') { NEG } else { ATOM };
                 (self.decimal(s), p)
@@ -224,13 +234,6 @@ impl Writer<'_> {
             opts: self.opts,
             pad: self.pad && !super::is_integer_power(base, exp),
         }
-    }
-
-    /// Apply the `padToDigits`/`padToDecimals` render options to a positional
-    /// number string (before the decimal separator is localized).
-    fn pad(&self, s: String) -> String {
-        let (digits, decimals) = self.pad_bounds();
-        super::pad_number(&s, digits, decimals)
     }
 
     /// The argument/tuple/list separator for the active notation, with a

@@ -158,15 +158,50 @@ fn a_non_finite_float_is_never_padded() {
     assert_eq!(text_padded(f64::INFINITY, Some(5), Some(5)), "Infinity");
 }
 
-/// Exact integers and rationals are unaffected — they are not floats, and the
-/// threshold is a float-display rule. A big integer literal stays exact.
+/// Exact integers and rationals take the threshold too — it is a *display*
+/// rule, not a float rule.
+///
+/// This test used to assert the opposite, on the reasoning that the threshold
+/// belongs to float rendering. That held only while DoenetML's values reached
+/// the printer as floats: they crossed through a JSON AST, which has one
+/// numeric type. They no longer do, and the old rule broke the very attribute
+/// this file is written against — `avoidScientificNotation` exists to turn the
+/// threshold *off*, so an exact value that never reached it made the attribute
+/// a no-op. DoenetML's own test pins both directions and both ends:
+/// `<math>2000000000000000000000 x^2</math>` renders `2 \cdot 10^{21} x^{2}`,
+/// and the same math under the attribute renders every digit.
+///
+/// Exactness is not what changed — `2 * 10^21` and `1.23 * 10^30` are the exact
+/// values, spelled differently. What a `Float` cannot do, and this still does
+/// not do, is invent digits it never had.
 #[test]
-fn exact_numbers_do_not_go_exponential() {
-    let big = math_expressions::TextToAst::new(Default::default())
-        .convert("1230000000000000000000000000000")
-        .unwrap();
+fn exact_numbers_take_the_threshold_too() {
+    let parse = |s: &str| {
+        math_expressions::TextToAst::new(Default::default())
+            .convert(s)
+            .unwrap()
+    };
+    let big = parse("1230000000000000000000000000000");
+    assert_eq!(to_text(&big, &TextOpts::default()), "1.23 * 10^30");
+    assert_eq!(to_latex(&big, &LatexOpts::default()), "1.23 \\cdot 10^{30}");
+
+    // `avoidScientificNotation` puts every digit back, exactly as authored.
     assert_eq!(
-        to_text(&big, &TextOpts::default()),
+        to_text(
+            &big,
+            &TextOpts {
+                avoid_scientific_notation: true,
+                ..Default::default()
+            }
+        ),
         "1230000000000000000000000000000"
     );
+
+    // Inside the threshold nothing changes, and an exact fraction is not a
+    // decimal display at all — it has no exponent to take.
+    assert_eq!(
+        to_text(&parse("1E20"), &TextOpts::default()),
+        "1".to_string() + &"0".repeat(20)
+    );
+    assert_eq!(to_text(&parse("2/3"), &TextOpts::default()), "2/3");
 }

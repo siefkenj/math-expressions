@@ -2,7 +2,9 @@
 //! `slow_math-expressions.spec.js`. Equal pairs resolve either at the exact
 //! canonical stage (stage 1) or by numerical sampling (stage 3).
 
-use math_expressions::{equals, equals_syntactic, EqOptions, Expr, TextToAst, TextToAstOptions};
+use math_expressions::{
+    equals, equals_syntactic, simplify, EqOptions, Expr, Number, TextToAst, TextToAstOptions,
+};
 
 fn parse(s: &str) -> Expr {
     TextToAst::new(TextToAstOptions::default())
@@ -357,4 +359,60 @@ fn sqrt_and_half_power_are_equal() {
     assert!(eq("sqrt(x)", "x^(1/2)"));
     assert!(eq("x^(1/2)", "sqrt(x)"));
     assert!(eq("sqrt(x*y)", "(x*y)^(1/2)"));
+}
+
+// ===================== bare numbers: exact vs computed =====================
+
+/// A `Float` — what numerical evaluation produces, and what a JS caller's
+/// `fromAst(0.1)` lands on. Parsed decimals are *not* this: they are exact
+/// rationals (PORTING_PLAN §3a).
+fn float(v: f64) -> Expr {
+    Expr::Num(Number::from_f64(v))
+}
+
+#[test]
+fn exact_bare_numbers_compare_exactly() {
+    // Two numbers a person wrote are exact quantities, and stage 1 is
+    // definitive about them — no f64 slop may override it. `exactness_beats_
+    // float_slop` above covers the integer case; these are the decimals,
+    // which are exact too (PORTING_PLAN §3a) and so must not pick up the
+    // float tolerance below.
+    assert!(!eq("0.3", "0.30000000000000004"));
+    assert!(!eq("1/3", "0.3333333333333333"));
+    assert!(eq("0.1 + 0.2", "0.3"), "exact arithmetic, exactly equal");
+}
+
+#[test]
+fn a_computed_float_compares_within_the_relative_tolerance() {
+    // A `Float`'s low digits record the route taken, not the value: they are
+    // the residue of inexact arithmetic. The JS library had no exact numbers
+    // and compared every numeric pair against a 1e-12 relative epsilon
+    // (`lib/expression/equality/numerical.js`), and callers depend on that —
+    // DoenetML's `<sequence type="math" from=".1" step=".1" exclude=".3">`
+    // drops its third term by comparing it to `.3`.
+    let opts = EqOptions::default();
+    let three_tenths = parse("0.3"); // exact: Rat(3,10)
+
+    // The sequence's third term, arrived at the way the component does.
+    let computed = simplify(&Expr::Add(vec![
+        float(0.1),
+        Expr::Mul(vec![float(0.1), Expr::Num(Number::Int(2))]),
+    ]));
+    assert_eq!(
+        format!("{:?}", computed).contains("Float"),
+        true,
+        "precondition: the sum is inexact, not folded to a rational"
+    );
+    assert!(equals(&three_tenths, &computed, &opts));
+    assert!(equals(&computed, &three_tenths, &opts), "symmetric");
+
+    // Same story stated directly, in both operand orders.
+    assert!(equals(&float(0.3), &float(0.30000000000000004), &opts));
+    assert!(equals(&float(0.30000000000000004), &float(0.3), &opts));
+    assert!(equals(&three_tenths, &float(0.30000000000000004), &opts));
+
+    // The tolerance is relative and tight — this is not "floats are equal".
+    assert!(!equals(&float(0.3), &float(0.3000000001), &opts));
+    assert!(!equals(&float(1.0), &float(1.0000001), &opts));
+    assert!(!equals(&float(2.0), &float(3.0), &opts));
 }

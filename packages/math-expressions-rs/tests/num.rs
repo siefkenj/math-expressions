@@ -123,6 +123,27 @@ fn f64_projection_matches_parsefloat() {
         let via_float: f64 = s.trim().parse().unwrap();
         assert_eq!(via_rat, via_float, "{s:?}");
     }
+
+    // Longer literals are where it used to break. Once a part passes 2^53 the
+    // naive `n as f64 / d as f64` rounds twice — converting the part, then
+    // dividing — and the two roundings compound past the nearest f64.
+    // `35203423.02352343201` is `Rat(3520342302352343201, 10^11)`, and the
+    // double rounding landed an ulp low, so DoenetML read
+    // `35203423.02352343` off `.tree` where JS parsing the same literal gives
+    // `35203423.023523435`. These must agree digit-for-digit or a tree
+    // round-trip silently moves the value.
+    for s in [
+        "35203423.02352343201",
+        "0.1234567890123456789",
+        "123456789012345678.9",
+        "-9007199254740993.5",
+        "1.7976931348623157E308",
+        "2.2250738585072014E-308",
+    ] {
+        let via_rat = Number::from_decimal_str(s).to_f64();
+        let via_float: f64 = s.trim().parse().unwrap();
+        assert_eq!(via_rat, via_float, "{s:?}");
+    }
 }
 
 #[test]

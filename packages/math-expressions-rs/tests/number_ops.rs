@@ -79,7 +79,10 @@ fn rounding_extreme_magnitudes_is_bounded() {
     // without huge allocations.
     let big = parse(&format!("1234{}", "0".repeat(56)));
     let r = round_numbers_to_precision(&big, 3);
-    assert_eq!(txt(&r), format!("123{}", "0".repeat(57)));
+    // Past 1e21 the display is scientific (the JS threshold, which exact
+    // values honour too), so the rounded value reads as its mantissa and
+    // exponent — 1.23e59, i.e. 3 significant figures, which is what was asked.
+    assert_eq!(txt(&r), "1.23 * 10^59");
 
     // A ~350-digit literal exceeds f64 range (to_f64 = inf): bit-length
     // fallback path; must not panic or blow up, and must round sanely.

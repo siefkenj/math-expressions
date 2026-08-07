@@ -335,6 +335,109 @@ pub(crate) fn render_float(
     }
 }
 
+/// [`render_float`] for a value whose exact decimal expansion is known — an
+/// integer or a decimal-spelled rational.
+///
+/// These render from their own digits rather than an f64's shortest
+/// round-trip, which is the whole point of holding a typed decimal exactly.
+/// Notation is a separate question from digits, though, and below `0.000001`
+/// it gets the float's answer: the reader shown `5.252 * 10^(-13)` for a
+/// computed value should not be shown `0.0000000000005252` for a typed one,
+/// where the leading zeros are unreadable and carry no information. Legacy
+/// never had to decide this — every number it held was a float — so the
+/// threshold is [`js_exponential_parts`]'s, applied to the exact digits.
+///
+/// DoenetML's `avoidScientificNotation` attribute depends on this: it exists
+/// to *turn the threshold off*, and if exact values never reached it the
+/// attribute would do nothing. Its test pins both sides symmetrically —
+/// `2000000000000000000000 x^2` renders `2 \cdot 10^{21} x^{2}` by default and
+/// positionally under the attribute — so the threshold applies at both ends,
+/// not just where the leading zeros are.
+///
+/// Exactness is untouched either way: `2 * 10^21` *is* the exact value, so
+/// upstream request 08 (a large value must not be perturbed by rounding) is
+/// unaffected — only its spelling changes.
+///
+/// The padding rules are [`render_float`]'s, for the same reasons.
+pub(crate) fn render_exact_decimal(
+    s: &str,
+    avoid_scientific: bool,
+    pad_to_digits: Option<u32>,
+    pad_to_decimals: Option<u32>,
+) -> FloatRender {
+    let positional = || FloatRender::Positional(pad_number(s, pad_to_digits, pad_to_decimals));
+    if avoid_scientific {
+        return positional();
+    }
+    // Zero has no exponent, and a string this does not understand is better
+    // shown as it stands than guessed at.
+    let Some((digits, n, negative)) = exact_decimal_parts(s) else {
+        return positional();
+    };
+    // Positional over `0.000001 ..< 1e21`, exponential outside it.
+    if -6 < n && n <= 21 {
+        return positional();
+    }
+    // Padding decimals onto a positive exponent saves no zeros, so the whole
+    // number reverts to positional — [`render_float`]'s rule, for parity.
+    if n > 0 && pad_to_decimals.is_some() {
+        return positional();
+    }
+    let mantissa = if digits.len() == 1 {
+        digits
+    } else {
+        format!("{}.{}", &digits[..1], &digits[1..])
+    };
+    let exponent = n - 1;
+    let decimals = pad_to_decimals
+        .map(|d| i64::from(d) + exponent)
+        .and_then(|d| u32::try_from(d).ok());
+    let signed = if negative {
+        format!("-{mantissa}")
+    } else {
+        mantissa
+    };
+    FloatRender::Scientific {
+        mantissa: pad_number(&signed, pad_to_digits, decimals),
+        exponent,
+    }
+}
+
+/// Split an exact decimal string into `(digits, n, negative)` with
+/// value = `±0.digits × 10^n` and `digits` free of leading and trailing zeros
+/// — the same normalisation [`crate::num::shortest_digits`] produces for an
+/// f64, so the two feed the same threshold.
+///
+/// `None` for zero (no exponent) and for anything that is not a plain decimal
+/// numeral.
+fn exact_decimal_parts(s: &str) -> Option<(String, i64, bool)> {
+    let (negative, body) = match s.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, s),
+    };
+    let (int_part, frac_part) = body.split_once('.').unwrap_or((body, ""));
+    if int_part.is_empty()
+        || !int_part
+            .bytes()
+            .chain(frac_part.bytes())
+            .all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let all = format!("{int_part}{frac_part}");
+    let without_leading = all.trim_start_matches('0');
+    let digits = without_leading.trim_end_matches('0');
+    if digits.is_empty() {
+        return None;
+    }
+    let leading = all.len() - without_leading.len();
+    Some((
+        digits.to_string(),
+        int_part.len() as i64 - leading as i64,
+        negative,
+    ))
+}
+
 /// Append trailing zeros to a rendered positional number so it shows at least
 /// `pad_to_digits` significant characters and/or `pad_to_decimals` fractional
 /// places — port of the legacy `padNumberStringToDigitsAndDecimals`

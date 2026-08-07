@@ -284,18 +284,24 @@ fn a_coefficient_is_not_forced_under_a_fraction_bar() {
     assert_eq!(tree(&simplify(&p("x^1.5"))), r#"["^","x",1.5]"#);
 }
 
-/// Rounding *to decimal places* imposes the decimal spelling — but only when it
-/// actually rounds. If the value survives the round unchanged it keeps whatever
-/// spelling it had, so an exact fraction a student sees stays a fraction
-/// (DoenetML open item 8: `displayDigits` defaults to 3 and every rational goes
-/// through this path — in a fractions lesson the fraction is the point).
+/// Rounding *to decimal places* imposes the decimal spelling on a decimal
+/// quantity — but never on a fraction the author wrote.
+///
+/// This used to turn on whether the round changed the value, which kept `5/2`
+/// and lost `1/3`. That rule assumed the JS library decimalized a
+/// non-terminating fraction, and it had no way to: `1/3` was the tree
+/// `["/", 1, 3]` and rounding, which maps over *numbers*, found two whole
+/// integers. The distinction now is [`Spelling`], which is the same one legacy
+/// drew by having no rational type at all.
 #[test]
 fn rounding_produces_decimals() {
     use math_expressions::{round_numbers_to_decimals, round_numbers_to_precision};
-    // Rounding that *changes* the value produces a decimal.
+    // A fraction stays a fraction, folded or not — `displayDigits` defaults to
+    // 3 and every rational a student sees goes through this path, so in a
+    // fractions lesson this is the whole point.
     assert_eq!(
         tree(&round_numbers_to_decimals(&simplify(&p("1/3")), 2)),
-        "0.33"
+        r#"["/",1,3]"#
     );
     assert_eq!(tree(&round_numbers_to_decimals(&p("2.345"), 2)), "2.35");
     // Rounding that changes nothing (`3/6` is `1/2` is `0.5` exactly) leaves the

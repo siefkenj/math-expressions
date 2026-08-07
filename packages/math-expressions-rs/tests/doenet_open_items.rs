@@ -66,17 +66,29 @@ fn rounding_that_changes_nothing_keeps_a_decimal_decimal() {
     assert_eq!(text(&rounded), "0.5");
 }
 
-/// Where rounding *does* change the value it still decimalizes, exactly as
-/// before: `1/3` is not `0.333`, so three significant figures produce a
-/// genuine decimal.
+/// A fraction is never decimalized by *display* rounding, however few digits
+/// are asked for.
+///
+/// This test previously asserted the opposite (`1/3` → `0.333`) on the reading
+/// that rounding decimalizes whenever it would change the value. Legacy could
+/// not do that — it had no rational type, so `1/3` was `["/", 1, 3]` and
+/// rounding mapped over two whole integers — and the value-changed rule made
+/// the display depend on whether anything had called `simplify`:
+/// `<math>2/3</math>` showed the fraction and `<point>(2/3,3)</point>` showed
+/// `0.67`, in the same document.
 #[test]
-fn rounding_that_changes_the_value_still_decimalizes() {
+fn display_rounding_never_decimalizes_a_fraction() {
     let third = Expr::Num(Number::rat(1, 3));
-    assert_eq!(text(&round_numbers_to_precision(&third, 3)), "0.333");
+    assert_eq!(text(&round_numbers_to_precision(&third, 3)), "1/3");
+    assert_eq!(text(&round_numbers_to_precision(&third, 1)), "1/3");
     assert_eq!(
         latex(&round_numbers_to_precision_plus_decimals(&third, 3.0, 2.0)),
-        "0.333"
+        "\\frac{1}{3}"
     );
+    // A decimal quantity is unaffected by the rule and still rounds.
+    let half = Expr::Num(Number::from_decimal_str("0.5"));
+    assert_eq!(text(&round_numbers_to_precision(&half, 3)), "0.5");
+    assert_eq!(text(&round_numbers_to_decimals(&half, 0)), "1");
 }
 
 // ---- item 10a: negative coefficients ---------------------------------------

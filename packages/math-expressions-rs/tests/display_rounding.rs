@@ -122,16 +122,87 @@ fn exact_values_are_unaffected() {
     use math_expressions::TextToAst;
     let p = |s: &str| TextToAst::new(Default::default()).convert(s).unwrap();
     assert_eq!(show(&round_numbers_to_decimals(&p("2.345"), 2)), "2.35");
-    // Simplified first: rounding maps over *numbers*, so an unevaluated `1/3`
-    // is two integers and each is already whole.
+    // A fraction stays a fraction whether or not it has been folded into a
+    // single `Rat`. Before, `simplify` decided the display: an unevaluated
+    // `1/3` is two whole integers and survived, a folded one became `0.33`.
+    // Display rounding now leaves a fraction-spelled rational alone either way.
     let third = math_expressions::simplify(&p("1/3"));
-    assert_eq!(show(&round_numbers_to_decimals(&third, 2)), "0.33");
+    assert_eq!(show(&round_numbers_to_decimals(&third, 2)), "1/3");
+    assert_eq!(show(&round_numbers_to_decimals(&p("1/3"), 2)), "1/3");
+    // A *decimal*-spelled rational still rounds — that is what the spelling is
+    // for, and it keeps `<round>0.5</round>` working.
+    assert_eq!(show(&round_numbers_to_decimals(&p("0.5"), 0)), "1");
+    // A large exact integer is not perturbed by rounding — the whole point of
+    // request 08. It *displays* in scientific notation (past 1e21, the JS
+    // threshold, which exact values honour the same way floats do), so the
+    // check is that the spelling is exact rather than that it is positional:
+    // `2 * 10^21` is the value, `1.9999999999999997e21` was the bug.
     assert_eq!(
         show(&round_numbers_to_precision_plus_decimals(
             &p("2000000000000000000000"),
             3.0,
             2.0
         )),
+        "2 * 10^21"
+    );
+    let opts = TextOpts {
+        avoid_scientific_notation: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        math_expressions::to_text(
+            &round_numbers_to_precision_plus_decimals(&p("2000000000000000000000"), 3.0, 2.0),
+            &opts
+        ),
         "2000000000000000000000"
     );
+}
+
+/// An *exact* tiny decimal takes the same notation threshold a float does.
+///
+/// Decimals parse to exact rationals, so a typed `5.252E-13` is a `Rat`, not a
+/// `Float`, and used to render as `0.0000000000005252` — thirteen leading
+/// zeros where legacy (which had only floats) showed `5.252 * 10^(-13)`. The
+/// switch is not cosmetic: DoenetML's `avoidScientificNotation` attribute
+/// exists to *turn the threshold off*, so if exact values never reached it the
+/// attribute would have nothing to do.
+#[test]
+fn exact_tiny_decimals_use_scientific_notation() {
+    use math_expressions::{to_latex, LatexOpts, TextToAst};
+    let p = |s: &str| TextToAst::new(Default::default()).convert(s).unwrap();
+
+    assert_eq!(show(&p("5.252E-13")), "5.252 * 10^(-13)");
+    assert_eq!(show(&p("0.0000000000005252")), "5.252 * 10^(-13)");
+    assert_eq!(show(&p("6E-21")), "6 * 10^(-21)");
+    assert_eq!(show(&p("-3E-12")), "-3 * 10^(-12)");
+    assert_eq!(
+        to_latex(&p("5.252E-13"), &LatexOpts::default()),
+        "5.252 \\cdot 10^{-13}"
+    );
+
+    // The threshold itself is JS's: positional from `0.000001` up.
+    assert_eq!(show(&p("0.000001")), "0.000001");
+    assert_eq!(show(&p("0.0000001")), "1 * 10^(-7)");
+
+    // `avoidScientificNotation` puts every digit back.
+    let opts = TextOpts {
+        avoid_scientific_notation: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        math_expressions::to_text(&p("5.252E-13"), &opts),
+        "0.0000000000005252"
+    );
+
+    // The large side is symmetric — DoenetML's `avoidScientificNotation` test
+    // pins `2000000000000000000000 x^2` as `2 \cdot 10^{21} x^{2}` by default
+    // and positional under the attribute.
+    assert_eq!(show(&p("2E21")), "2 * 10^21");
+    assert_eq!(show(&p("1E30")), "1 * 10^30");
+    assert_eq!(
+        math_expressions::to_text(&p("2E21"), &opts),
+        "2".to_string() + &"0".repeat(21)
+    );
+    // The threshold's upper edge: 1e21 is exponential, 1e20 is not.
+    assert_eq!(show(&p("1E20")), "1".to_string() + &"0".repeat(20));
 }
