@@ -803,7 +803,7 @@ fn is_vectorlike(k: SeqKind) -> bool {
 /// container (`createIntervals` reads it as an interval), and `equals` keeps
 /// tuple↔array coercion a separate opt-in from tuple↔vector for the same
 /// reason. Length is still part of the key, so different arities never merge.
-fn vector_class(k: SeqKind) -> Option<u8> {
+pub(crate) fn vector_class(k: SeqKind) -> Option<u8> {
     match k {
         SeqKind::Tuple | SeqKind::Vector | SeqKind::AltVector => Some(0),
         SeqKind::Array => Some(1),

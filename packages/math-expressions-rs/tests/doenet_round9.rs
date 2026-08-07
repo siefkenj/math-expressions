@@ -31,7 +31,7 @@ const M: &str = r"\begin{bmatrix}a&b\\c&d\end{bmatrix}";
 fn a_matrix_times_a_vector_contracts_under_expand() {
     assert_eq!(
         js(&expand(&l(&format!("{M}(e,f)")))),
-        r#"["tuple",["+",["*","b","f"],["*","a","e"]],["+",["*","d","f"],["*","c","e"]]]"#
+        r#"["tuple",["+",["*","a","e"],["*","b","f"]],["+",["*","c","e"],["*","d","f"]]]"#
     );
     assert_eq!(
         js(&expand(&l(&format!(r"{M}\langle p,q\rangle")))),
@@ -111,7 +111,7 @@ fn variable_free_complex_arithmetic_is_exact() {
     assert_eq!(js(&simplify(&t("(2+3i)(2-3i)"))), "13");
     assert_eq!(js(&simplify(&t("(1+i)/(1-i)"))), "\"i\"");
     assert_eq!(js(&simplify(&t("(1+i)^8"))), "16");
-    assert_eq!(js(&simplify(&t("(1+2i)+(3-5i)"))), r#"["+",4,["-",["*",3,"i"]]]"#);
+    assert_eq!(js(&simplify(&t("(1+2i)+(3-5i)"))), r#"["+",["-",["*",3,"i"]],4]"#);
     // Exact stays exact: no floats appear.
     assert_eq!(js(&simplify(&t("(1/2+i)(1/2-i)"))), r#"["/",5,4]"#);
 }
@@ -121,7 +121,7 @@ fn variable_free_complex_arithmetic_is_exact() {
 #[test]
 fn the_complex_fold_declines_outside_its_field() {
     assert_eq!(js(&simplify(&t("2i"))), r#"["*",2,"i"]"#);
-    assert_eq!(js(&simplify(&t("x+i"))), r#"["+","x","i"]"#);
+    assert_eq!(js(&simplify(&t("x+i"))), r#"["+","i","x"]"#);
     assert_eq!(js(&simplify(&t("sqrt(2)i"))), r#"["*","i",["apply","sqrt",2]]"#);
     assert_eq!(js(&simplify(&t("pi i"))), r#"["*","i","pi"]"#);
 }
@@ -132,7 +132,7 @@ fn the_complex_fold_declines_outside_its_field() {
 fn expanding_a_symbolic_complex_product_finishes() {
     assert_eq!(
         js(&simplify(&expand(&t("(a+bi)(c+di)")))),
-        r#"["+",["*","a","c"],["*","a","d","i"],["*","b","c","i"],["-",["*","b","d"]]]"#
+        r#"["+",["*","a","d","i"],["*","b","c","i"],["*","a","c"],["-",["*","b","d"]]]"#
     );
     assert_eq!(
         js(&simplify(&expand(&t("(a+bi)(a-bi)")))),

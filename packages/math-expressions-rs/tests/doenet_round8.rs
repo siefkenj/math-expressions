@@ -67,7 +67,9 @@ fn integral_values_stay_exact_even_under_the_budget() {
 #[test]
 fn the_default_budget_leaves_exact_values_exact() {
     let exact = |s: &str| js(&evaluate_numbers(&t(s)));
-    assert_eq!(exact("2pi+pi+6"), r#"["+",6,"pi",["*",2,"pi"]]"#);
+    // Constant-bearing terms lead: `π` and `2π` carry degree where the bare
+    // `6` does not (see `present::atom_rank`).
+    assert_eq!(exact("2pi+pi+6"), r#"["+","pi",["*",2,"pi"],6]"#);
     assert_eq!(exact("pi"), "\"pi\"");
     assert_eq!(exact("pi/2"), r#"["/","pi",2]"#);
     assert_eq!(exact("1/2+1/3"), r#"["/",5,6]"#);
@@ -104,7 +106,7 @@ fn the_budget_composes_with_the_other_forms() {
 /// come out of the pass as nonsense.
 #[test]
 fn the_imaginary_unit_survives_the_budget() {
-    assert_eq!(folded("0.5i+0.75"), r#"["+",0.75,["*",0.5,"i"]]"#);
+    assert_eq!(folded("0.5i+0.75"), r#"["+",["*",0.5,"i"],0.75]"#);
 }
 
 // ---- item 19: parity that pays for itself ------------------------------

@@ -219,37 +219,74 @@ fn present_add(ts: &[Expr]) -> Expr {
     Expr::Add(items.into_iter().map(|p| p.1).collect())
 }
 
-/// A term's monomial signature: total degree plus per-variable exponents
-/// (name-sorted). Non-monomial parts (function applications, unexpanded
-/// powers of sums, symbolic exponents) contribute degree 0, so they sort
-/// with the constants.
+/// A term's monomial signature: total degree plus per-atom exponents, sorted by
+/// [`atom_rank`] then name. Non-monomial parts (function applications,
+/// unexpanded powers of sums, symbolic exponents) contribute degree 0.
+///
+/// **Constants count.** `π`, `e` and `i` carry degree here exactly as a
+/// variable does, which is what keeps `a·e + b·f` in the order it was written:
+/// with constants excluded, `a·e` was degree 1 against `b·f`'s 2 and sorted
+/// second. Authors write `e`, `i` and `f` as coordinate names often enough
+/// (`(e,f)`, `(g,h,i)`) that the alternative reads as a bug every time.
 struct DegKey {
     total: f64,
-    vars: Vec<(String, f64)>,
+    vars: Vec<(u8, String, f64)>,
+}
+
+/// Which class an atom sorts in: other constants first, then `e` and `i`, then
+/// ordinary variables. Within a class the order is alphabetical.
+///
+/// The middle rank is the interesting one. `e` and `i` are constants, so they
+/// belong ahead of variables, but they are also the two an author is most
+/// likely to have meant as a plain name — putting them last among the constants
+/// keeps `π` (never a variable name in practice) leading a term it appears in,
+/// while `i + l` still reads in that order.
+fn atom_rank(name: &str) -> u8 {
+    if !crate::expr::sym::is_constant_symbol(name) {
+        2
+    } else if matches!(name, "e" | "i") {
+        1
+    } else {
+        0
+    }
 }
 
 fn deg_key(t: &Expr) -> DegKey {
-    let mut vars: Vec<(String, f64)> = Vec::new();
+    let mut vars: Vec<(u8, String, f64)> = Vec::new();
     collect_deg(t, 1.0, &mut vars);
-    vars.sort_by(|a, b| a.0.cmp(&b.0));
+    vars.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     // Merge duplicate names (e.g. from a presented `Div` with x on both sides).
     vars.dedup_by(|next, prev| {
-        if prev.0 == next.0 {
-            prev.1 += next.1;
+        if prev.1 == next.1 {
+            prev.2 += next.2;
             true
         } else {
             false
         }
     });
-    vars.retain(|(_, d)| *d != 0.0);
-    let total = vars.iter().map(|(_, d)| d).sum();
+    vars.retain(|(_, _, d)| *d != 0.0);
+    let total = vars.iter().map(|(_, _, d)| d).sum();
     DegKey { total, vars }
 }
 
-fn collect_deg(t: &Expr, mult: f64, vars: &mut Vec<(String, f64)>) {
+fn collect_deg(t: &Expr, mult: f64, vars: &mut Vec<(u8, String, f64)>) {
     match t {
-        Expr::Sym(s) if !crate::expr::sym::is_constant_symbol(&s.name()) => {
-            vars.push((s.name().to_string(), mult));
+        Expr::Sym(s) => {
+            let name = s.name().to_string();
+            vars.push((atom_rank(&name), name, mult));
+        }
+        // `π`, `e` and `i` reach here as constants rather than symbols
+        // depending on how the expression was built; both spellings must land
+        // in the same class. The non-finite specials are not atoms of a
+        // monomial and are left out.
+        Expr::Const(c) => {
+            let name = match c {
+                crate::expr::MathConst::Pi => "pi",
+                crate::expr::MathConst::E => "e",
+                crate::expr::MathConst::I => "i",
+                _ => return,
+            };
+            vars.push((atom_rank(name), name.to_string(), mult));
         }
         Expr::Pow(b, x) => {
             if let Expr::Num(n) = &**x {
@@ -280,17 +317,17 @@ fn key_order(a: &DegKey, b: &DegKey) -> Ordering {
     }
     let (mut i, mut j) = (0, 0);
     while i < a.vars.len() || j < b.vars.len() {
-        let (an, ad) = a
+        let (ar, an, ad) = a
             .vars
             .get(i)
-            .map(|(n, d)| (n.as_str(), *d))
-            .unwrap_or(("\u{10FFFF}", 0.0));
-        let (bn, bd) = b
+            .map(|(r, n, d)| (*r, n.as_str(), *d))
+            .unwrap_or((u8::MAX, "\u{10FFFF}", 0.0));
+        let (br, bn, bd) = b
             .vars
             .get(j)
-            .map(|(n, d)| (n.as_str(), *d))
-            .unwrap_or(("\u{10FFFF}", 0.0));
-        match an.cmp(bn) {
+            .map(|(r, n, d)| (*r, n.as_str(), *d))
+            .unwrap_or((u8::MAX, "\u{10FFFF}", 0.0));
+        match ar.cmp(&br).then_with(|| an.cmp(bn)) {
             Ordering::Equal => {
                 match bd.partial_cmp(&ad) {
                     Some(Ordering::Equal) | None => {}

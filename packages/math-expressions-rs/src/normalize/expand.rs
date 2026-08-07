@@ -57,11 +57,107 @@ fn contract_matrix_vector(factors: &[Expr]) -> Option<Expr> {
     Some(mul(rest))
 }
 
+/// Add coordinate vectors of the same kind and length componentwise.
+///
+/// The counterpart of [`distribute_over_vector`] on the additive side, and
+/// needed for the same reason: `simplify` combines `(a,b) + (c,d)` and `expand`
+/// did not, so a scalar multiple distributed into two vectors stopped one step
+/// short of `(am + cn, bm + dn)`. Canonicalization deliberately leaves the sum
+/// alone — a `<math>` that asks for nothing renders what the author wrote — so
+/// this lives here rather than in the `add` constructor.
+///
+/// Kinds combine by *class*, the rule `simplify` already uses: `(a,b)`, `⟨a,b⟩`
+/// and the vector spelling are one object in three notations, while `[a,b]` is
+/// its own class because `createIntervals` reads it as an interval. The first
+/// term's spelling is the one the result keeps.
+fn combine_vector_terms(terms: &[Expr]) -> Option<Expr> {
+    let mut kind: Option<crate::expr::SeqKind> = None;
+    let mut class = None;
+    let mut len = 0;
+    for t in terms {
+        let Expr::Seq(k, comps) = t else { return None };
+        let c = super::vector_class(*k)?;
+        match class {
+            None => {
+                kind = Some(*k);
+                class = Some(c);
+                len = comps.len();
+            }
+            // Same class and arity: `⟨a,b⟩ + (c,d)` is one vector written two
+            // ways, and the first term's spelling is the one that survives.
+            Some(c0) if c0 == c && len == comps.len() => {}
+            _ => return None,
+        }
+    }
+    if terms.len() < 2 {
+        return None;
+    }
+    let kind = kind?;
+    let combined = (0..len)
+        .map(|i| {
+            add(terms
+                .iter()
+                .map(|t| match t {
+                    Expr::Seq(_, comps) => comps[i].clone(),
+                    _ => unreachable!("checked above"),
+                })
+                .collect())
+        })
+        .collect();
+    Some(Expr::Seq(kind, combined))
+}
+
+/// Multiply a scalar factor into the components of a coordinate vector.
+///
+/// `simplify` already does this (`rule_seq_arith`), and `expand` — whose whole
+/// job is multiplying out — did not, so `<math expand>m(a,b)</math>` rendered
+/// `m(a,b)` where `<math simplify>` gave `(am, bm)`. One vector only: two of
+/// them is a dot or cross product, which is not this rule's business.
+fn distribute_over_vector(factors: &[Expr]) -> Option<Expr> {
+    let mut seq_idx = None;
+    for (i, f) in factors.iter().enumerate() {
+        if super::is_vector_valued(f) {
+            if seq_idx.is_some() {
+                return None;
+            }
+            seq_idx = Some(i);
+        }
+    }
+    let i = seq_idx?;
+    let Expr::Seq(kind, comps) = &factors[i] else {
+        return None;
+    };
+    // A matrix in the product means the vector is being multiplied, not scaled;
+    // `contract_matrix_vector` has already had its turn and declined (shapes do
+    // not conform), so leaving the product alone is the honest answer.
+    if factors.iter().any(super::is_matrix_valued) {
+        return None;
+    }
+    let others: Vec<Expr> = factors
+        .iter()
+        .enumerate()
+        .filter(|(j, _)| *j != i)
+        .map(|(_, f)| f.clone())
+        .collect();
+    let scaled = comps
+        .iter()
+        .map(|c| {
+            let mut fs = others.clone();
+            fs.push(c.clone());
+            expand_core(&mul(fs))
+        })
+        .collect();
+    Some(Expr::Seq(*kind, scaled))
+}
+
 /// [`expand`] without the final presentation pass: the result is canonical.
 pub(crate) fn expand_core(e: &Expr) -> Expr {
     match e {
         // Sum: expand each term (the smart `add` flattens and combines).
-        Expr::Add(ts) => add(ts.iter().map(expand_core).collect()),
+        Expr::Add(ts) => {
+            let terms: Vec<Expr> = ts.iter().map(expand_core).collect();
+            combine_vector_terms(&terms).unwrap_or_else(|| add(terms))
+        }
 
         // Negation is multiplication by −1, so it distributes over a sum.
         // (Two factors, one of them a constant: cannot hit the cap on its own.)
@@ -77,6 +173,9 @@ pub(crate) fn expand_core(e: &Expr) -> Expr {
             let factors: Vec<Expr> = fs.iter().map(expand_core).collect();
             if let Some(contracted) = contract_matrix_vector(&factors) {
                 return contracted;
+            }
+            if let Some(distributed) = distribute_over_vector(&factors) {
+                return distributed;
             }
             let fallback = mul(factors.clone());
             distribute_guarded(try_distribute(&factors), fallback)
