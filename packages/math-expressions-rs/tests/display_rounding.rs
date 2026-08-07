@@ -87,15 +87,17 @@ fn rounding_that_should_change_the_value_still_does() {
     );
 }
 
-/// Exact rounding is rounding of the value the float *actually holds*, not of
-/// its shortest decimal spelling. `2.675` is stored as `2.67499999999999982…`,
-/// so two decimals is `2.67` — the classic result, and the one legacy's
-/// `parseFloat(toFixed(v, n))` produced. A value that is exactly a half rounds
-/// away from zero.
+/// Rounding reads the float's **shortest decimal spelling**, which is what a
+/// reader sees and what legacy rounded: mathjs's
+/// `format(v, {notation:"fixed", precision:n})` generates digits from that
+/// spelling, so `2.675` → `2.68` and `1.005` → `1.01`. (`toFixed` would give
+/// `2.67` and `1.00` by reading the stored `2.67499999999999982…`; this test
+/// asserted those until it was checked against mathjs itself.) A tie in the
+/// spelling rounds away from zero.
 #[test]
-fn ties_are_resolved_against_the_stored_value() {
-    assert_eq!(show(&round_numbers_to_decimals(&f(2.675), 2)), "2.67");
-    assert_eq!(show(&round_numbers_to_decimals(&f(1.005), 2)), "1");
+fn ties_are_resolved_against_the_shortest_spelling() {
+    assert_eq!(show(&round_numbers_to_decimals(&f(2.675), 2)), "2.68");
+    assert_eq!(show(&round_numbers_to_decimals(&f(1.005), 2)), "1.01");
     // Exactly representable halves: away from zero, both signs.
     assert_eq!(show(&round_numbers_to_decimals(&f(0.125), 2)), "0.13");
     assert_eq!(show(&round_numbers_to_decimals(&f(-0.125), 2)), "-0.13");

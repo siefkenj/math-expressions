@@ -289,11 +289,33 @@ impl Number {
         // which is what the exact rational plus [`float_from_scaled`] does here.
         let exact = match self.to_bigrational() {
             Some(r) => r,
-            // `Float`; `None` only for NaN/±∞, which no rounding can change.
-            None => match BigRational::from_float(self.to_f64()) {
-                Some(r) => r,
-                None => return self.clone(),
-            },
+            // A `Float` rounds through its **shortest decimal spelling**, not
+            // its exact binary expansion — `0.5555` is stored as
+            // `0.55549999999999999…`, and rounding that to three places gives
+            // `0.555` where the value the author wrote gives `0.556`.
+            //
+            // This is legacy's behaviour, and the earlier note here (that
+            // legacy went through `parseFloat(toFixed(v, n))`) had it wrong:
+            // mathjs's `format(v, {notation:"fixed"})` generates digits from the
+            // shortest representation, so it gave `0.5555 → 0.556`,
+            // `2.675 → 2.68` and `1.005 → 1.01` where `toFixed` gives
+            // `0.555`, `2.67` and `1.00`. Measured against mathjs directly.
+            //
+            // The large-magnitude fix this branch was written for is unaffected:
+            // `2e21` spells as its exact integer either way.
+            None => {
+                let f = self.to_f64();
+                if !f.is_finite() {
+                    return self.clone(); // NaN/±∞: no rounding can change them
+                }
+                match Number::from_decimal_str(&format!("{f}")).to_bigrational() {
+                    Some(r) => r,
+                    None => match BigRational::from_float(f) {
+                        Some(r) => r,
+                        None => return self.clone(),
+                    },
+                }
+            }
         };
         let pow10 = BigInt::from(10).pow(d.unsigned_abs());
         let scale = if d >= 0 {
