@@ -66,7 +66,9 @@ pub fn evaluate_fast_f64(e: &Expr, bindings: &HashMap<String, f64>) -> Option<Co
 /// while [`eval_complex`] dispatches through `Complex64`, and on the real axis
 /// those are not always the same algorithm. `Complex64::tan` is the double-angle
 /// form `sin(2x)/(1 + cos 2x)`, whose denominator cancels, against the tape's
-/// `f64::tan`; `e^x` is `exp(x)` here against the tape's generic `powf(e, x)`.
+/// `f64::tan`; `e^x` goes through `powc`, i.e. `(ln(e)·x).exp()`, which folds to
+/// `exp(x)` because `ln(e)` is exactly `1.0`, against the tape's generic
+/// `powf(e, x)`.
 /// Measured over a 33-expression corpus, canonicalizing here lifted
 /// bit-identical agreement from 78 % to 92 %; the remainder is `tan`, `e^x`,
 /// `x^x` and non-integer powers, and closing it means aligning the kernels
