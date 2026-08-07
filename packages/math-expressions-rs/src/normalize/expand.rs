@@ -46,6 +46,15 @@ pub fn expand(e: &Expr) -> Expr {
 /// Only `matrix` *then* `vector`, in that order and adjacent in the ordered
 /// segment. A vector on the left is a column and does not conform; transposing
 /// it to make the product work would be answering a different question.
+///
+/// The contracted product goes back through [`expand_core`] rather than out as
+/// it stands, which is what actually delivers the two claims above. Contracting
+/// leaves a vector where a matrix was, and that changes what the *remaining*
+/// factors can do: a scalar beside it now distributes (`distribute_over_vector`
+/// declines while a matrix is present), and a second matrix now sits next to a
+/// vector and contracts in turn. Without the re-entry `2M(e,f)` came back
+/// `2·(ae+bf, ce+df)` with the scalar stranded outside, and `MN(e,f)` stopped
+/// after one contraction. Each pass consumes one matrix, so this terminates.
 fn contract_matrix_vector(factors: &[Expr]) -> Option<Expr> {
     let i = factors
         .windows(2)
@@ -54,7 +63,7 @@ fn contract_matrix_vector(factors: &[Expr]) -> Option<Expr> {
     let mut rest: Vec<Expr> = factors[..i].to_vec();
     rest.push(contracted);
     rest.extend_from_slice(&factors[i + 2..]);
-    Some(mul(rest))
+    Some(expand_core(&mul(rest)))
 }
 
 /// Add coordinate vectors of the same kind and length componentwise.
@@ -161,8 +170,18 @@ pub(crate) fn expand_core(e: &Expr) -> Expr {
 
         // Negation is multiplication by −1, so it distributes over a sum.
         // (Two factors, one of them a constant: cannot hit the cap on its own.)
+        //
+        // It distributes over a *vector* for the same reason, and by the same
+        // rule the `Mul` arm below uses — `−1` is a scalar like any other. This
+        // is what lets `combine_vector_terms` see a subtraction: it matches on
+        // `Expr::Seq`, so a term left as `Neg(Seq)` made the whole sum decline
+        // and `(a,b) − (c,d)` came out of `expand` uncombined while `simplify`
+        // combined it — the one gap that rule exists to close.
         Expr::Neg(a) => {
             let factors = vec![Expr::int(-1), expand_core(a)];
+            if let Some(distributed) = distribute_over_vector(&factors) {
+                return distributed;
+            }
             let fallback = mul(factors.clone());
             distribute_guarded(try_distribute(&factors), fallback)
         }

@@ -1,6 +1,8 @@
 //! The round-9 DoenetML items: matrix–vector products, powers of `i`, and the
 //! sign of a zero that rounding produces. (The fourth, an explicit bound on
-//! `unflatten`, lives in the wasm crate with the function it bounds.)
+//! `unflatten`, is pinned by `unflatten_refuses_a_node_too_wide_to_fold` in
+//! `math-expressions-rs-wasm/src-rust/js_match.rs`, beside the function it
+//! bounds — the bound is not reachable from this crate.)
 //!
 //! Each `assert` here is a row of an expected-behaviour table DoenetML filed,
 //! including the neighbouring rows that must *not* change — those are the
@@ -44,14 +46,62 @@ fn a_matrix_times_a_vector_contracts_under_expand() {
     );
 }
 
+/// The contraction goes back through the expansion, so the factors around it
+/// get their turn on the vector it leaves behind: a scalar lands *inside* the
+/// components rather than stranded outside them, and a second matrix contracts
+/// in turn instead of stopping after one.
+#[test]
+fn the_factors_around_a_contraction_are_expanded_too() {
+    assert_eq!(
+        js(&expand(&l(&format!("2{M}(e,f)")))),
+        r#"["tuple",["+",["*",2,"a","e"],["*",2,"b","f"]],["+",["*",2,"c","e"],["*",2,"d","f"]]]"#
+    );
+    // `M·M·v`: both matrices contract, left to right.
+    assert_eq!(
+        js(&expand(&l(&format!("{M}{M}(e,f)")))),
+        r#"["tuple",["+",["*",["^","a",2],"e"],["*","b","c","e"],["*","a","b","f"],["*","b","d","f"]],["+",["*","a","c","e"],["*","c","d","e"],["*","b","c","f"],["*",["^","d",2],"f"]]]"#
+    );
+}
+
+/// Vectors combine under `expand` whichever sign they carry. Subtraction is the
+/// case that matters: the negated term reaches the sum as `Neg(Seq)`, and until
+/// negation distributed over a vector too, the whole sum declined to combine
+/// and `expand` fell short of `simplify` on the most ordinary input there is.
+#[test]
+fn vector_sums_and_differences_both_combine_under_expand() {
+    assert_eq!(
+        js(&expand(&t("-(a,b)"))),
+        r#"["tuple",["-","a"],["-","b"]]"#
+    );
+    assert_eq!(
+        js(&expand(&t("(a,b)-(c,d)"))),
+        js(&simplify(&t("(a,b)-(c,d)")))
+    );
+    assert_eq!(
+        js(&expand(&t("(a,b)-(c,d)"))),
+        r#"["tuple",["+","a",["-","c"]],["+","b",["-","d"]]]"#
+    );
+    // A mixed-class sum still declines to *merge*: `[c,d]` is read as an
+    // interval, so it stays its own term. The sign distributes into it either
+    // way — that part is scalar multiplication, not addition — and `simplify`
+    // does exactly the same, which is the property worth pinning.
+    assert_eq!(
+        js(&expand(&t("(a,b)-[c,d]"))),
+        r#"["+",["tuple","a","b"],["array",["-","c"],["-","d"]]]"#
+    );
+    assert_eq!(
+        js(&expand(&t("(a,b)-[c,d]"))),
+        js(&simplify(&t("(a,b)-[c,d]")))
+    );
+}
+
 /// Nothing contracts without being asked. A `<math>` that requests no
 /// simplification renders what the author typed, so the product stays written
 /// as a product — and, in particular, the vector is *not* distributed into the
 /// matrix entries, which is what it used to do (`[[a·(e,f), b·(e,f)], …]`).
 #[test]
 fn the_product_is_left_alone_until_expand() {
-    let written =
-        r#"["*",["matrix",["tuple",2,2],["tuple",["tuple","a","b"],["tuple","c","d"]]],["tuple","e","f"]]"#;
+    let written = r#"["*",["matrix",["tuple",2,2],["tuple",["tuple","a","b"],["tuple","c","d"]]],["tuple","e","f"]]"#;
     assert_eq!(js(&l(&format!("{M}(e,f)"))), written);
     assert_eq!(js(&simplify(&l(&format!("{M}(e,f)")))), written);
 }
@@ -77,7 +127,9 @@ fn a_vector_on_the_left_does_not_contract() {
 #[test]
 fn matrix_times_matrix_and_scalar_scaling_are_unchanged() {
     assert_eq!(
-        js(&simplify(&l(&format!(r"{M}\begin{{bmatrix}}1&0\\0&1\end{{bmatrix}}")))),
+        js(&simplify(&l(&format!(
+            r"{M}\begin{{bmatrix}}1&0\\0&1\end{{bmatrix}}"
+        )))),
         r#"["matrix",["tuple",2,2],["tuple",["tuple","a","b"],["tuple","c","d"]]]"#
     );
     assert_eq!(
@@ -99,7 +151,10 @@ fn integer_powers_of_i_close_the_cycle() {
     // Negative exponents come out of the same cycle: `1/i` is `−i`.
     assert_eq!(js(&simplify(&t("1/i"))), r#"["-","i"]"#);
     // Collected inside a product: `a·i·b·i·c·i` is `i³` times the rest.
-    assert_eq!(js(&simplify(&t("aibici"))), r#"["-",["*","a","b","c","i"]]"#);
+    assert_eq!(
+        js(&simplify(&t("aibici"))),
+        r#"["-",["*","a","b","c","i"]]"#
+    );
 }
 
 /// A variable-free complex expression evaluates exactly, in ℚ(i). The product
@@ -111,7 +166,10 @@ fn variable_free_complex_arithmetic_is_exact() {
     assert_eq!(js(&simplify(&t("(2+3i)(2-3i)"))), "13");
     assert_eq!(js(&simplify(&t("(1+i)/(1-i)"))), "\"i\"");
     assert_eq!(js(&simplify(&t("(1+i)^8"))), "16");
-    assert_eq!(js(&simplify(&t("(1+2i)+(3-5i)"))), r#"["+",["-",["*",3,"i"]],4]"#);
+    assert_eq!(
+        js(&simplify(&t("(1+2i)+(3-5i)"))),
+        r#"["+",["-",["*",3,"i"]],4]"#
+    );
     // Exact stays exact: no floats appear.
     assert_eq!(js(&simplify(&t("(1/2+i)(1/2-i)"))), r#"["/",5,4]"#);
 }
@@ -122,7 +180,10 @@ fn variable_free_complex_arithmetic_is_exact() {
 fn the_complex_fold_declines_outside_its_field() {
     assert_eq!(js(&simplify(&t("2i"))), r#"["*",2,"i"]"#);
     assert_eq!(js(&simplify(&t("x+i"))), r#"["+","i","x"]"#);
-    assert_eq!(js(&simplify(&t("sqrt(2)i"))), r#"["*","i",["apply","sqrt",2]]"#);
+    assert_eq!(
+        js(&simplify(&t("sqrt(2)i"))),
+        r#"["*","i",["apply","sqrt",2]]"#
+    );
     assert_eq!(js(&simplify(&t("pi i"))), r#"["*","i","pi"]"#);
 }
 
@@ -147,7 +208,8 @@ fn expanding_a_symbolic_complex_product_finishes() {
 /// what makes the reciprocal `−∞`.
 #[test]
 fn rounding_to_zero_keeps_the_sign() {
-    let rounded = math_expressions::round_numbers_to_decimals(&Expr::Num(Number::from_f64(-0.001)), 2);
+    let rounded =
+        math_expressions::round_numbers_to_decimals(&Expr::Num(Number::from_f64(-0.001)), 2);
     let Expr::Num(n) = &rounded else {
         panic!("expected a number, got {}", js(&rounded))
     };
@@ -156,7 +218,8 @@ fn rounding_to_zero_keeps_the_sign() {
     // not round to zero is untouched.
     let pos = math_expressions::round_numbers_to_decimals(&Expr::Num(Number::from_f64(0.001)), 2);
     assert_eq!(js(&pos), "0");
-    let keeps = math_expressions::round_numbers_to_decimals(&Expr::Num(Number::from_f64(-1.006)), 2);
+    let keeps =
+        math_expressions::round_numbers_to_decimals(&Expr::Num(Number::from_f64(-1.006)), 2);
     assert_eq!(js(&keeps), "-1.01");
 }
 
@@ -166,6 +229,7 @@ fn rounding_to_zero_keeps_the_sign() {
 /// surprising the next reader.
 #[test]
 fn the_sign_does_not_cross_the_js_boundary() {
-    let rounded = math_expressions::round_numbers_to_decimals(&Expr::Num(Number::from_f64(-0.001)), 2);
+    let rounded =
+        math_expressions::round_numbers_to_decimals(&Expr::Num(Number::from_f64(-0.001)), 2);
     assert_eq!(js(&rounded), "0");
 }

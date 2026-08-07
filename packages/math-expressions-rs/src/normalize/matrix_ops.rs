@@ -57,11 +57,12 @@ pub(crate) fn matvec_literal(m: &Expr, v: &Expr) -> Option<Expr> {
     let mut out = Vec::with_capacity(rows);
     for r in 0..rows {
         let mut terms = Vec::with_capacity(cols);
-        for c in 0..cols {
-            terms.push(mul(vec![
-                ma.get(r as u32, c as u32)?.clone(),
-                comps[c].clone(),
-            ]));
+        // Over `comps` rather than `0..cols`: the two are the same length (the
+        // conformability check above is exactly that), and indexing the one
+        // while iterating the other is what clippy's `needless_range_loop`
+        // objects to — CI gates on a warning-free clippy.
+        for (c, v) in comps.iter().enumerate() {
+            terms.push(mul(vec![ma.get(r as u32, c as u32)?.clone(), v.clone()]));
         }
         out.push(add(terms));
     }

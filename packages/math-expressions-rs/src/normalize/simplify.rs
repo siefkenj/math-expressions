@@ -600,17 +600,21 @@ fn gaussian_eval(e: &Expr) -> Option<(BigRational, BigRational)> {
                 }
                 _ => return None,
             };
+            // Bounded so a huge exponent cannot spend the budget here; past the
+            // bound the value is left to whoever can afford it. Checked *before*
+            // the loop so the refusal is free: clamping the iteration count
+            // instead meant `(2+i)^1000000` paid for 64 bigint multiplications,
+            // on operands growing to hundreds of digits, and then threw them
+            // away — at every node of every fixpoint pass.
+            if k.unsigned_abs() > 64 {
+                return None;
+            }
             let (br, bi) = gaussian_eval(b)?;
             let (mut ar, mut ai) = (BigRational::one(), BigRational::zero());
-            for _ in 0..k.unsigned_abs().min(64) {
+            for _ in 0..k.unsigned_abs() {
                 let (nr, ni) = (&ar * &br - &ai * &bi, &ar * &bi + &ai * &br);
                 ar = nr;
                 ai = ni;
-            }
-            // Bounded so a huge exponent cannot spend the budget here; past the
-            // bound the value is left to whoever can afford it.
-            if k.unsigned_abs() > 64 {
-                return None;
             }
             if k < 0 {
                 return gaussian_div(BigRational::one(), BigRational::zero(), ar, ai);

@@ -619,7 +619,7 @@ mod tests {
     //! (`variables` kinds, `allow_permutations`, `allow_implicit_identities`)
     //! that `match_template_with_options` adds — see this file's module docs
     //! and JS_TEST_COVERAGE_AUDIT.md.
-    use super::{flatten_tree, unflatten_left, unflatten_right};
+    use super::{flatten_tree, unflatten_left, unflatten_right, MAX_UNFLATTEN_OPERANDS};
     use serde_json::Map;
 
     /// [`super::match_template`] with the step budget asserted away. These
@@ -668,12 +668,12 @@ mod tests {
         // unflattenRight: ["+",1,2,3] -> ["+",1,["+",2,3]]
         assert_eq!(
             unflatten_right(&json!(["+", 1, 2, 3])),
-            json!(["+", 1, ["+", 2, 3]])
+            Some(json!(["+", 1, ["+", 2, 3]]))
         );
         // unflattenLeft: ["+",1,2,3] -> ["+",["+",1,2],3]
         assert_eq!(
             unflatten_left(&json!(["+", 1, 2, 3])),
-            json!(["+", ["+", 1, 2], 3])
+            Some(json!(["+", ["+", 1, 2], 3]))
         );
         // flatten both nestings back to the n-ary form.
         assert_eq!(
@@ -684,6 +684,43 @@ mod tests {
             flatten_tree(&json!(["+", ["+", 1, 2], 3])),
             json!(["+", 1, 2, 3])
         );
+    }
+
+    /// The unflatten bound ([`super::MAX_UNFLATTEN_OPERANDS`]). The fold turns
+    /// width into depth, and past the bound nothing downstream survives it —
+    /// serializing recurses here, and `JSON.parse` plus the `jsonToAst` walk
+    /// recurse again on the JS side. Both directions are pinned: the bound is a
+    /// contract the JS boundary now throws on, so widening it silently is as
+    /// much a regression as losing it.
+    #[test]
+    fn unflatten_refuses_a_node_too_wide_to_fold() {
+        let sum = |n: usize| {
+            let mut v = vec![json!("+")];
+            v.extend((0..n).map(|i| json!(i)));
+            Value::Array(v)
+        };
+
+        // At the bound, both directions still fold.
+        assert!(unflatten_left(&sum(MAX_UNFLATTEN_OPERANDS)).is_some());
+        assert!(unflatten_right(&sum(MAX_UNFLATTEN_OPERANDS)).is_some());
+
+        // One operand past it, both refuse.
+        assert_eq!(unflatten_left(&sum(MAX_UNFLATTEN_OPERANDS + 1)), None);
+        assert_eq!(unflatten_right(&sum(MAX_UNFLATTEN_OPERANDS + 1)), None);
+
+        // The width that matters is the *widest node anywhere*, not the root's:
+        // a narrow root carrying a wide child is exactly as unfoldable.
+        let buried = json!(["*", 2, sum(MAX_UNFLATTEN_OPERANDS + 1)]);
+        assert_eq!(unflatten_left(&buried), None);
+        assert_eq!(unflatten_right(&buried), None);
+
+        // A wide *non*-associative node is not folded at all, so it is not
+        // bounded either — a 3000-entry tuple passes through untouched.
+        let mut wide_tuple = vec![json!("tuple")];
+        wide_tuple.extend((0..3000).map(|i| json!(i)));
+        let wide_tuple = Value::Array(wide_tuple);
+        assert_eq!(unflatten_left(&wide_tuple), Some(wide_tuple.clone()));
+        assert_eq!(unflatten_right(&wide_tuple), Some(wide_tuple));
     }
 
     #[test]
