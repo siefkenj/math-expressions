@@ -173,6 +173,8 @@ const EQ_OPTION_KEYS: Record<string, string> = {
   include_error_in_number_exponents: "includeErrorInNumberExponents",
   allowed_error_is_absolute: "allowedErrorIsAbsolute",
   allow_blanks: "allowBlanks",
+  coerce_tuples_arrays: "coerceTuplesArrays",
+  coerce_vectors: "coerceVectors",
 };
 function mapEqOptions(opts: EqualityOptions): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -405,6 +407,16 @@ class Expression {
   }
   expand() {
     return wrap(this._w.expand(), this.context);
+  }
+  /**
+   * Sort into the default order without evaluating — DoenetML's
+   * `simplify="normalizeOrder"`. Unlike `simplify`, every term survives:
+   * `0x^2` stays, `7+4` stays two terms, `1x^2` keeps its coefficient. The
+   * ordering key is the JS library's, quirks included, because the term
+   * sequence it produces is what gets displayed.
+   */
+  default_order() {
+    return wrap(this._w.default_order(), this.context);
   }
   factor() {
     return wrap(this._w.factor(), this.context);
@@ -811,13 +823,14 @@ for (const name of [
 }
 
 // Normalization passes with no faithful Rust entry point (folded into
-// `canonicalize`; `default_order` would need the JS ordering key, not Rust's
-// canonical `cmp`). Kept as no-ops returning `this` rather than throwing: a
+// `canonicalize`). Kept as no-ops returning `this` rather than throwing: a
 // blanket throw here regressed ~170 idempotent-input specs that legitimately
 // pass on the unchanged tree, and aborted whole spec files at collection. The
 // real fix is implementing them; see DOENET_COMPAT_PLAN R7 and the follow-up note.
+// `default_order` graduated out of this list — it has a real implementation
+// now (`normalize::default_order`), carrying the JS ordering key rather than
+// the Rust canonical `cmp`, because the order it produces is displayed.
 for (const name of [
-  "default_order",
   "normalize_negative_numbers",
   "normalize_applied_functions",
   "expand_relations",
@@ -988,6 +1001,117 @@ function dopri(
   };
 }
 
+/**
+ * Every tree obtainable from `tree` by negating exactly one of its nodes,
+ * itself included. Each node is negated once across the whole enumeration, so
+ * an n-node tree yields n variants.
+ */
+function* singleNegations(tree: Tree): Generator<Tree> {
+  yield ["-", tree] as Tree;
+  if (Array.isArray(tree)) {
+    for (let i = 1; i < tree.length; i++) {
+      for (const variant of singleNegations(tree[i])) {
+        const copy = tree.slice() as Tree[];
+        copy[i] = variant;
+        yield copy as Tree;
+      }
+    }
+  }
+}
+
+/**
+ * Does `expr` equal `other` once **exactly** `n_sign_errors` of its parts have
+ * their sign flipped? Grading for "you had the right idea but dropped a minus
+ * sign" — DoenetML's `numSignErrorsMatched`.
+ *
+ * Port of the JS `equalSpecifiedSignErrors`. That version negated nodes in
+ * place, in the caller's tree, and relied on restoring them afterwards; this
+ * one enumerates variants instead, since a wasm-backed `Expression` has no
+ * mutable tree. Callers no longer need the defensive deep copy the old
+ * contract forced on them, though making one is harmless.
+ *
+ * `equalityFunction` receives the *negated* expression first, matching the JS
+ * argument order — DoenetML's normalizes that side before comparing.
+ */
+function equalSpecifiedSignErrors(
+  expr: ExpressionLike,
+  other: ExpressionLike,
+  {
+    equalityFunction,
+    n_sign_errors = 1,
+  }: {
+    equalityFunction?: (a: Expression, b: Expression) => boolean;
+    n_sign_errors?: number;
+  } = {},
+): boolean {
+  const e = toExpr(expr, Context);
+  const o = toExpr(other, Context);
+  const baseEquality =
+    equalityFunction ?? ((a: Expression, b: Expression) => a.equals(b));
+
+  if (n_sign_errors === 0) {
+    return baseEquality(e, o);
+  }
+  if (!(Number.isInteger(n_sign_errors) && n_sign_errors > 0)) {
+    throw Error(
+      `Have not implemented equality check with ${n_sign_errors} sign errors.`,
+    );
+  }
+
+  // More than one error: each variant is then checked for the remaining ones,
+  // so the negations compose without this function needing to enumerate
+  // combinations itself.
+  const compare =
+    n_sign_errors === 1
+      ? baseEquality
+      : (a: Expression, b: Expression) =>
+          equalSpecifiedSignErrors(a, b, {
+            equalityFunction: baseEquality,
+            n_sign_errors: n_sign_errors - 1,
+          });
+
+  const ctx = (e.context || Context) as Ctx;
+  for (const variant of singleNegations(e.tree as Tree)) {
+    if (compare(ctx.fromAst(variant) as Expression, o)) return true;
+  }
+  return false;
+}
+
+/**
+ * Equal outright, or after up to `max_sign_errors` sign flips — reporting how
+ * many it took. Port of the JS `equalWithSignErrors`.
+ */
+function equalWithSignErrors(
+  expr: ExpressionLike,
+  other: ExpressionLike,
+  {
+    equalityFunction,
+    max_sign_errors = 1,
+  }: {
+    equalityFunction?: (a: Expression, b: Expression) => boolean;
+    max_sign_errors?: number;
+  } = {},
+): { matched: boolean; n_sign_errors?: number } {
+  const e = toExpr(expr, Context);
+  const o = toExpr(other, Context);
+  const compare =
+    equalityFunction ?? ((a: Expression, b: Expression) => a.equals(b));
+
+  if (compare(e, o)) return { matched: true, n_sign_errors: 0 };
+
+  for (let i = 1; i <= max_sign_errors; i++) {
+    if (
+      equalSpecifiedSignErrors(e, o, {
+        equalityFunction: compare,
+        n_sign_errors: i,
+      })
+    ) {
+      return { matched: true, n_sign_errors: i };
+    }
+  }
+  return { matched: false };
+}
+
 const Context = {
   dopri,
   from: createFrom,
@@ -1042,6 +1166,10 @@ const Context = {
   converters,
   utils: { match, flatten, unflattenLeft, unflattenRight },
   class: Expression,
+
+  // ---- sign-error grading (`lib/expression/sign_error.js`) ----
+  equalSpecifiedSignErrors,
+  equalWithSignErrors,
 
   // ---- assumptions (context-level) ----
   // Backed by a wasm `Assumptions` handle plus a parallel text list so

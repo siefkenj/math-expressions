@@ -23,6 +23,8 @@ pub fn equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     let a = desugar_units(a);
     let b = desugar_units(b);
 
+    let (a, b) = coerce_intervals(a, b, opts);
+
     // Sequence-kind coercion runs BEFORE simplification so the tuple/vector
     // rewrite clusters see unified kinds: `[1,2]+(3,4)` must combine
     // componentwise when `coerce_tuples_arrays` is set, which requires the
@@ -216,8 +218,13 @@ pub fn equals_syntactic(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     if !opts.allow_blanks && (contains_blank(a) || contains_blank(b)) {
         return false;
     }
-    let na = coerce_seqs(normalize_syntactic(a), opts);
-    let nb = coerce_seqs(normalize_syntactic(b), opts);
+    // Same interval reading as `equals`. The form check already coerces tuple,
+    // array and vector spellings of a pair, so leaving the interval out made
+    // it the one notational difference a *form* check refused — and it is not
+    // even a difference the author wrote, but which parse built the tree.
+    let (a, b) = coerce_intervals(normalize_syntactic(a), normalize_syntactic(b), opts);
+    let na = coerce_seqs(a, opts);
+    let nb = coerce_seqs(b, opts);
     // `allowed_error_in_numbers` compares number *leaves* within the allowed
     // error while the structure still has to match exactly — the same
     // primitive [`equals`] uses for it, so a tolerance means the same thing on
@@ -233,6 +240,36 @@ pub fn equals_syntactic(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
 /// whether `equals`'s stage-0 blank guard will reject a tree.
 pub fn contains_blank(e: &Expr) -> bool {
     e.any_subexpr(&|c| matches!(c, Expr::Blank))
+}
+
+/// Does the tree contain an interval anywhere? The trigger for reading
+/// 2-element tuples and arrays on the *other* side as intervals too.
+fn has_interval(e: &Expr) -> bool {
+    e.any_subexpr(&|c| matches!(c, Expr::Interval { .. }))
+}
+
+/// Read a 2-element tuple or array as an interval — `(1,2)` open, `[3,4]`
+/// closed — on both sides, when either side has an interval in it. It is the
+/// same notation: `(1,2) union (3,4)` and the same text parsed with intervals
+/// built *are* the same set, each written the only way its parse can write it.
+///
+/// Nothing happens when neither side mentions an interval, so an ordinary
+/// point or pair is never silently reinterpreted — it takes an interval across
+/// from it to make interval the reading in play.
+///
+/// Rides on `coerce_tuples_arrays` because it is the same notational coercion,
+/// and because that is the flag the JS spec pins it to
+/// (`slow_math-expressions.spec.ts`, "tuples, vectors, intervals, altvectors"
+/// and "arrays, intervals"). Runs before [`coerce_seqs`], which would
+/// otherwise unify Tuple and Array first and lose the open/closed distinction;
+/// and it reads Seq kinds directly, so a *vector* never becomes an interval,
+/// however `coerce_vectors` is set.
+fn coerce_intervals(a: Expr, b: Expr, opts: &EqOptions) -> (Expr, Expr) {
+    if opts.coerce_tuples_arrays && (has_interval(&a) || has_interval(&b)) {
+        (crate::ops::to_intervals(&a), crate::ops::to_intervals(&b))
+    } else {
+        (a, b)
+    }
 }
 
 /// Map coerced sequence kinds to a common kind so `(1,2)`, `[1,2]`, and vector

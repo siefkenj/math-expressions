@@ -3,7 +3,8 @@
 
 use super::Expression;
 use math_expressions::{
-    constants_to_floats, derivative as rust_derivative, equals as rust_equals, evaluate_numbers,
+    constants_to_floats, default_order as rust_default_order, derivative as rust_derivative,
+    equals as rust_equals, evaluate_numbers,
     evaluate_numbers_evaluate_functions, evaluate_numbers_evaluate_functions_with_digits,
     evaluate_numbers_preserve_order, evaluate_numbers_preserve_order_with_digits,
     evaluate_numbers_with_digits, evaluate_to_constant as rust_evc, expand as rust_expand, ops,
@@ -153,6 +154,14 @@ impl Expression {
             }
         }
         self.derive(rust_simplify_with(&self.0, &a))
+    }
+
+    /// Sort into the JS library's default order, without evaluating anything:
+    /// DoenetML's `simplify="normalizeOrder"`. Every term survives, including
+    /// `0x^2` and unfolded constants — that is the difference from `simplify`,
+    /// and the reason the attribute exists.
+    pub fn default_order(&self) -> Expression {
+        self.derive(rust_default_order(&self.0))
     }
 
     /// Distribute products and powers of sums.

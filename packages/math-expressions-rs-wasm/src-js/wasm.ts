@@ -57,6 +57,8 @@ export interface WasmExpression {
   simplify(): WasmExpression;
   simplify_with_assumptions(assumptions: string[]): WasmExpression;
   simplify_logical(): WasmExpression;
+  /** Sort into the JS default order without evaluating (`simplify="normalizeOrder"`). */
+  default_order(): WasmExpression;
   expand(): WasmExpression;
   factor(): WasmExpression;
   evaluate_numbers(): WasmExpression;

@@ -83,6 +83,25 @@ pub fn to_intervals(e: &Expr) -> Expr {
 /// `me.normalize_function_names`: fold alternate function spellings to their
 /// canonical form (`arcsin` → `asin`, `ln` → `log`, …) via the function
 /// registry's alias map. Only bare-symbol heads are rewritten.
+///
+/// `exp(x)` folds to `e^x`, the two being spellings of one thing. This has to
+/// happen *here* rather than only in [`normalize_syntactic`], because callers
+/// normalize names before simplifying and simplification takes the two
+/// spellings in different directions: `e^(-t)` becomes `1/e^t` (a negative
+/// exponent is a reciprocal) while `exp(-t)` stays applied. Fold first and
+/// `-5e^{-t}`, `-5\exp(-t)`, `-5/e^t` and `-5/\exp(t)` all reach one tree,
+/// which is what lets any of them match any of the others under
+/// `symbolicEquality`.
+///
+/// JS folded the other way (`e^x` → `exp(x)`) and got no such agreement — its
+/// simplifier left the reciprocal and the applied form apart, so only the
+/// exactly-matching spelling scored. The direction is chosen for the engine
+/// that has to live with it: this one canonicalizes powers, so powers are where
+/// the spellings meet.
+///
+/// `sqrt(x)` deliberately does *not* fold to `x^(1/2)` here, unlike JS: the two
+/// stay distinct canonical trees and `equals` reconciles them (see
+/// `equality.rs`, `sqrt_and_half_power_are_equal`).
 pub fn normalize_function_names(e: &Expr) -> Expr {
     fn rename_head(h: &Expr) -> Expr {
         match h {
@@ -96,6 +115,18 @@ pub fn normalize_function_names(e: &Expr) -> Expr {
         }
     }
     if let Expr::Apply(head, args) = e {
+        // `exp(x)` is a spelling of `e^x`, and folding the two together is what
+        // lets a student's `-5e^{-t}` match an author's `-5\exp(-t)`.
+        if args.len() == 1 {
+            if let Expr::Sym(s) = head.as_ref() {
+                if s.name() == "exp" {
+                    return Expr::Pow(
+                        Box::new(Expr::sym("e")),
+                        Box::new(normalize_function_names(&args[0])),
+                    );
+                }
+            }
+        }
         return Expr::Apply(
             Box::new(rename_head(head)),
             args.iter().map(normalize_function_names).collect(),

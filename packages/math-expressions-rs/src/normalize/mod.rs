@@ -22,6 +22,7 @@
 
 mod canonicalize;
 mod constructors;
+mod default_order;
 mod full;
 mod matrix_ops;
 mod units;
@@ -46,6 +47,7 @@ pub use syntactic::normalize_syntactic;
 
 pub use canonicalize::canonicalize;
 pub(crate) use constructors::{add, mul, pow, split_coeff, without_like_term_collection};
+pub use default_order::default_order;
 pub(crate) use full::full_simplify;
 pub(crate) use matrix_ops::{
     identity_matrix, is_matrix_valued, is_vector_valued, matmul_literal, matvec_literal,

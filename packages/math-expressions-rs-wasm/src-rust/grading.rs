@@ -149,6 +149,12 @@ fn eq_options_from_json(options_json: &str) -> Result<EqOptions, JsError> {
         &mut o.allowed_error_is_absolute,
     );
     read_opt_bool(&v, "allowBlanks", &mut o.allow_blanks);
+    // The coercion flags. Without these the JS `equals(other, {
+    // coerce_tuples_arrays: false })` was accepted and ignored, so a caller
+    // asking to tell `(a,b)` from `[a,b]` — or from the interval — got the
+    // coerced answer anyway.
+    read_opt_bool(&v, "coerceTuplesArrays", &mut o.coerce_tuples_arrays);
+    read_opt_bool(&v, "coerceVectors", &mut o.coerce_vectors);
     Ok(o)
 }
 

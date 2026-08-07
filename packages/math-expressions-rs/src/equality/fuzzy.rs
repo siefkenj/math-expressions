@@ -15,7 +15,7 @@ pub(super) fn fuzzy_tree_eq(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
         (Expr::Num(x), Expr::Num(y)) => fuzzy_number_eq(x, y, opts),
         (Expr::Pow(b1, e1), Expr::Pow(b2, e2)) => {
             let base_ok = fuzzy_tree_eq(b1, b2, opts);
-            let exp_ok = if opts.include_error_in_number_exponents {
+            let exp_ok = if opts.include_error_in_number_exponents || !is_literal_exponent(e1) {
                 fuzzy_tree_eq(e1, e2, opts)
             } else {
                 e1 == e2
@@ -40,6 +40,21 @@ pub(super) fn fuzzy_tree_eq(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
                     .all(|(x, y)| fuzzy_tree_eq(x, y, opts))
         }
     }
+}
+
+/// Is this exponent a bare number the author typed, like the `2` in `x^2`?
+///
+/// That is the case the exempt-exponents rule is about: a student must not
+/// collect slack on an exponent, so `x^2.0002` does not pass for `x^2` unless
+/// the author asks for it. Anything else in the exponent position is an
+/// ordinary expression whose numbers are ordinary numbers —
+/// `e^(7x²/(0.00003−√y))` is an exponential, and its "exponent" is a function
+/// argument. The JS library never had to draw this line: its
+/// `normalize_function_names` spells that as `exp(…)`, so the argument was
+/// never in an exponent to begin with. This engine folds the pair the other
+/// way, into powers, so the line is drawn here instead.
+fn is_literal_exponent(e: &Expr) -> bool {
+    matches!(e, Expr::Num(_))
 }
 
 /// Non-child structure equal (symbol names, seq kinds, relation ops, matrix
@@ -165,7 +180,7 @@ fn replace_numbers(
         // see pre-canonical trees; both spellings must be parameterized alike.
         Expr::Const(crate::expr::MathConst::Pi) => fresh(std::f64::consts::PI, params),
         Expr::Const(crate::expr::MathConst::E) => fresh(std::f64::consts::E, params),
-        Expr::Pow(b, x) if !include_exponents => Expr::Pow(
+        Expr::Pow(b, x) if !include_exponents && is_literal_exponent(x) => Expr::Pow(
             Box::new(replace_numbers(b, vars, include_exponents, params)),
             x.clone(),
         ),

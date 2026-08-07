@@ -35,6 +35,27 @@ use serde_json::{Map, Value};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
+/// Move a unary minus onto a factor, folding it into a numeric literal.
+///
+/// `-(9·y)` matched against `b·y` binds `b`. Wrapping the literal as
+/// `["-", 9]` is the same *value* as `-9`, but it is not a *number* to anything
+/// that inspects the binding, and these bindings are read as coefficients:
+/// DoenetML's `<matchesPattern>` hands them straight to components that expect
+/// `-9`. A non-numeric factor keeps the wrapper, since there is nothing to fold
+/// into.
+fn negate_factor(v: &Value) -> Value {
+    if let Some(i) = v.as_i64() {
+        if let Some(neg) = i.checked_neg() {
+            return Value::Number(neg.into());
+        }
+    } else if let Some(f) = v.as_f64() {
+        if let Some(n) = serde_json::Number::from_f64(-f) {
+            return Value::Number(n);
+        }
+    }
+    Value::Array(vec![Value::String("-".to_string()), v.clone()])
+}
+
 /// Is this operator associative in the JS tree sense (`flatten.is_associative`)?
 fn is_associative(op: &str) -> bool {
     matches!(op, "+" | "*" | "and" | "or" | "union" | "intersect")
@@ -315,10 +336,7 @@ fn match_inner(tree: &Value, pattern: &Value, ctx: &Ctx) -> Option<Map<String, V
                 // under `panic = "abort"` — `match_template` is `pub` and runs
                 // on raw caller-supplied JS trees).
                 if !tree_operands.is_empty() {
-                    neg_first = Some(Value::Array(vec![
-                        Value::String("-".to_string()),
-                        tree_operands[0].clone(),
-                    ]));
+                    neg_first = Some(negate_factor(tree_operands[0]));
                 }
             }
         }
@@ -836,6 +854,15 @@ mod tests {
         let m = match_template(&tree, &json!(["*", "a", "b"])).unwrap();
         assert_eq!(m.get("a").unwrap(), &json!(["-", "x"]));
         assert_eq!(m.get("b").unwrap(), &json!("y"));
+
+        // A *numeric* first factor absorbs the minus, so the binding is a
+        // number: `-(9y)` against `b·y` gives `b = -9`, not `["-", 9]`.
+        let tree = json!(["-", ["*", 9, "y"]]);
+        let m = match_template(&tree, &json!(["*", "b", "y"])).unwrap();
+        assert_eq!(m.get("b").unwrap(), &json!(-9));
+        let tree = json!(["-", ["*", 1.5, "y"]]);
+        let m = match_template(&tree, &json!(["*", "b", "y"])).unwrap();
+        assert_eq!(m.get("b").unwrap(), &json!(-1.5));
 
         // Operators must match exactly; no match across operators.
         assert!(match_template(&json!(["*", 1, 2]), &json!(["+", "u", "v"])).is_none());

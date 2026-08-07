@@ -416,3 +416,98 @@ fn a_computed_float_compares_within_the_relative_tolerance() {
     assert!(!equals(&float(1.0), &float(1.0000001), &opts));
     assert!(!equals(&float(2.0), &float(3.0), &opts));
 }
+
+// ===================== intervals, and the finite-field floor =====================
+
+#[test]
+fn a_float_constant_does_not_blind_the_finite_field_stage() {
+    // The field is the only stage that can tell `e^(10x)` from `e^(10x) + C`:
+    // sampling cannot, because `e^(10x)` ranges over so many orders of
+    // magnitude that a small offset is invisible at almost every point.
+    // Skipping *every* float there meant the answer depended on whether the
+    // constant had been through a JSON round trip — written `0.0000001` the
+    // pair was correctly unequal, read back as the f64 `1e-7` it was not.
+    let e10x = parse("e^(10x)");
+    let opts = EqOptions::default();
+    for offset in [1e-7, 1e-3, 0.5] {
+        let shifted = Expr::Add(vec![e10x.clone(), float(offset)]);
+        assert!(
+            !equals(&e10x, &shifted, &opts),
+            "e^(10x) must not equal e^(10x) + {offset}"
+        );
+    }
+    // The bound that keeps the field honest still holds: a float that only
+    // *approximates* something is not taken at face value.
+    assert!(eq("x + 3.141592653589793", "x + pi"));
+}
+
+#[test]
+fn intervals_and_the_tuple_spellings_of_them() {
+    let opts = EqOptions::default();
+    let open = |s: &str| crate_to_intervals(parse(s));
+    // `(1,2) union (3,4)` and the same text parsed with intervals built are
+    // the same set — each written the only way its parse can write it.
+    assert!(equals(
+        &parse("(1,2) union (3,4)"),
+        &open("(1,2) union (3,4)"),
+        &opts
+    ));
+    assert!(equals(
+        &open("(1,2) union [3,4]"),
+        &parse("(1,2) union [3,4]"),
+        &opts
+    ));
+    // Open/closed still has to agree.
+    assert!(!equals(&parse("(1,2)"), &open("[1,2]"), &opts));
+    assert!(!equals(&parse("[1,2]"), &open("(1,2)"), &opts));
+    // A *vector* is not an interval, however the vector flag is set.
+    let v = math_expressions::tuples_to_vectors(&parse("(1,2)"));
+    assert!(!equals(&v, &open("(1,2)"), &opts));
+    // The form check reads them the same way, so `symbolicEquality` grading
+    // agrees with numeric grading here.
+    assert!(equals_syntactic(
+        &parse("(1,2) union (3,4)"),
+        &open("(1,2) union (3,4)"),
+        &opts
+    ));
+    // Off with the coercion flag.
+    let strict = EqOptions {
+        coerce_tuples_arrays: false,
+        ..EqOptions::default()
+    };
+    assert!(!equals(&parse("(1,2)"), &open("(1,2)"), &strict));
+}
+
+fn crate_to_intervals(e: Expr) -> Expr {
+    math_expressions::to_intervals(&e)
+}
+
+#[test]
+fn an_exponent_is_exempt_from_the_allowed_error_only_when_it_is_a_typed_number() {
+    // The rule protects against slack on an exponent a *student typed*.
+    let fuzzy = EqOptions {
+        allowed_error_in_numbers: 1e-4,
+        ..EqOptions::default()
+    };
+    assert!(!equals_syntactic(
+        &parse("x^2.00002"),
+        &parse("x^2"),
+        &fuzzy
+    ));
+    let with_exp = EqOptions {
+        include_error_in_number_exponents: true,
+        ..fuzzy.clone()
+    };
+    assert!(equals_syntactic(
+        &parse("x^2.00002"),
+        &parse("x^2"),
+        &with_exp
+    ));
+
+    // A compound exponent is not that case: `e^(…)` is an exponential and its
+    // "exponent" is an argument, which `normalize_function_names` puts there by
+    // folding `exp`. Its numbers are ordinary numbers.
+    let a = math_expressions::normalize_function_names(&parse("10000exp(7.00002x/y)"));
+    let b = math_expressions::normalize_function_names(&parse("10000exp(7x/y)"));
+    assert!(equals_syntactic(&a, &b, &fuzzy));
+}

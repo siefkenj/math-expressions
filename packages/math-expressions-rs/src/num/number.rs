@@ -513,6 +513,55 @@ impl Number {
         }
     }
 
+    /// The value as a small `(numerator, denominator)` pair, or `None` when it
+    /// is not one — for consumers that can only work in exact small-integer
+    /// arithmetic, such as equality's finite-field stage.
+    ///
+    /// `max_den` is the honesty bound, and it is doing real work: a decimal
+    /// whose reduced denominator is enormous is usually an *approximation of
+    /// something else* (`3.141592653589793` is π, not 3141592653589793/10¹⁵),
+    /// and a consumer that took it at face value would separate two spellings
+    /// of the same quantity. Small fractions stay exact, which is what lets the
+    /// field reject `0.33 ≠ 1/3`.
+    ///
+    /// A `Float` is read through its **shortest decimal spelling**, so `1e-7`
+    /// answers `(1, 10_000_000)` — the same as the literal `0.0000001` — while
+    /// `0.30000000000000004` needs 17 digits, blows `max_den`, and answers
+    /// `None`. That is the intended split: a float that spells as a simple
+    /// fraction *is* that fraction, and one that does not is round-off, which
+    /// must stay comparable only within tolerance.
+    pub(crate) fn simple_rational(&self, max_den: u64) -> Option<(i64, i64)> {
+        match self {
+            Number::Int(v) => Some((*v, 1)),
+            Number::NegZero => Some((0, 1)),
+            Number::Rat(num, den, _) => (den.unsigned_abs() <= max_den).then_some((*num, *den)),
+            // Big integers and high-precision decimals are past the bound by
+            // construction.
+            Number::Big(_) => None,
+            Number::Float(f) => {
+                let v = f.get();
+                if !v.is_finite() {
+                    return None;
+                }
+                if v == 0.0 {
+                    return Some((0, 1));
+                }
+                let (digits, n) = super::shortest_digits(v.abs());
+                let sign = if v < 0.0 { -1i64 } else { 1 };
+                let mantissa: i64 = digits.parse().ok()?;
+                let scale = n - digits.len() as i64;
+                if scale >= 0 {
+                    // An integral value: 10^scale must still fit.
+                    let factor = 10i64.checked_pow(u32::try_from(scale).ok()?)?;
+                    Some((sign * mantissa.checked_mul(factor)?, 1))
+                } else {
+                    let den = 10i64.checked_pow(u32::try_from(-scale).ok()?)?;
+                    (den.unsigned_abs() <= max_den).then_some((sign * mantissa, den))
+                }
+            }
+        }
+    }
+
     fn is_float(&self) -> bool {
         matches!(self, Number::Float(_))
     }
