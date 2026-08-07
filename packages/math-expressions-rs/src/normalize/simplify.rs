@@ -588,8 +588,16 @@ fn gaussian_eval(e: &Expr) -> Option<(BigRational, BigRational)> {
             gaussian_div(ar, ai, br, bi)
         }
         Expr::Pow(b, k) => {
+            // Integer exponents only: `i^(1/2)` is a branch cut, not a walk of
+            // the four-cycle, and `to_integer` would truncate it to `i^0 = 1`.
             let k = match k.as_ref() {
-                Expr::Num(n) => n.to_bigrational()?.to_integer().to_i64()?,
+                Expr::Num(n) => {
+                    let q = n.to_bigrational()?;
+                    if !q.is_integer() {
+                        return None;
+                    }
+                    q.to_integer().to_i64()?
+                }
                 _ => return None,
             };
             let (br, bi) = gaussian_eval(b)?;
