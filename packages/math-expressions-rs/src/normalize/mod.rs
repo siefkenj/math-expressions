@@ -53,4 +53,4 @@ pub(crate) use matrix_ops::{
     identity_matrix, is_matrix_valued, is_vector_valued, matmul_literal, matvec_literal,
 };
 pub use units::desugar_units;
-pub(crate) use units::{fold_units, unit_body};
+pub(crate) use units::{fold_units, scaling_unit_and_value, unit_body};

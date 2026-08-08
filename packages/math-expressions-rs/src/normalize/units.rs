@@ -59,6 +59,31 @@ enum Unit {
     Deg,
 }
 
+impl Unit {
+    /// The symbol as JS spells it in `all_units` — the string a consumer
+    /// appends when it needs to name the unit rather than apply it.
+    fn name(self) -> &'static str {
+        match self {
+            Unit::Dollar => "$",
+            Unit::Percent => "%",
+            Unit::Deg => "deg",
+        }
+    }
+}
+
+/// The `(unit symbol, value)` of a `["unit", …]` node — JS
+/// `get_unit_value_of_tree` (lib/expression/units.js).
+///
+/// Restricted to the units JS's `all_units` lists, so `circ` answers `None`
+/// here even though [`is_scaling_unit_symbol`] accepts it — JS never had a
+/// `circ` entry. What a caller should *do* with that `None` is its own call:
+/// JS destructures the null return and throws, which is not a behaviour worth
+/// reproducing. (The LaTeX parser substitutes `\circ` → `deg`, so a `circ`
+/// node only ever arrives hand-built.)
+pub(crate) fn scaling_unit_and_value(args: &[Expr]) -> Option<(&'static str, &Expr)> {
+    unit_value(args).map(|(unit, value)| (unit.name(), value))
+}
+
 /// Classify a `["unit", …]` node into its desugarable [`Unit`] and value.
 /// `None` for a non-unit node or the `circ` spelling (recognized as a unit
 /// symbol, but with no numeric scaling rule).

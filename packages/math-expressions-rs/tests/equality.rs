@@ -398,9 +398,8 @@ fn a_computed_float_compares_within_the_relative_tolerance() {
         float(0.1),
         Expr::Mul(vec![float(0.1), Expr::Num(Number::Int(2))]),
     ]));
-    assert_eq!(
+    assert!(
         format!("{:?}", computed).contains("Float"),
-        true,
         "precondition: the sum is inexact, not folded to a rational"
     );
     assert!(equals(&three_tenths, &computed, &opts));

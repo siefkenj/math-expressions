@@ -76,6 +76,35 @@ fn comparisons_all_point_one_way() {
 }
 
 #[test]
+fn a_unit_sorts_with_the_value_it_annotates() {
+    // JS keys a `["unit", …]` node as its *value's* key with the unit appended
+    // to the kind string — `5%` is `[0,"number_%",5]`, `$x` is
+    // `[1,"symbol_$","x"]` — so a unit-annotated term sorts among the numbers
+    // or the symbols. Keying it as an ordinary operator instead sent it to the
+    // `[10, …]` catch-all and put it *last*, reversing these sums.
+    //
+    // Pinned against the JS library, which returns the unit term first for all
+    // three: e.g. `["+",["apply","sqrt","y"],["unit","$","x"]]` sorts to
+    // `["+",["unit","$","x"],["apply","sqrt","y"]]`.
+    for (written, reversed) in [
+        ("$x + sqrt(y)", "sqrt(y) + $x"),
+        ("5% + sqrt(y)", "sqrt(y) + 5%"),
+        ("30deg + sqrt(y)", "sqrt(y) + 30deg"),
+    ] {
+        assert!(same_form(written, reversed), "{written} vs {reversed}");
+        // The unit term leads, as it does in the JS.
+        let Expr::Add(terms) = ordered(reversed) else {
+            panic!("expected a sum: {reversed}");
+        };
+        assert!(
+            matches!(&terms[0], Expr::OtherOp(s, _) if s.name() == "unit"),
+            "the unit term must sort first: {reversed} -> {:?}",
+            terms
+        );
+    }
+}
+
+#[test]
 fn idempotent() {
     // Sorting a sorted tree changes nothing — the property every normalizer
     // needs, and the one a comparison-based sort loses if its key is not a
@@ -86,6 +115,8 @@ fn idempotent() {
         "sin(y)+cos(x)+2",
         "x > 3",
         "a and b and c",
+        "$x + sqrt(y)",
+        "5% + 3 + sqrt(y)",
     ] {
         let once = ordered(s);
         let twice = default_order(&once);

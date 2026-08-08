@@ -129,9 +129,13 @@ fn remove_duplicate_negatives(e: &Expr) -> Expr {
     crate::expr::map_children(e, remove_duplicate_negatives)
 }
 
+/// Rebuilds a node from the factors [`negatives_out_of_factors`] pulled out of
+/// it, so the two shapes that carry factors share one sign-stripping pass.
+type Rebuild = fn(Vec<Expr>) -> Expr;
+
 fn negatives_out_of_factors(e: &Expr) -> Expr {
     let e = crate::expr::map_children(e, negatives_out_of_factors);
-    let (factors, rebuild): (Vec<Expr>, fn(Vec<Expr>) -> Expr) = match &e {
+    let (factors, rebuild): (Vec<Expr>, Rebuild) = match &e {
         Expr::Mul(xs) => (xs.clone(), Expr::Mul),
         Expr::Div(a, b) => (vec![a.as_ref().clone(), b.as_ref().clone()], |mut v| {
             Expr::Div(Box::new(v.remove(0)), Box::new(v.remove(0)))
@@ -568,6 +572,28 @@ fn sort_key(e: &Expr, ignore_negatives: bool) -> Key {
         }
         return arr3(1.0, "symbol", Key::Str(name));
     }
+    // JS `sort_key`'s `unit` branch, taken before the operator tail below
+    // exactly as it is there. A unit-annotated quantity keys as its *value's*
+    // key with the unit appended to the kind string, so `5%` sorts among the
+    // numbers (`[0,"number_%",5]`) and `$x` among the symbols
+    // (`[1,"symbol_$","x"]`) rather than landing in the `[10, …]` catch-all
+    // every unrecognized operator falls into — which put a unit-annotated term
+    // last in a sum where JS puts it first.
+    //
+    // A unit node whose symbol is not one of JS's three keys as any other
+    // operator does. That is the one deliberate divergence: JS destructures
+    // `get_unit_value_of_tree`'s `null` and *throws*, so its `if (unit)` guard
+    // is unreachable. Sorting is not a place to panic — it runs inside the
+    // wasm worker on author-supplied trees — and the only nodes that reach it
+    // are hand-built (`circ` is the one unit symbol this crate accepts that JS
+    // has no entry for, and the LaTeX parser substitutes it to `deg`).
+    if let Expr::OtherOp(s, args) = e {
+        if s.name() == "unit" {
+            if let Some((unit, value)) = crate::normalize::scaling_unit_and_value(args) {
+                return append_unit(sort_key(value, ignore_negatives), unit);
+            }
+        }
+    }
     match e {
         Expr::Num(n) => {
             let v = n.to_f64();
@@ -714,6 +740,34 @@ fn apply_key(head: &Expr, args: &[Expr], ignore_negatives: bool) -> Key {
 
 fn arr3(tag: f64, kind: &str, value: Key) -> Key {
     Key::Arr(vec![Key::Num(tag), Key::Str(kind.to_string()), value])
+}
+
+/// JS `key[1] += "_" + unit` — the last step of the `unit` branch.
+///
+/// A *string* concatenation whatever index 1 held. For the keys this actually
+/// meets it is the kind (`"number"` → `"number_%"`), but a tuple or array key
+/// carries its operand count there and JS turns that into `"2_%"`; the tag at
+/// index 0 is untouched either way, which is what keeps the unit sorting with
+/// the kind of thing it annotates.
+fn append_unit(key: Key, unit: &str) -> Key {
+    match key {
+        Key::Arr(mut items) if items.len() > 1 => {
+            items[1] = Key::Str(format!("{}_{}", js_to_string(&items[1]), unit));
+            Key::Arr(items)
+        }
+        other => other,
+    }
+}
+
+/// A key scalar as JS stringifies it when concatenated onto a string.
+fn js_to_string(k: &Key) -> String {
+    match k {
+        Key::Str(s) => s.clone(),
+        Key::Num(v) => crate::num::js_f64_to_string(*v),
+        Key::Bool(b) => b.to_string(),
+        // Index 1 is never an array in any key this file builds.
+        Key::Arr(_) => String::new(),
+    }
 }
 
 fn key_items(k: Key) -> Vec<Key> {

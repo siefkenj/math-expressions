@@ -14,10 +14,13 @@ pub(super) const MINIMUM_MATCHES: usize = 10;
 /// Disagreeing base points tolerated before rejecting — branch-cut identities
 /// disagree at many points, so this must be generous.
 pub(super) const NUMBER_TRIES: usize = 100;
-/// Base-point sampling radii. Only the *first* is reached in practice, and that
-/// is deliberate — see [`equals_numerical`]. Large scales first so a
-/// non-identity reveals its global disagreement before small scales probe near
-/// the origin.
+/// Base-point sampling radii, largest-first so a non-identity reveals its
+/// global disagreement before small scales probe near the origin.
+///
+/// [`equals_numerical`] reaches only the *first*, deliberately — see the note
+/// on its sampling loop. The ± stage
+/// ([`super::plus_minus::pm_multiset_equals`]) still cycles the whole list,
+/// which it flags as a known divergence from the JS.
 pub(super) const BINDING_SCALES: [f64; 6] = [10.0, 1.0, 100.0, 0.1, 1000.0, 0.01];
 /// Radius of the cluster probed around an agreeing base point — **fixed**, not
 /// a fraction of the base-point scale.
