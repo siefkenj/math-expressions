@@ -14,13 +14,12 @@ use super::numeric::{
     close_numeric_fuzzy, sample_point, BINDING_SCALES, MAX_VALUE, MINIMUM_MATCHES, NUMBER_TRIES,
 };
 use super::relations::{as_comparison, proportional, Comparison};
+use super::seedrandom::SeedRandom;
 use super::{equals, EqOptions};
 use crate::eval_numeric::complex::{eval_complex, free_symbols};
 use crate::expr::{Expr, RelOp};
 use crate::normalize::{canonicalize, simplify_canonical};
 use num_complex::Complex64;
-use rand::rngs::SmallRng;
-use rand::SeedableRng;
 
 pub(super) fn pm_equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     // Sequences (tuples/vectors/…): compare componentwise, re-entering `equals`
@@ -121,7 +120,12 @@ fn pm_multiset_equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
         Vec::new()
     };
 
-    let mut rng = SmallRng::seed_from_u64(0x5EED_1234_ABCD_0003);
+    // The ± stage is reached from the complex stage in the JS and inherits its
+    // generator mid-stream, so byte-for-byte parity is not available here the
+    // way it is in `numeric`; a fresh stream from the same seed is the closest
+    // faithful choice. (Our scale cycling below is already a divergence — the
+    // JS keeps one scale.)
+    let mut rng = SeedRandom::new("complex_seed");
     let minimum_matches = if vars.is_empty() { 1 } else { MINIMUM_MATCHES };
     let max_iter = 10 * NUMBER_TRIES;
     let mut matches = 0;

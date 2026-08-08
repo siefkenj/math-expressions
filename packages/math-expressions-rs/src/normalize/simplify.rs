@@ -22,7 +22,9 @@
 //! 3. `rule_trig_pythagorean` — `sin²+cos² → 1` and its relatives.
 //! 4. `rule_seq_arith` — componentwise arithmetic on tuples/vectors.
 //! 5. `rule_radical` — numeric root extraction (`sqrt(8) → 2√2`, `cbrt(-8) → -2`).
-//! 6. `rule_distribute_sign` — moving a product's sign into one factor
+//! 6. `rule_distribute_neg_over_sum` — `-(a+b) → -a-b`, the one distribution
+//!    that cannot grow the tree, and the one JS `.simplify()` performs.
+//! 7. `rule_distribute_sign` — moving a product's sign into one factor
 //!    (`-2(1-x) → 2(x-1)`), when doing so does not add minus signs.
 //!
 //! Only cluster 1 *needs* facts to do anything. Cluster 5 reads them to decline
@@ -58,7 +60,7 @@ use crate::expr::map_children;
 /// uses [`simplify_base_with`]; code that needs the canonical (non-display)
 /// shape uses [`simplify_core`].
 pub fn simplify(e: &Expr) -> Expr {
-    crate::normalize::full_simplify(e, &Assumptions::new())
+    simplify_with(e, &Assumptions::new())
 }
 
 /// The base canonical simplify in display form — `simplify`'s
@@ -79,6 +81,20 @@ pub(crate) fn simplify_base_with(e: &Expr, assumptions: &Assumptions) -> Expr {
 /// `assumptions` set makes it *identical* to [`simplify`] — adding a fact can
 /// only ever make the simplifier stronger, never weaker.
 pub fn simplify_with(e: &Expr, assumptions: &Assumptions) -> Expr {
+    // A blank is a hole, not an unknown, and two holes are not the same hole:
+    // folding across them turns "not filled in" into a definite answer. `＿/＿`
+    // is not `1`, `＿−＿` is not `0`. So an incomplete expression is returned as
+    // written — the JS library guards `simplify` the same way, and for the same
+    // reason. `<line>` reports a degenerate line's coefficients as blanks and
+    // computes its slope as `−a/b`; with the blanks cancelling, a line with no
+    // slope claimed a slope of `−1`.
+    //
+    // The guard belongs here rather than inside the rewrite rules because it is
+    // about the whole expression: whatever else the tree contains, once one
+    // operand is missing there is no simplification to claim.
+    if crate::equality::contains_blank(e) {
+        return e.clone();
+    }
     crate::normalize::full_simplify(e, assumptions)
 }
 
@@ -190,6 +206,10 @@ fn rewrite(e: &Expr, fired: &mut bool, assumptions: &Assumptions) -> Expr {
         return r;
     }
     if let Some(r) = rule_radical(&e, assumptions) {
+        *fired = true;
+        return r;
+    }
+    if let Some(r) = rule_distribute_neg_over_sum(&e) {
         *fired = true;
         return r;
     }
@@ -441,7 +461,14 @@ fn fold_infnan_pow(base: &Expr, exp: &Expr) -> Option<Expr> {
 /// An all-constant product with an infinite factor (a `±∞` constant or a
 /// zero-pole) folds to `±∞`, or `NaN` if any factor is already `NaN`.
 /// Canonicalize has already removed any literal zero, so `0·∞` never reaches
-/// here (it is `0`); `∞·i` folds to `∞` (matching JS), since `i` is a `Const`.
+/// here (it is `0`).
+///
+/// `∞·i` folds to `∞`, matching the JS library's `simplify` — see
+/// `equality.rs`, `infnan_folds_are_conservative`. This engine has one
+/// infinity and it lies on the real axis; an infinity in the imaginary
+/// direction has nowhere else to go. (JS's *evaluator* disagreed with its own
+/// simplifier here and answered complex.js's `Complex.INFINITY`, which is why
+/// DoenetML's `<number>Infinity i</number>` used to render `NaN + NaN i`.)
 fn fold_infnan_mul(factors: &[Expr]) -> Option<Expr> {
     if !factors.iter().all(is_infnan_constant) {
         return None; // a symbolic factor: sign/shape unknown, do not fold
@@ -1063,6 +1090,36 @@ fn absorb_sign(f: &Expr) -> Expr {
         // `sign_absorption` returned `None` for everything else.
         other => other.clone(),
     }
+}
+
+/// `-(a + b + c) → -a - b - c`, and *only* for a coefficient of exactly −1
+/// over a lone sum.
+///
+/// This is the one distribution the JS `.simplify()` performs, and it is not
+/// arbitrary: negating a sum adds no terms and no factors, so the result is
+/// never larger than the input. `-2(x+1)` is left as written, because
+/// distributing there would turn one term into two; `-((x+1)(x+2))` is left
+/// because the lone factor is a product, not a sum.
+///
+/// Without it, a difference of two sums never cancels. `(q + 12 - (q+2))/2`
+/// stayed unreduced where the JS library gives `5` — the shape `<lineSegment>`
+/// produces for a symbolic midpoint, so a user-visible coordinate was showing
+/// its own derivation instead of its value.
+fn rule_distribute_neg_over_sum(e: &Expr) -> Option<Expr> {
+    let Expr::Mul(factors) = e else { return None };
+    // Exactly `−1 · (sum)`: canonical form keeps the coefficient first, so
+    // anything else — a different coefficient, or a second factor — means
+    // distributing would not be free.
+    let [Expr::Num(coeff), Expr::Add(terms)] = factors.as_slice() else {
+        return None;
+    };
+    if coeff.to_f64() != -1.0 {
+        return None;
+    }
+    Some(add(terms
+        .iter()
+        .map(|t| mul(vec![Expr::int(-1), t.clone()]))
+        .collect()))
 }
 
 fn rule_distribute_sign(e: &Expr) -> Option<Expr> {

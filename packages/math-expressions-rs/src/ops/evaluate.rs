@@ -259,10 +259,9 @@ fn compile_sampler(e: &Expr, var: &str) -> Option<CompiledExpr> {
 /// unbounded endpoint into a bounded one (DOENET_INTEGRATION item 1). Anything
 /// still undecided — a `NaN`, an unevaluable head — remains `None`.
 pub fn evaluate_to_constant(e: &Expr) -> Option<Complex64> {
-    if variables(e)
-        .iter()
-        .any(|v| !crate::expr::sym::is_constant_symbol(v))
-    {
+    if variables(e).iter().any(|v| {
+        !crate::expr::sym::is_constant_symbol(v) && crate::expr::sym::mathjs_constant(v).is_none()
+    }) {
         return None;
     }
     // A hole (`＿`) or a `{"$":"None"}` leaf makes the value undefined, exactly

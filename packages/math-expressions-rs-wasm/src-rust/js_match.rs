@@ -229,6 +229,38 @@ pub fn match_template(
     match_template_with_options(tree, pattern, &MatchOptions::default())
 }
 
+/// Rewrite every ordered relation to its left-pointing form, reversing the
+/// operands: `a > b` → `b < a`, `a ≥ b` → `b ≤ a`, and the containment pair
+/// `∋`/`⊃` → `∈`/`⊂`. Recursive, and a no-op on everything else.
+fn orient_relations(v: &Value) -> Value {
+    let Value::Array(items) = v else {
+        return v.clone();
+    };
+    let mut out: Vec<Value> = items.iter().map(orient_relations).collect();
+    let Some(Value::String(op)) = out.first().cloned() else {
+        return Value::Array(out);
+    };
+    let flipped = match op.as_str() {
+        ">" => "<",
+        "ge" => "le",
+        "ni" => "in",
+        "notni" => "notin",
+        "superset" => "subset",
+        "notsuperset" => "notsubset",
+        "supseteq" => "subseteq",
+        "notsupseteq" => "notsubseteq",
+        _ => return Value::Array(out),
+    };
+    // Binary form only: a chained relation ("x < y < z") carries its operators
+    // differently and is left alone.
+    if out.len() != 3 {
+        return Value::Array(out);
+    }
+    out.swap(1, 2);
+    out[0] = Value::String(flipped.to_string());
+    Value::Array(out)
+}
+
 /// [`match_template`] with the JS `match` options honored rather than dropped.
 pub fn match_template_with_options(
     tree: &Value,
@@ -250,6 +282,21 @@ pub fn match_template_with_options(
         implicit_identities_all: opts.implicit_identities_all,
         budget: Cell::new(MAX_MATCH_STEPS),
         exhausted: Cell::new(false),
+    };
+    // Under permutations, point every ordered relation the same way first.
+    // `x > y` and `y < x` are one statement, and which one an author typed
+    // must not decide whether a pattern matches — JS did this by running
+    // `default_order` over both trees here, "as it orients operators such as
+    // inequalities and containments to a direction that won't be affected by
+    // permutations". Only the orienting part is needed: the sorting half of
+    // that pass is what this matcher's permutation search already does.
+    let (oriented_tree, oriented_pattern);
+    let (tree, pattern) = if opts.allow_permutations {
+        oriented_tree = orient_relations(tree);
+        oriented_pattern = orient_relations(pattern);
+        (&oriented_tree, &oriented_pattern)
+    } else {
+        (tree, pattern)
     };
     let found = match_inner(tree, pattern, &ctx);
     // A refused step unwinds as `None`, so an exhausted search is

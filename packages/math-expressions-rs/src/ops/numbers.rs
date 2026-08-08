@@ -23,6 +23,9 @@ use std::collections::BTreeSet;
 /// [`without_like_term_collection`](crate::normalize::without_like_term_collection)
 /// for exactly what that does and does not suppress.
 pub fn evaluate_numbers(e: &Expr) -> Expr {
+    if crate::equality::contains_blank(e) {
+        return e.clone();
+    }
     crate::normalize::without_like_term_collection(|| present(&canonicalize(e)))
 }
 
@@ -48,6 +51,9 @@ pub fn evaluate_numbers(e: &Expr) -> Expr {
 /// [`evaluate_numbers`] suppresses it: the difference between this and plain
 /// `evaluate_numbers` should be function evaluation and nothing else.
 pub fn evaluate_numbers_evaluate_functions(e: &Expr) -> Expr {
+    if crate::equality::contains_blank(e) {
+        return e.clone();
+    }
     crate::normalize::without_like_term_collection(|| {
         let folded = crate::normalize::fold_special_values(e);
         present(&crate::normalize::fold_numeric_applications_approx(&folded))
@@ -90,6 +96,9 @@ pub enum MaxDigits {
 /// value to become, and the imaginary unit surviving the pass is what keeps
 /// `0.5i + 0.75` a complex number rather than nonsense.
 pub fn evaluate_numbers_with_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
+    if crate::equality::contains_blank(e) {
+        return e.clone();
+    }
     evaluate_numbers(&spend_digits(e, max_digits))
 }
 
@@ -102,6 +111,9 @@ pub fn evaluate_numbers_with_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
 /// against — a `π/2` the author wrote — came out as `1.5707963267948966`, and
 /// syntactic equality reads two spellings of the same number as unequal.
 pub fn evaluate_numbers_evaluate_functions_with_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
+    if crate::equality::contains_blank(e) {
+        return e.clone();
+    }
     let folded = evaluate_numbers_evaluate_functions(&spend_digits(e, max_digits));
     match max_digits {
         MaxDigits::None => folded,
@@ -112,6 +124,9 @@ pub fn evaluate_numbers_evaluate_functions_with_digits(e: &Expr, max_digits: Max
 /// [`evaluate_numbers_preserve_order`](crate::ops::evaluate_numbers_preserve_order)
 /// under a digit budget.
 pub fn evaluate_numbers_preserve_order_with_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
+    if crate::equality::contains_blank(e) {
+        return e.clone();
+    }
     crate::ops::evaluate_numbers_preserve_order(&spend_digits(e, max_digits))
 }
 

@@ -16,6 +16,39 @@ fn unary(xs: &[BigRational], f: fn(&BigRational) -> Option<BigRational>) -> Opti
     }
 }
 
+/// Nudge a value that is within a hair of an integer onto it, before rounding.
+///
+/// `floor(3.999999999999999)` is `3` exactly and `4` to anyone reading it, and
+/// the DoenetML tests that pin these functions say so in as many words
+/// ("Allow for slight roundoff error"). The number all but always got there by
+/// arithmetic — a float sum, a division, a numerically evaluated function —
+/// and flooring the shortfall away turns an accumulated 1e-15 into an answer
+/// off by one, which is the largest error a rounding function can make.
+///
+/// The window is relative (1e-14 of the magnitude, never less than 1e-14
+/// absolute), so it stays a *roundoff* allowance rather than a rounding rule of
+/// its own: `floor(3.99)` is still `3`.
+fn snap_to_integer(v: &BigRational) -> BigRational {
+    use num_traits::{One, Signed};
+    let nearest = v.round();
+    let diff = (v - &nearest).abs();
+    let scale = {
+        let mag = v.abs();
+        if mag > BigRational::one() {
+            mag
+        } else {
+            BigRational::one()
+        }
+    };
+    // 1e-14, as an exact rational.
+    let window = scale * BigRational::new(1.into(), 100_000_000_000_000u64.into());
+    if diff <= window {
+        nearest
+    } else {
+        v.clone()
+    }
+}
+
 pub const MOD: FnDef = FnDef {
     name: "mod",
     parse_text: &["mod"],
@@ -122,7 +155,7 @@ pub const FLOOR: FnDef = FnDef {
     parse_text: &["floor"],
     parse_latex: &["floor"],
     eval1: Some(|z| real_only(z, f64::floor)),
-    fold_exact: Some(|xs| unary(xs, |v| Some(v.floor()))),
+    fold_exact: Some(|xs| unary(xs, |v| Some(snap_to_integer(v).floor()))),
     ..DEFAULTS
 };
 
@@ -131,7 +164,7 @@ pub const CEIL: FnDef = FnDef {
     parse_text: &["ceil"],
     parse_latex: &["ceil"],
     eval1: Some(|z| real_only(z, f64::ceil)),
-    fold_exact: Some(|xs| unary(xs, |v| Some(v.ceil()))),
+    fold_exact: Some(|xs| unary(xs, |v| Some(snap_to_integer(v).ceil()))),
     ..DEFAULTS
 };
 

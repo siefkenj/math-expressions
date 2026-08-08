@@ -1,5 +1,6 @@
 //! `default_order`: **sort, do not evaluate** — a faithful port of the JS
-//! `trees/default_order.js`.
+//! `trees/default_order.js` as it stands in `math-expressions@2.0.0-alpha94`,
+//! the version DoenetML pins.
 //!
 //! This is not [`canonicalize`](super::canonicalize), and the difference is the
 //! whole point. Canonical form folds as it goes: `0·x²` disappears, `7+4`
@@ -17,18 +18,30 @@
 //!
 //! [`super::order::cmp`] is this crate's canonical order and is a better
 //! comparator — typed, allocation-free, stable across sessions. It is also a
-//! *different* order, and the order here is observable: it decides the term
-//! sequence a `normalizeOrder` expression prints in. Reproducing the JS key is
-//! what keeps existing documents rendering as their authors saw them.
+//! *different* order, and the order here is observable: `simplify="normalizeOrder"`
+//! feeds straight into `valueForDisplay`, so this decides the term sequence an
+//! expression *prints* in. Reproducing the JS key is what keeps existing
+//! documents rendering as their authors saw them.
 //!
-//! The JS key is an array of mixed types compared with `<`, which in JavaScript
-//! compares the arrays' *string* forms — so the key is really a comma-joined
-//! string, and `[0,'number',10] < [0,'number',2]` because `"10" < "2"`. That is
-//! reproduced literally: [`sort_key`] builds that string and comparison is
-//! `str`'s. Do not "fix" the number ordering; it is the contract.
+//! # Sums do not use the sort key
+//!
+//! The one part of this that is not a comparator over keys is the sum. JS calls
+//! it a "kludge to get sort order closer to lexographic order", and it is: a
+//! sum's terms are sorted by *descending exponent* of each variable in turn
+//! (variables taken in alphabetical order), and only then by the sort key of
+//! what is left over as a coefficient. That is what puts `x³` before `x²`
+//! before `x` before the constants, instead of the key order, which would lead
+//! with every bare number. See [`coeff_factors_from_term`].
+//!
+//! An earlier port of this file took its algorithm from a *different* JS
+//! lineage, whose sum sort was the plain key comparator. It read as a tidier
+//! implementation of the same idea and was not: it printed `-3-3+4-2x²+…`
+//! where every DoenetML document written against the pinned library shows
+//! `-2x²+0x²+1x²+5x²-3-3+4`.
+
+use std::collections::BTreeMap;
 
 use crate::expr::{Expr, MathConst, RelOp, SeqKind};
-use crate::num::Number;
 
 /// Sort an expression into the JS library's default order.
 pub fn default_order(e: &Expr) -> Expr {
@@ -81,13 +94,19 @@ fn flatten(e: &Expr) -> Expr {
     }
 }
 
-/// Drop double negatives and pull a negative out of any factor, so a product's
-/// sign is carried in one place. Run before *and* after sorting, as JS does:
-/// the sort's own `-`-into-product rewrite can create a new inner negative.
+// ---------------------------------------------------------------------------
+// Negative normalization (JS `normalize_negatives`)
+// ---------------------------------------------------------------------------
+
+/// Drop double negatives, pull a negative out of any factor, then put the sign
+/// back onto a leading numeric coefficient. Run before *and* after sorting, as
+/// JS does: the sort's own `-`-into-product rewrite creates a new inner
+/// negative that the second run resolves.
 fn normalize_negatives(e: &Expr) -> Expr {
     let e = remove_duplicate_negatives(e);
     let e = negatives_out_of_factors(&e);
-    remove_duplicate_negatives(&e)
+    let e = remove_duplicate_negatives(&e);
+    normalize_negative_numbers(&e)
 }
 
 fn remove_duplicate_negatives(e: &Expr) -> Expr {
@@ -95,21 +114,14 @@ fn remove_duplicate_negatives(e: &Expr) -> Expr {
         if let Expr::Neg(inner2) = inner.as_ref() {
             return remove_duplicate_negatives(inner2);
         }
-        // A negated *literal* folds into the literal. Not evaluation — it is
-        // the same number, and the two spellings are only ever an accident of
-        // where the value came from: `x-1` parses as `["+", x, -1]`, while the
-        // same expression with the 1 substituted in from elsewhere arrives as
-        // `["+", x, ["-", 1]]`. Left alone they carry different sort keys and
-        // land in different positions, so the two spellings of one expression
-        // stop matching — which is the whole job of this pass.
-        //
-        // Zero is the exception: negating it yields `NegZero`, a *different*
-        // leaf that sorts elsewhere, so folding it would make the pass
-        // non-idempotent — `-0x²` sorted to one place on the first run and
-        // another on the second. A zero's sign carries no information here
-        // anyway, so the `-0` spelling is left exactly as written.
+        // Only an already-*negative* literal folds here (`["-", -3] → 3`); a
+        // negated positive is left for `normalize_negative_numbers`, which runs
+        // last and so gets the final say on where the sign sits. Doing it in
+        // both places would be harmless but doing it *only* here would fold
+        // `["-", 0]` to `NegZero`, a different leaf that sorts elsewhere, and
+        // the pass would stop being idempotent.
         if let Expr::Num(n) = inner.as_ref() {
-            if !n.is_zero() {
+            if n.is_negative() {
                 return Expr::Num(n.neg());
             }
         }
@@ -120,7 +132,7 @@ fn remove_duplicate_negatives(e: &Expr) -> Expr {
 fn negatives_out_of_factors(e: &Expr) -> Expr {
     let e = crate::expr::map_children(e, negatives_out_of_factors);
     let (factors, rebuild): (Vec<Expr>, fn(Vec<Expr>) -> Expr) = match &e {
-        Expr::Mul(xs) => (xs.clone(), |v| Expr::Mul(v)),
+        Expr::Mul(xs) => (xs.clone(), Expr::Mul),
         Expr::Div(a, b) => (vec![a.as_ref().clone(), b.as_ref().clone()], |mut v| {
             Expr::Div(Box::new(v.remove(0)), Box::new(v.remove(0)))
         }),
@@ -134,6 +146,13 @@ fn negatives_out_of_factors(e: &Expr) -> Expr {
                 negative = !negative;
                 *inner
             }
+            // A negative *number* as a factor counts too: `(-2)·x` and `-(2x)`
+            // are one product with the sign in two places, and the sort must
+            // see them alike.
+            Expr::Num(n) if n.is_negative() => {
+                negative = !negative;
+                Expr::Num(n.neg())
+            }
             other => other,
         })
         .collect();
@@ -145,17 +164,72 @@ fn negatives_out_of_factors(e: &Expr) -> Expr {
     }
 }
 
+/// JS `normalize_negative_numbers`: `["-", 3] → -3`, `["-", ["*", 3, x]] →
+/// ["*", -3, x]`, `["-", ["/", 3, x]] → ["/", -3, x]`. The inverse of the
+/// pull-out above, and the reason the two together are a fixpoint rather than a
+/// loop: the sign ends up on the leading number when there is one, and outside
+/// the product when there is not.
+fn normalize_negative_numbers(e: &Expr) -> Expr {
+    if let Expr::Neg(inner) = e {
+        match inner.as_ref() {
+            Expr::Num(n) if !n.is_negative() => return Expr::Num(n.neg()),
+            Expr::Mul(factors) if !factors.is_empty() => {
+                if let Some(first) = negate_leading_positive_number(&factors[0]) {
+                    let mut out = Vec::with_capacity(factors.len());
+                    out.push(first);
+                    out.extend(factors[1..].iter().map(normalize_negative_numbers));
+                    return Expr::Mul(out);
+                }
+            }
+            Expr::Div(num, den) => {
+                if let Some(negated) = negate_leading_positive_number(num) {
+                    return Expr::Div(Box::new(negated), Box::new(normalize_negative_numbers(den)));
+                }
+            }
+            _ => {}
+        }
+    }
+    crate::expr::map_children(e, normalize_negative_numbers)
+}
+
+/// `Some(-node)` when `node` leads with a non-negative number that can carry
+/// the sign, `None` when there is nowhere for it to go.
+fn negate_leading_positive_number(node: &Expr) -> Option<Expr> {
+    match node {
+        Expr::Num(n) if !n.is_negative() => Some(Expr::Num(n.neg())),
+        Expr::Mul(factors) => match factors.first() {
+            Some(Expr::Num(n)) if !n.is_negative() => {
+                let mut out = Vec::with_capacity(factors.len());
+                out.push(Expr::Num(n.neg()));
+                out.extend(factors[1..].iter().map(normalize_negative_numbers));
+                Some(Expr::Mul(out))
+            }
+            _ => None,
+        },
+        Expr::Div(num, den) => negate_leading_positive_number(num)
+            .map(|negated| Expr::Div(Box::new(negated), Box::new(normalize_negative_numbers(den)))),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The sort itself
+// ---------------------------------------------------------------------------
+
 fn sort_ast(e: &Expr) -> Expr {
     let e = crate::expr::map_children(e, sort_ast);
     match e {
-        // The commutative operators: sort operands by the JS key.
-        Expr::Add(mut xs) => {
-            sort_by_key(&mut xs);
-            Expr::Add(xs)
-        }
-        Expr::Mul(mut xs) => {
-            sort_by_key(&mut xs);
-            Expr::Mul(xs)
+        // Sums get the exponent-first ordering, not the sort key.
+        Expr::Add(xs) => Expr::Add(sort_sum_terms(xs)),
+        // A product sorts by the key, except that the operands with a
+        // meaningful order of their own — a tuple, a matrix, an interval — keep
+        // theirs and move to the end, so `M·(e,f)` never becomes `(e,f)·M`.
+        Expr::Mul(xs) => {
+            let (mut sortable, fixed): (Vec<Expr>, Vec<Expr>) =
+                xs.into_iter().partition(|x| !order_is_meaningful(x));
+            sort_by_key(&mut sortable);
+            sortable.extend(fixed);
+            Expr::Mul(sortable)
         }
         Expr::And(mut xs) => {
             sort_by_key(&mut xs);
@@ -192,6 +266,8 @@ fn sort_ast(e: &Expr) -> Expr {
                         | RelOp::NotNi
                         | RelOp::Superset
                         | RelOp::NotSuperset
+                        | RelOp::SupersetEq
+                        | RelOp::NotSupersetEq
                 )
             }) {
                 operands.reverse();
@@ -203,8 +279,8 @@ fn sort_ast(e: &Expr) -> Expr {
             }
             Expr::Relation { operands, ops }
         }
-        // Negating a product with a leading numerical factor puts the sign on
-        // that factor, so `-(2x)` and `(-2)x` reach the same tree.
+        // Negating a product puts the sign on its first factor, so `-(2x)` and
+        // `(-2)x` reach the same tree.
         Expr::Neg(inner) => match *inner {
             Expr::Mul(mut xs) if !xs.is_empty() => {
                 let first = xs.remove(0);
@@ -215,6 +291,12 @@ fn sort_ast(e: &Expr) -> Expr {
         },
         other => other,
     }
+}
+
+/// Operands whose position carries meaning, which a product's sort must not
+/// disturb. JS tests the operator name against this exact list.
+fn order_is_meaningful(e: &Expr) -> bool {
+    matches!(e, Expr::Seq(..) | Expr::Interval { .. } | Expr::Matrix(_))
 }
 
 /// The same relation read right-to-left: `a > b` is `b < a`. Not
@@ -246,87 +328,475 @@ fn mirror(op: RelOp) -> RelOp {
 fn sort_by_key(xs: &mut [Expr]) {
     // A decorate-sort-undecorate: building the key is the expensive part, and
     // a comparison sort would rebuild it O(n log n) times per operand.
-    let mut keyed: Vec<(String, Expr)> = xs.iter().map(|x| (sort_key(x), x.clone())).collect();
-    keyed.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut keyed: Vec<(Key, Expr)> = xs.iter().map(|x| (sort_key(x, false), x.clone())).collect();
+    keyed.sort_by(|a, b| cmp_key(&a.0, &b.0));
     for (slot, (_, e)) in xs.iter_mut().zip(keyed) {
         *slot = e;
     }
 }
 
-/// The JS sort key, as the string JavaScript's array comparison would have
-/// produced. See the module note: the string form *is* the key, quirks and all.
-fn sort_key(e: &Expr) -> String {
-    let mut s = String::new();
-    write_key(e, &mut s);
-    s
-}
+// ---------------------------------------------------------------------------
+// Sum ordering — the "kludge to get sort order closer to lexographic order"
+// ---------------------------------------------------------------------------
 
-fn write_key(e: &Expr, out: &mut String) {
-    match e {
-        Expr::Num(n) => {
-            out.push_str("0,number,");
-            out.push_str(&js_number(n));
-        }
-        // Constants are plain strings in the JS tree (`"pi"`), so they key as
-        // symbols there and must here.
-        Expr::Const(c) => {
-            out.push_str("1,symbol,");
-            out.push_str(const_name(*c));
-        }
-        Expr::Sym(s) => {
-            out.push_str("1,symbol,");
-            out.push_str(&s.name());
-        }
-        Expr::Blank => out.push_str("1,symbol,\u{ff3f}"),
-        Expr::Bool(b) => {
-            out.push_str("1,boolean,");
-            out.push_str(if *b { "true" } else { "false" });
-        }
-        Expr::Apply(f, args) => {
-            out.push_str("2,function,");
-            write_key(f, out);
-            out.push(',');
-            out.push_str(&args.len().to_string());
-            for a in args {
-                out.push(',');
-                write_key(a, out);
+/// Split a term into "which variables it contains, to what power" and "what is
+/// left over as a coefficient". Only the shapes JS recognises are decomposed —
+/// a product of symbols and integer powers of symbols, possibly negated or
+/// divided. Anything else (a function call, a power of a sum) contributes no
+/// variables and *is* its own coefficient, which is why `sqrt(x)+x+1` orders
+/// `x` first and then sorts `1` and `sqrt(x)` by key.
+fn coeff_factors_from_term(term: &Expr, string_factors: &mut Vec<String>) -> (Exponents, Expr) {
+    fn index_of(name: String, string_factors: &mut Vec<String>) -> usize {
+        match string_factors.iter().position(|s| *s == name) {
+            Some(i) => i,
+            None => {
+                string_factors.push(name);
+                string_factors.len() - 1
             }
         }
-        Expr::Mul(xs) => write_op_key("4,product", xs, out),
-        Expr::Div(a, b) => {
-            write_op_key("4,quotient", &[a.as_ref().clone(), b.as_ref().clone()], out)
+    }
+
+    // JS asks `typeof term === "string"`, which is true of a variable, of a
+    // named constant (`pi` is the string `"pi"` in that tree) and of the blank.
+    if let Some(name) = js_string_leaf(term) {
+        let ind = index_of(name, string_factors);
+        return (Exponents::single(ind, 1.0), Expr::int(1));
+    }
+
+    match term {
+        Expr::Mul(factors) => {
+            let mut exps = Exponents::default();
+            let mut coeff: Vec<Expr> = Vec::new();
+            for factor in factors {
+                if let Some(name) = js_string_leaf(factor) {
+                    let ind = index_of(name, string_factors);
+                    exps.add(ind, 1.0);
+                    continue;
+                }
+                if matches!(factor, Expr::Pow(..) | Expr::Neg(_)) {
+                    let (sub_exps, sub_coeff) = coeff_factors_from_term(factor, string_factors);
+                    exps.merge(&sub_exps);
+                    if !is_literal_one(&sub_coeff) {
+                        coeff.push(sub_coeff);
+                    }
+                    continue;
+                }
+                coeff.push(factor.clone());
+            }
+            let coeff = match coeff.len() {
+                0 => Expr::int(1),
+                1 => coeff.into_iter().next().expect("length checked"),
+                _ => Expr::Mul(coeff),
+            };
+            (exps, coeff)
         }
-        Expr::Add(xs) => write_op_key("5,sum", xs, out),
-        Expr::Neg(x) => write_op_key("6,minus", std::slice::from_ref(x.as_ref()), out),
-        other => {
-            let mut head = String::from("7,");
-            head.push_str(&legacy_operator(other));
-            let children = key_children(other);
-            write_op_key(&head, &children, out);
+        // Only `variable ^ finite-number` is a power for these purposes.
+        Expr::Pow(base, exp) => {
+            if let (Some(name), Expr::Num(n)) = (js_string_leaf(base), exp.as_ref()) {
+                let v = n.to_f64();
+                if v.is_finite() {
+                    let ind = index_of(name, string_factors);
+                    return (Exponents::single(ind, v), Expr::int(1));
+                }
+            }
+            (Exponents::default(), term.clone())
         }
+        Expr::Neg(inner) => {
+            let (exps, coeff) = coeff_factors_from_term(inner, string_factors);
+            let coeff = match &coeff {
+                Expr::Num(n) => Expr::Num(n.neg()),
+                other => Expr::Neg(Box::new(other.clone())),
+            };
+            (exps, coeff)
+        }
+        Expr::Div(num, den) => {
+            let (exps, coeff) = coeff_factors_from_term(num, string_factors);
+            (
+                exps,
+                Expr::Div(Box::new(coeff), Box::new(den.as_ref().clone())),
+            )
+        }
+        _ => (Exponents::default(), term.clone()),
     }
 }
 
-fn write_op_key(head: &str, xs: &[Expr], out: &mut String) {
-    out.push_str(head);
-    out.push(',');
-    out.push_str(&xs.len().to_string());
-    for x in xs {
-        out.push(',');
-        write_key(x, out);
+/// A term's variable exponents, keyed by index into the shared `string_factors`
+/// list. Sparse, like the JS array it stands in for: an absent entry is 0.
+#[derive(Default, Clone)]
+struct Exponents(BTreeMap<usize, f64>);
+
+impl Exponents {
+    fn single(ind: usize, v: f64) -> Exponents {
+        let mut m = BTreeMap::new();
+        m.insert(ind, v);
+        Exponents(m)
+    }
+    fn add(&mut self, ind: usize, v: f64) {
+        *self.0.entry(ind).or_insert(0.0) += v;
+    }
+    fn merge(&mut self, other: &Exponents) {
+        for (&ind, &v) in &other.0 {
+            self.add(ind, v);
+        }
+    }
+    fn get(&self, ind: usize) -> f64 {
+        self.0.get(&ind).copied().unwrap_or(0.0)
     }
 }
 
-/// The operand list the JS tree would have had, for the nodes that key
-/// generically. Metadata that JS carried as operands (interval closure,
-/// relation ops) is spelled back out so the key sees what JS saw.
-fn key_children(e: &Expr) -> Vec<Expr> {
+fn sort_sum_terms(terms: Vec<Expr>) -> Vec<Expr> {
+    let mut string_factors: Vec<String> = Vec::new();
+    let mut exps_by_term: Vec<Exponents> = Vec::with_capacity(terms.len());
+    let mut coeffs: Vec<Expr> = Vec::with_capacity(terms.len());
+    for term in &terms {
+        let (exps, coeff) = coeff_factors_from_term(term, &mut string_factors);
+        exps_by_term.push(exps);
+        coeffs.push(coeff);
+    }
+
+    // Variables are compared in alphabetical order, whatever order they were
+    // discovered in.
+    let mut var_order: Vec<usize> = (0..string_factors.len()).collect();
+    var_order.sort_by(|&a, &b| string_factors[a].cmp(&string_factors[b]));
+
+    // Descending exponent per variable, then the coefficient's own sort key.
+    let mut keyed: Vec<(Key, Expr)> = terms
+        .into_iter()
+        .enumerate()
+        .map(|(i, term)| {
+            let mut parts: Vec<Key> = var_order
+                .iter()
+                .map(|&v| Key::Num(-exps_by_term[i].get(v)))
+                .collect();
+            parts.push(sort_key(&coeffs[i], false));
+            (Key::Arr(parts), term)
+        })
+        .collect();
+    keyed.sort_by(|a, b| cmp_key(&a.0, &b.0));
+    keyed.into_iter().map(|(_, t)| t).collect()
+}
+
+fn is_literal_one(e: &Expr) -> bool {
+    matches!(e, Expr::Num(n) if n.to_f64() == 1.0)
+}
+
+/// The name this node carries as a bare *string* in the JS tree — a variable, a
+/// named constant, or the blank. `None` for everything else, including the
+/// specials (`Inf`, `NaN`) which serialize as objects rather than strings.
+fn js_string_leaf(e: &Expr) -> Option<String> {
     match e {
-        Expr::Pow(b, x) => vec![b.as_ref().clone(), x.as_ref().clone()],
-        Expr::Prime(f) => vec![f.as_ref().clone()],
-        Expr::Index(x, i) => vec![x.as_ref().clone(), i.as_ref().clone()],
-        Expr::Not(x) => vec![x.as_ref().clone()],
-        Expr::Seq(_, xs) => xs.clone(),
+        Expr::Sym(s) => Some(s.name()),
+        Expr::Const(MathConst::Pi) => Some("pi".to_string()),
+        Expr::Const(MathConst::E) => Some("e".to_string()),
+        Expr::Const(MathConst::I) => Some("i".to_string()),
+        Expr::Blank => Some("\u{ff3f}".to_string()),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sort keys
+// ---------------------------------------------------------------------------
+
+/// A JS sort key: a nested array of numbers, strings and booleans. Kept as a
+/// tree rather than flattened to a string because alpha94 compares these with
+/// its own recursive `arrayCompare` — a scalar sorts before an array, and a
+/// shorter array before a longer one with the same prefix — which string
+/// coercion would not reproduce.
+#[derive(Clone, Debug)]
+enum Key {
+    Num(f64),
+    Str(String),
+    Bool(bool),
+    Arr(Vec<Key>),
+}
+
+/// JS `arrayCompare`.
+fn cmp_key(a: &Key, b: &Key) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (Key::Arr(xs), Key::Arr(ys)) => {
+            for (x, y) in xs.iter().zip(ys.iter()) {
+                let c = cmp_key(x, y);
+                if c != Ordering::Equal {
+                    return c;
+                }
+            }
+            xs.len().cmp(&ys.len())
+        }
+        // A non-array comes before an array.
+        (Key::Arr(_), _) => Ordering::Greater,
+        (_, Key::Arr(_)) => Ordering::Less,
+        // Two strings compare as strings; anything else compares numerically,
+        // as JS `<` does after ToPrimitive. A comparison that yields NaN is
+        // neither less nor greater, so it ties — which is what JS's
+        // `a < b ? -1 : a > b ? 1 : 0` returns.
+        (Key::Str(x), Key::Str(y)) => x.cmp(y),
+        _ => scalar_f64(a)
+            .partial_cmp(&scalar_f64(b))
+            .unwrap_or(Ordering::Equal),
+    }
+}
+
+fn scalar_f64(k: &Key) -> f64 {
+    match k {
+        Key::Num(v) => *v,
+        Key::Bool(b) => {
+            if *b {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        Key::Str(s) => s.trim().parse::<f64>().unwrap_or(f64::NAN),
+        Key::Arr(_) => f64::NAN,
+    }
+}
+
+/// JS `sort_key`. `ignore_negatives` is the caller-supplied flag; note that JS
+/// loses it one level down (`operands.map(sort_key, params)` passes the array
+/// index where the function expects its options), so nested keys are always
+/// built without it. That quirk is reproduced rather than fixed: it is the
+/// order existing documents were authored against.
+fn sort_key(e: &Expr, ignore_negatives: bool) -> Key {
+    // Every branch returns an array, which is what lets `^` splice two keys
+    // together below.
+    if let Some(name) = js_string_leaf(e) {
+        // `+` and `-` occur as bare strings inside `pm` expressions.
+        if name == "-" || name == "+" {
+            return arr3(8.0, "plus_minus_string", Key::Str(name));
+        }
+        return arr3(1.0, "symbol", Key::Str(name));
+    }
+    match e {
+        Expr::Num(n) => {
+            let v = n.to_f64();
+            arr3(
+                0.0,
+                "number",
+                Key::Num(if ignore_negatives { v.abs() } else { v }),
+            )
+        }
+        Expr::Bool(b) => arr3(1.0, "boolean", Key::Bool(*b)),
+        // A power keys as its base, then the marker, then its exponent — so
+        // `x`, `x^2` and `x^3` land next to each other rather than being
+        // scattered among the other two-operand operators.
+        Expr::Pow(base, exp) => {
+            let mut parts = key_items(sort_key(base, ignore_negatives));
+            parts.push(Key::Str("power".to_string()));
+            parts.extend(key_items(sort_key(exp, ignore_negatives)));
+            Key::Arr(parts)
+        }
+        Expr::Apply(head, args) => apply_key(head, args, ignore_negatives),
+        _ => {
+            let operands = js_operands(e);
+            let n = operands.len() as f64;
+            // The nested keys deliberately drop `ignore_negatives`; see the doc
+            // comment.
+            let factor_keys = Key::Arr(operands.iter().map(|o| sort_key(o, false)).collect());
+            match e {
+                Expr::Mul(_) => Key::Arr(vec![
+                    Key::Num(4.0),
+                    Key::Str("product".to_string()),
+                    Key::Num(n),
+                    factor_keys,
+                ]),
+                Expr::Div(..) => Key::Arr(vec![
+                    Key::Num(4.0),
+                    Key::Str("quotient".to_string()),
+                    Key::Num(n),
+                    factor_keys,
+                ]),
+                Expr::Add(_) => Key::Arr(vec![
+                    Key::Num(5.0),
+                    Key::Str("sum".to_string()),
+                    Key::Num(n),
+                    factor_keys,
+                ]),
+                Expr::Neg(_) if ignore_negatives => first_item(factor_keys),
+                Expr::Neg(_) => Key::Arr(vec![
+                    Key::Num(6.0),
+                    Key::Str("minus".to_string()),
+                    Key::Num(n),
+                    factor_keys,
+                ]),
+                Expr::OtherOp(s, _) if s.name() == "pm" => {
+                    if ignore_negatives {
+                        first_item(factor_keys)
+                    } else {
+                        Key::Arr(vec![
+                            Key::Num(6.0),
+                            Key::Str("pm".to_string()),
+                            Key::Num(n),
+                            factor_keys,
+                        ])
+                    }
+                }
+                // Shapes that can be coerced into each other sort together, so
+                // that a tuple and an open interval — or an array and a closed
+                // one — land in the same place. The operator name is left out
+                // of the key for exactly that reason.
+                Expr::Seq(SeqKind::Tuple | SeqKind::Vector | SeqKind::AltVector, _) => {
+                    Key::Arr(vec![Key::Num(7.0), Key::Num(n), factor_keys])
+                }
+                Expr::Seq(SeqKind::Array, _) => {
+                    Key::Arr(vec![Key::Num(9.0), Key::Num(n), factor_keys])
+                }
+                Expr::Interval { closed, .. } => match closed {
+                    (false, false) => {
+                        let mut parts = vec![Key::Num(7.0)];
+                        parts.extend(tail_of_first(&factor_keys));
+                        Key::Arr(parts)
+                    }
+                    (true, true) => {
+                        let mut parts = vec![Key::Num(9.0)];
+                        parts.extend(tail_of_first(&factor_keys));
+                        Key::Arr(parts)
+                    }
+                    _ => Key::Arr(vec![Key::Num(8.0), Key::Num(n), factor_keys]),
+                },
+                other => Key::Arr(vec![
+                    Key::Num(10.0),
+                    Key::Str(legacy_operator(other)),
+                    Key::Num(n),
+                    factor_keys,
+                ]),
+            }
+        }
+    }
+}
+
+fn apply_key(head: &Expr, args: &[Expr], ignore_negatives: bool) -> Key {
+    // `sqrt`, `cbrt` and `nthroot` are one family spelled three ways, and key
+    // as the family plus its degree so they sort together and by degree.
+    let mut key = match head {
+        Expr::Sym(s) if s.name() == "sqrt" => {
+            vec![Key::Num(5.0), Key::Str("root".to_string()), Key::Num(2.0)]
+        }
+        Expr::Sym(s) if s.name() == "cbrt" => {
+            vec![Key::Num(5.0), Key::Str("root".to_string()), Key::Num(3.0)]
+        }
+        Expr::Sym(s) if s.name() == "nthroot" => {
+            let degree = match args.get(1) {
+                Some(Expr::Num(n)) => Key::Num(n.to_f64()),
+                Some(other) => raw_key(other),
+                None => Key::Num(2.0),
+            };
+            vec![Key::Num(5.0), Key::Str("root".to_string()), degree]
+        }
+        _ => vec![
+            Key::Num(2.0),
+            Key::Str("function".to_string()),
+            raw_key(head),
+        ],
+    };
+
+    // JS reads the argument slot straight out of the tree: one argument that is
+    // itself an array has its head dropped and its operands read as the
+    // argument list. That is why `f(x+y)` keys as a two-argument call — a quirk
+    // of the encoding, faithfully kept, since it only affects ordering.
+    let (n_args, arg_keys) = match args {
+        [only] => match js_operands_opt(only) {
+            Some(ops) => (
+                ops.len(),
+                ops.iter().map(|a| sort_key(a, ignore_negatives)).collect(),
+            ),
+            None => (1, vec![sort_key(only, ignore_negatives)]),
+        },
+        many => (
+            many.len(),
+            many.iter().map(|a| sort_key(a, ignore_negatives)).collect(),
+        ),
+    };
+    key.push(Key::Arr(vec![Key::Num(n_args as f64), Key::Arr(arg_keys)]));
+    Key::Arr(key)
+}
+
+fn arr3(tag: f64, kind: &str, value: Key) -> Key {
+    Key::Arr(vec![Key::Num(tag), Key::Str(kind.to_string()), value])
+}
+
+fn key_items(k: Key) -> Vec<Key> {
+    match k {
+        Key::Arr(xs) => xs,
+        other => vec![other],
+    }
+}
+
+fn first_item(k: Key) -> Key {
+    match k {
+        Key::Arr(mut xs) if !xs.is_empty() => xs.remove(0),
+        other => other,
+    }
+}
+
+/// The first factor key with its leading tag dropped — JS `factor_keys[0].slice(1)`,
+/// used so an interval keys identically to the tuple or array it can be read as.
+fn tail_of_first(factor_keys: &Key) -> Vec<Key> {
+    match factor_keys {
+        Key::Arr(xs) => match xs.first() {
+            Some(Key::Arr(inner)) if !inner.is_empty() => inner[1..].to_vec(),
+            Some(other) => vec![other.clone()],
+            None => Vec::new(),
+        },
+        other => vec![other.clone()],
+    }
+}
+
+/// The raw JS tree value, as a key. Used where JS pushes an operand into the
+/// key without keying it — a function's name, which is usually a string but is
+/// an array for `f'`.
+fn raw_key(e: &Expr) -> Key {
+    if let Some(name) = js_string_leaf(e) {
+        return Key::Str(name);
+    }
+    match e {
+        Expr::Num(n) => Key::Num(n.to_f64()),
+        Expr::Bool(b) => Key::Bool(*b),
+        other => {
+            let mut parts = vec![Key::Str(legacy_operator(other))];
+            parts.extend(js_operands(other).iter().map(raw_key));
+            Key::Arr(parts)
+        }
+    }
+}
+
+/// The operand list this node would have had in the JS tree, or `None` when the
+/// JS tree holds a bare scalar there rather than an array.
+fn js_operands_opt(e: &Expr) -> Option<Vec<Expr>> {
+    match e {
+        Expr::Num(_) | Expr::Bool(_) => None,
+        _ if js_string_leaf(e).is_some() => None,
+        // The specials serialize as tagged objects, not arrays.
+        Expr::Const(_) => None,
+        Expr::RootOf { .. } => None,
+        _ => Some(js_operands(e)),
+    }
+}
+
+fn js_operands(e: &Expr) -> Vec<Expr> {
+    match e {
+        Expr::Add(xs)
+        | Expr::Mul(xs)
+        | Expr::And(xs)
+        | Expr::Or(xs)
+        | Expr::Union(xs)
+        | Expr::Intersect(xs)
+        | Expr::Seq(_, xs)
+        | Expr::OtherOp(_, xs) => xs.clone(),
+        Expr::Div(a, b) | Expr::Pow(a, b) | Expr::Index(a, b) => {
+            vec![a.as_ref().clone(), b.as_ref().clone()]
+        }
+        Expr::Neg(a) | Expr::Not(a) | Expr::Prime(a) => vec![a.as_ref().clone()],
+        // `["apply", f, arg]` — a single argument sits bare, several become a
+        // tuple.
+        Expr::Apply(head, args) => vec![
+            head.as_ref().clone(),
+            match args.as_slice() {
+                [only] => only.clone(),
+                many => Expr::Seq(SeqKind::Tuple, many.to_vec()),
+            },
+        ],
         Expr::Interval { endpoints, closed } => vec![
             Expr::Seq(
                 SeqKind::Tuple,
@@ -337,9 +807,24 @@ fn key_children(e: &Expr) -> Vec<Expr> {
                 vec![Expr::Bool(closed.0), Expr::Bool(closed.1)],
             ),
         ],
-        Expr::Relation { operands, .. } => operands.clone(),
+        // A two-operand relation is `[op, a, b]`; a chained one is
+        // `["lts", <operands tuple>, <strictness tuple>]`.
+        Expr::Relation { operands, ops } => {
+            if ops.len() <= 1 {
+                operands.clone()
+            } else {
+                vec![
+                    Expr::Seq(SeqKind::Tuple, operands.clone()),
+                    Expr::Seq(
+                        SeqKind::Tuple,
+                        ops.iter()
+                            .map(|o| Expr::Bool(matches!(o, RelOp::Lt | RelOp::Gt)))
+                            .collect(),
+                    ),
+                ]
+            }
+        }
         Expr::Matrix(m) => m.entries().to_vec(),
-        Expr::OtherOp(_, xs) => xs.clone(),
         _ => Vec::new(),
     }
 }
@@ -354,37 +839,28 @@ fn legacy_operator(e: &Expr) -> String {
         Expr::Or(_) => "or".to_string(),
         Expr::Union(_) => "union".to_string(),
         Expr::Intersect(_) => "intersect".to_string(),
+        Expr::Add(_) => "+".to_string(),
+        Expr::Mul(_) => "*".to_string(),
+        Expr::Div(..) => "/".to_string(),
+        Expr::Neg(_) => "-".to_string(),
+        Expr::Apply(..) => "apply".to_string(),
         Expr::Seq(k, _) => k.js_name().to_string(),
         Expr::Interval { .. } => "interval".to_string(),
-        // A chained relation keys under its first operator, as the JS tree's
-        // head would have been for the two-operand case.
-        Expr::Relation { ops, .. } => ops
-            .first()
-            .map(|o| o.js_name().to_string())
-            .unwrap_or_else(|| "=".to_string()),
+        // A chained relation keys under `lts`, as the JS tree's head would have
+        // been; a two-operand one under its own operator.
+        Expr::Relation { ops, .. } => {
+            if ops.len() > 1 {
+                "lts".to_string()
+            } else {
+                ops.first()
+                    .map(|o| o.js_name().to_string())
+                    .unwrap_or_else(|| "=".to_string())
+            }
+        }
         Expr::Matrix(_) => "matrix".to_string(),
         Expr::OtherOp(s, _) => s.name(),
         Expr::RootOf { .. } => "rootof".to_string(),
         Expr::Ldots => "ldots".to_string(),
         _ => "unknown".to_string(),
     }
-}
-
-fn const_name(c: MathConst) -> &'static str {
-    match c {
-        MathConst::Pi => "pi",
-        MathConst::E => "e",
-        MathConst::I => "i",
-        MathConst::Inf => "infinity",
-        MathConst::NegInf => "-infinity",
-        MathConst::NaN => "NaN",
-        MathConst::None => "None",
-    }
-}
-
-/// A number as JavaScript would have stringified it inside the key. The JS
-/// trees held f64s, so an exact rational keys by its f64 projection — the same
-/// value the JS tree would have carried.
-fn js_number(n: &Number) -> String {
-    n.js_string()
 }

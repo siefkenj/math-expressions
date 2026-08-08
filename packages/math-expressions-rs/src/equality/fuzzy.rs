@@ -18,7 +18,21 @@ pub(super) fn fuzzy_tree_eq(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
             let exp_ok = if opts.include_error_in_number_exponents || !is_literal_exponent(e1) {
                 fuzzy_tree_eq(e1, e2, opts)
             } else {
-                e1 == e2
+                // The allowance does not reach the exponent, but "no allowance"
+                // is not "bit-identical": JS re-enters its comparison with
+                // `allowed_error_in_numbers` left at its default of 0, which
+                // still admits a 1e-14 *relative* difference. A structural `==`
+                // here made `x^2` and `x^2.0` — the same exponent, one arriving
+                // as an integer and one as a float from a different code path —
+                // grade as different expressions.
+                fuzzy_tree_eq(
+                    e1,
+                    e2,
+                    &EqOptions {
+                        allowed_error_in_numbers: 0.0,
+                        ..opts.clone()
+                    },
+                )
             };
             base_ok && exp_ok
         }

@@ -57,7 +57,31 @@ fn fold_nodes(e: &Expr) -> Expr {
     let Expr::Apply(head, args) = &e else {
         return e;
     };
-    fold_application(head, args).map_or(e, Expr::Num)
+    if let Some(v) = fold_application(head, args) {
+        return Expr::Num(v);
+    }
+    // The integer-valued functions can fold through an argument that has no
+    // exact value of its own: `ceil(log(31.1))` is 4, whatever log(31.1) is to
+    // the last digit. Their *result* is exact even when their input is not,
+    // which is what makes this a legitimate exception to the exact-only rule
+    // above — the float never survives the fold. Anything closer to the
+    // decision boundary than the argument's own accuracy is left alone by
+    // `snap_to_integer`'s window rather than guessed at.
+    if args.len() == 1 && !matches!(args[0], Expr::Num(_)) && is_integer_valued(head) {
+        let approx = fold_nodes_approx(&args[0]);
+        if matches!(approx, Expr::Num(_)) {
+            if let Some(v) = fold_application(head, std::slice::from_ref(&approx)) {
+                return Expr::Num(v);
+            }
+        }
+    }
+    e
+}
+
+/// Functions whose value is an integer for every input they accept, so folding
+/// them loses nothing even when the argument had to be evaluated numerically.
+fn is_integer_valued(head: &Expr) -> bool {
+    matches!(head, Expr::Sym(s) if matches!(s.name().as_str(), "floor" | "ceil" | "round"))
 }
 
 /// [`fold_numeric_applications`], but a function of numeric arguments that has

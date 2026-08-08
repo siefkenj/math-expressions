@@ -62,3 +62,32 @@ describe("exp and e^ are one spelling", () => {
     expect(c.equalsViaSyntax(d)).toBe(true);
   });
 });
+
+describe("substitute: sequential, with a simultaneous sibling", () => {
+  const f = () => me.fromText("sin(x+y)");
+
+  it("substitute keeps the JS left-to-right pass", () => {
+    // A replacement is open to the bindings that follow it, which DoenetML's
+    // `<math>` code expansion depends on — its codes' values contain further
+    // codes and must expand.
+    expect(
+      f()
+        .substitute({ x: me.fromText("10y"), y: me.fromText("-pi") })
+        .toString(),
+    ).toBe("sin(10 (-π) - π)");
+  });
+
+  it("substitute_all binds every variable at once", () => {
+    expect(
+      f()
+        .substitute_all({ x: me.fromText("10y"), y: me.fromText("-pi") })
+        .toString(),
+    ).toBe("sin(10 y - π)");
+    // The classic swap, which no sequential pass can do.
+    expect(
+      f()
+        .substitute_all({ x: me.fromText("y"), y: me.fromText("x") })
+        .toString(),
+    ).toBe("sin(y + x)");
+  });
+});

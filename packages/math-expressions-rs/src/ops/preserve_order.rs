@@ -32,10 +32,20 @@ use crate::num::Number;
 ///
 /// [`evaluate_numbers`]: crate::evaluate_numbers
 pub fn evaluate_numbers_preserve_order(e: &Expr) -> Expr {
+    // An expression with an operand missing is returned as written; see
+    // `simplify_with` for why folding across a blank is not allowed. Checked
+    // once here rather than inside `fold`, which recurses.
+    if crate::equality::contains_blank(e) {
+        return e.clone();
+    }
+    fold(e)
+}
+
+fn fold(e: &Expr) -> Expr {
     // Bottom-up: children fold first, so an inner `2*3` has already become `6`
     // by the time the surrounding sum looks for adjacent numbers — which is
     // what makes `1 + 2*3 + 4` reach `11` in a single pass.
-    let e = map_children(e, evaluate_numbers_preserve_order);
+    let e = map_children(e, fold);
     match e {
         Expr::Add(terms) => sum(terms),
         Expr::Mul(factors) => product(factors),

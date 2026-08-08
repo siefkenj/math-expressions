@@ -32,10 +32,19 @@ fn a_sign_that_cancels_one_inside_moves_in() {
 
 #[test]
 fn a_sign_that_would_multiply_stays_put() {
-    // n = 0, k = 2: moving it in turns one sign into two.
-    assert_eq!(simplified("-(x+y)"), r#"["-",["+","x","y"]]"#);
-    // n = 1, k = 3: `2n < k`, so the written form wins.
-    assert_eq!(simplified("-(x+y-z)"), r#"["-",["+","x","y",["-","z"]]]"#);
+    // A bare `−1` over a sum is not this rule at all — `rule_distribute_neg_over_sum`
+    // takes it first and distributes unconditionally, because negating a sum
+    // adds no terms and no factors. So the "would multiply the signs" reasoning
+    // below applies only once some *other* factor is present; with nothing but
+    // the sign, the sum is simply negated termwise.
+    //
+    // These two rows used to assert the opposite. They were the only place this
+    // crate disagreed with `math-expressions@2.0.0-alpha94`, the version
+    // DoenetML pins, which gives `["+",["-","x"],["-","y"]]` here — and the
+    // disagreement had a cost: a difference of two sums could never cancel, so
+    // `(q + 12 - (q+2))/2` stayed unreduced where the JS library gives `5`.
+    assert_eq!(simplified("-(x+y)"), r#"["+",["-","x"],["-","y"]]"#);
+    assert_eq!(simplified("-(x+y-z)"), r#"["+",["-","x"],["-","y"],"z"]"#);
     // A *positive* coefficient has no sign to move in the first place.
     assert_eq!(simplified("2(1-x)"), r#"["*",2,["+",["-","x"],1]]"#);
     // Negative coefficient, but no factor worth giving the sign to.

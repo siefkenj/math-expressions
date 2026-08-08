@@ -4,13 +4,13 @@
 use super::Expression;
 use math_expressions::{
     constants_to_floats, default_order as rust_default_order, derivative as rust_derivative,
-    equals as rust_equals, evaluate_numbers,
-    evaluate_numbers_evaluate_functions, evaluate_numbers_evaluate_functions_with_digits,
-    evaluate_numbers_preserve_order, evaluate_numbers_preserve_order_with_digits,
-    evaluate_numbers_with_digits, evaluate_to_constant as rust_evc, expand as rust_expand, ops,
-    reduce_rational, round_numbers_to_decimals, round_numbers_to_precision,
-    simplify as rust_simplify, simplify_with as rust_simplify_with, to_latex, to_text, Assumptions,
-    EqOptions, Expr, LatexOpts, MaxDigits, TextOpts, TextToAst, TextToAstOptions,
+    equals as rust_equals, evaluate_numbers, evaluate_numbers_evaluate_functions,
+    evaluate_numbers_evaluate_functions_with_digits, evaluate_numbers_preserve_order,
+    evaluate_numbers_preserve_order_with_digits, evaluate_numbers_with_digits,
+    evaluate_to_constant as rust_evc, expand as rust_expand, ops, reduce_rational,
+    round_numbers_to_decimals, round_numbers_to_precision, simplify as rust_simplify,
+    simplify_with as rust_simplify_with, to_latex, to_text, Assumptions, EqOptions, Expr,
+    LatexOpts, MaxDigits, TextOpts, TextToAst, TextToAstOptions,
 };
 use wasm_bindgen::prelude::*;
 
@@ -333,6 +333,29 @@ impl Expression {
     pub fn substitute_var(&self, var: &str, value: &Expression) -> Expression {
         let map = std::collections::HashMap::from([(var.to_string(), value.0.clone())]);
         self.derive(ops::substitute(&self.0, &map))
+    }
+
+    /// Replace several variables at once, from a `{name: tree}` JSON object.
+    ///
+    /// **Simultaneously**, which is the whole reason this exists: applying the
+    /// bindings one at a time captures. `sin(x+y)` with `x → 10y` and
+    /// `y → -pi` is `sin(10y − π)`, but substituting `x` first puts a fresh `y`
+    /// in the tree for the second substitution to replace, giving
+    /// `sin(-10π − π)` — a wrong answer, silently, and one that depends on
+    /// key order.
+    pub fn substitute_map(&self, map_json: &str) -> Result<Expression, JsError> {
+        let value: serde_json::Value =
+            serde_json::from_str(map_json).map_err(|e| JsError::new(&e.to_string()))?;
+        let obj = value
+            .as_object()
+            .ok_or_else(|| JsError::new("substitute_map: expected an object of {name: tree}"))?;
+        let mut map = std::collections::HashMap::with_capacity(obj.len());
+        for (name, tree) in obj {
+            let expr = math_expressions::expr::serde::try_from_js(tree)
+                .map_err(|e| JsError::new(&format!("substitute_map: {name}: {e}")))?;
+            map.insert(name.clone(), expr);
+        }
+        Ok(self.derive(ops::substitute(&self.0, &map)))
     }
 
     /// Evaluate at many values of one variable in a single call.

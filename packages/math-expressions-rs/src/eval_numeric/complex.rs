@@ -63,7 +63,12 @@ fn eval_complex_inner(e: &Expr, env: &Env) -> Option<Complex64> {
             "pi" => Complex64::new(std::f64::consts::PI, 0.0),
             "e" => Complex64::new(std::f64::consts::E, 0.0),
             "i" => Complex64::I,
-            name => *env.get(name)?,
+            // A binding wins; mathjs's named constants stand in when there is
+            // none, which is the scope the JS library evaluated in.
+            name => match env.get(name) {
+                Some(v) => *v,
+                None => Complex64::new(crate::expr::sym::mathjs_constant(name)?, 0.0),
+            },
         },
 
         Expr::Add(xs) => xs

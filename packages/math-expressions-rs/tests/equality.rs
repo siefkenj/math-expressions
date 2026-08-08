@@ -511,3 +511,41 @@ fn an_exponent_is_exempt_from_the_allowed_error_only_when_it_is_a_typed_number()
     let b = math_expressions::normalize_function_names(&parse("10000exp(7x/y)"));
     assert!(equals_syntactic(&a, &b, &fuzzy));
 }
+
+#[test]
+fn rounding_functions_fold_through_an_inexact_argument() {
+    // `ceil(log(31.1))` is 4 whatever log(31.1) is to the last digit: the
+    // *result* is exact even when the argument has no exact value, which is
+    // what lets these fold where the exact-only rule leaves them alone.
+    let simp = |s: &str| math_expressions::simplify(&parse(s));
+    let num = |n: i64| Expr::Num(Number::Int(n));
+    assert_eq!(simp("ceil(log(31.1))"), num(4));
+    assert_eq!(simp("floor(log(31.1))"), num(3));
+    // A hair below an integer is that integer — the value got there by
+    // arithmetic, and flooring the shortfall away is an off-by-one.
+    assert_eq!(simp("floor(3.999999999999999)"), num(4));
+    assert_eq!(simp("ceil(-6999.999999999999)"), num(-7000));
+    // ...but the allowance is roundoff-sized, not a rounding rule of its own.
+    assert_eq!(simp("floor(3.99)"), num(3));
+    assert_eq!(simp("ceil(2.01)"), num(3));
+}
+
+#[test]
+fn mathjs_named_constants_evaluate() {
+    // The JS library evaluated through mathjs's scope, so these names had
+    // values wherever a closed expression was reduced to a number. DoenetML
+    // depends on it: `1E-300` typed into a `<mathInput>` with scientific
+    // notation off parses as `1·E − 300`, and `<isNumber>` answers yes.
+    use math_expressions::evaluate_to_constant;
+    let expr = Expr::Add(vec![
+        Expr::Mul(vec![Expr::Num(Number::Int(1)), Expr::sym("E")]),
+        Expr::Num(Number::Int(-300)),
+    ]);
+    let v = evaluate_to_constant(&expr).expect("E is Euler's number here");
+    assert!((v.re - (std::f64::consts::E - 300.0)).abs() < 1e-9);
+    assert!(evaluate_to_constant(&Expr::sym("PI")).is_some());
+    assert!(evaluate_to_constant(&Expr::sym("SQRT2")).is_some());
+    // Not language constants, though: they stay ordinary variables, so
+    // `variables()` lists them and a sampler binds them.
+    assert!(math_expressions::variables(&Expr::sym("E")).contains(&"E".to_string()));
+}

@@ -21,6 +21,33 @@ pub fn is_constant_symbol(name: &str) -> bool {
     CONSTANT_SYMBOLS.contains(&name)
 }
 
+/// The named constants mathjs put in scope, which the JS library evaluated
+/// through — so `1E-300` (uppercase `E`, not scientific notation unless the
+/// parser is asked) came out as `1·e − 300`, a number, and `SQRT2` as 1.414.
+///
+/// Deliberately *not* [`CONSTANT_SYMBOLS`]: these are not constants of the
+/// language. The parsers do not emit them, they sort and print as the ordinary
+/// variables they are, and [`crate::ops::variables`] still lists them — which
+/// matters, because the equality sampler binds every variable it lists, and a
+/// binding takes precedence over this table wherever one exists. The table
+/// applies only where a *closed* expression is being reduced to a number and
+/// there is no binding to be had, which is exactly the reach mathjs's scope had.
+pub fn mathjs_constant(name: &str) -> Option<f64> {
+    Some(match name {
+        "E" => std::f64::consts::E,
+        "PI" => std::f64::consts::PI,
+        "LN2" => std::f64::consts::LN_2,
+        "LN10" => std::f64::consts::LN_10,
+        "LOG2E" => std::f64::consts::LOG2_E,
+        "LOG10E" => std::f64::consts::LOG10_E,
+        "SQRT1_2" => std::f64::consts::FRAC_1_SQRT_2,
+        "SQRT2" => std::f64::consts::SQRT_2,
+        "Infinity" => f64::INFINITY,
+        "NaN" => f64::NAN,
+        _ => return None,
+    })
+}
+
 /// The number of distinct symbol names interned so far — a memory gauge for the
 /// long-lived worker (DoenetML issue #83, item 8). The interner is append-only:
 /// a `Sym` is a raw index into it, so names are never evicted while any `Sym`

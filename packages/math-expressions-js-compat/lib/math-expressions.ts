@@ -160,6 +160,15 @@ function varName(v: string | Expression): string {
   return String(v);
 }
 
+/** The tree heads `get_component` will index — the JS library's set. */
+const COMPONENT_CONTAINERS = new Set([
+  "list",
+  "tuple",
+  "vector",
+  "altvector",
+  "array",
+]);
+
 /** The Context (`me`) shape, used for the back-reference on each Expression. */
 type Ctx = typeof Context;
 
@@ -550,8 +559,33 @@ class Expression {
   // `component` is an operand index into the tree spelling, or a path of them
   // for nested components. A matrix is `["matrix", ["tuple", rows, cols],
   // ["tuple", <row-tuples>]]`, so an entry of one is `[1, row, col]`.
+  /**
+   * The `component`-th operand of a **container** — a list, tuple, vector,
+   * altvector or array.
+   *
+   * **Throws** for anything else, which is the legacy contract and what
+   * callers are written against: DoenetML wraps this in `try/catch` and reads
+   * the throw as "not a container, use the value whole". Two things went wrong
+   * without it. The wasm entry point indexes the operands of *any* operator
+   * (its paths are over the flattened JS tree, which is right for what it is
+   * used for internally), so `xyz` — a product — reported its first factor as
+   * `.x`, and a scalar reported `undefined`, which read as a container holding
+   * nothing.
+   */
   get_component(component) {
-    return wrap(this._w.get_component(componentPath(component)), this.context);
+    const t = this.tree;
+    if (!Array.isArray(t) || !COMPONENT_CONTAINERS.has(t[0])) {
+      throw Error(
+        "Invalid get_component: expected list, tuple, vector, or array",
+      );
+    }
+    const got = this._w.get_component(componentPath(component));
+    if (got === undefined) {
+      throw Error(
+        "Invalid get_component: expected list, tuple, vector, or array",
+      );
+    }
+    return wrap(got, this.context);
   }
   substitute_component(component, value) {
     return wrap(
@@ -631,11 +665,17 @@ class Expression {
   }
 
   // ---- evaluation ----
-  // Legacy returned a plain number for a real value and a math.js complex
-  // object for a non-real one, so `fromText("i").evaluate_to_constant()` is
-  // `{re:0, im:1}`, not null. The wasm entry point reports only the real case;
-  // the complex one comes back through `evaluate_to_complex`, which applies the
-  // same free-variable and undefined-leaf rules.
+  // Legacy returned a plain number for a real value and a complex value for a
+  // non-real one, so `fromText("i").evaluate_to_constant()` is `{re:0, im:1}`,
+  // not null. The wasm entry point reports only the real case; the complex one
+  // comes back through `evaluate_to_complex`, which applies the same
+  // free-variable and undefined-leaf rules.
+  //
+  // The complex value is a math.js `Complex`, as legacy's was: callers pass it
+  // straight into math.js functions (`divide(evaluate_to_constant(a), …)`),
+  // which reject a plain object. A consumer that puts one into a *state
+  // variable* should flatten it there — it is structured-cloned to the main
+  // thread and arrives prototype-stripped either way.
   evaluate_to_constant() {
     const v = this._w.evaluate_to_constant();
     if (v !== undefined) return v;
@@ -673,6 +713,19 @@ class Expression {
       values instanceof Float64Array ? values : Float64Array.from(values),
     );
   }
+  /**
+   * Replace variables by their bindings, one binding at a time.
+   *
+   * Sequential, as the JS library was, and deliberately: a replacement is
+   * itself open to the bindings that follow it, which DoenetML depends on —
+   * its `<math>` machinery substitutes generated *codes* whose values contain
+   * further codes, and expects them to expand.
+   *
+   * The cost is capture: `sin(x+y)` with `{x: "10y", y: "-pi"}` gives
+   * `sin(-10π − π)`, because the `y` the first binding introduced is still
+   * there for the second. A caller replacing several *independent* variables
+   * wants {@link substitute_all} instead.
+   */
   substitute(bindings) {
     let cur = this._w;
     for (const k of Object.keys(bindings || {})) {
@@ -683,6 +736,26 @@ class Expression {
       cur = next;
     }
     return wrap(cur, this.context);
+  }
+
+  /**
+   * Replace variables by their bindings **simultaneously** — no binding sees
+   * another's replacement.
+   *
+   * This is what evaluating a multi-variable function at given arguments
+   * needs: `f(x,y) = sin(x+y)` at `(10y, -π)` is `sin(10y − π)`, and
+   * {@link substitute}'s left-to-right pass would turn the freshly-substituted
+   * `y` into `-π` and answer `sin(-11π)`.
+   */
+  substitute_all(bindings) {
+    const keys = Object.keys(bindings || {});
+    if (keys.length === 0) return this;
+    const map = {};
+    for (const k of keys) map[k] = bindings[k];
+    return wrap(
+      this._w.substitute_map(JSON.stringify(map, astReplacer)),
+      this.context,
+    );
   }
 
   // ---- arithmetic ----
