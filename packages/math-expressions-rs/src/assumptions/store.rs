@@ -3,8 +3,8 @@
 //! Storage mirrors the JS `initialize_assumptions` shape: per-variable facts
 //! (`by_var`) added via [`Assumptions::add`], retrieved with
 //! [`Assumptions::get`], removed with [`Assumptions::remove`]. A fact is a
-//! canonical relation `Expr` (`x > 0`, `n ∈ Z`, `x ≠ 0`, `x = 3`, chains split
-//! on `And`).
+//! canonical relation `Expr` (`x > 0`, `n ∈ Z`, `x ≠ 0`, `x = 3`, optionally
+//! wrapped in `not`), with chains split on `And` and on a negated `Or`.
 
 use crate::expr::Expr;
 use crate::normalize::canonicalize;
@@ -31,7 +31,7 @@ impl Assumptions {
         let canon = canonicalize(assumption);
         for conjunct in conjuncts(&canon) {
             let mut vars = std::collections::BTreeSet::new();
-            crate::eval_numeric::complex::free_symbols(conjunct, &mut vars);
+            crate::eval_numeric::complex::free_symbols(&conjunct, &mut vars);
             for v in vars {
                 self.by_var.entry(v).or_default().push(conjunct.clone());
             }
@@ -55,7 +55,7 @@ impl Assumptions {
         let canon = canonicalize(assumption);
         for conjunct in conjuncts(&canon) {
             for facts in self.by_var.values_mut() {
-                facts.retain(|f| f != conjunct);
+                facts.retain(|f| *f != conjunct);
             }
         }
         self.by_var.retain(|_, v| !v.is_empty());
@@ -78,7 +78,7 @@ impl Assumptions {
         let canon = canonicalize(assumption);
         for conjunct in conjuncts(&canon) {
             let mut vars = std::collections::BTreeSet::new();
-            crate::eval_numeric::complex::free_symbols(conjunct, &mut vars);
+            crate::eval_numeric::complex::free_symbols(&conjunct, &mut vars);
             if vars.contains("x") {
                 self.generic.push(conjunct.clone());
             }
@@ -89,7 +89,7 @@ impl Assumptions {
     pub fn remove_generic(&mut self, assumption: &Expr) {
         let canon = canonicalize(assumption);
         for conjunct in conjuncts(&canon) {
-            self.generic.retain(|f| f != conjunct);
+            self.generic.retain(|f| *f != conjunct);
         }
     }
 
@@ -119,9 +119,20 @@ impl Assumptions {
     }
 }
 
-fn conjuncts(e: &Expr) -> Vec<&Expr> {
+/// The conjuncts of an assumption. `and` splits, and — by De Morgan — so does
+/// a negated `or`: `not(p or q)` is filed as the two facts `not p` and
+/// `not q`, which is what lets the reader see a plain (negated) relation
+/// instead of a compound it has to give up on.
+fn conjuncts(e: &Expr) -> Vec<Expr> {
     match e {
         Expr::And(xs) => xs.iter().flat_map(conjuncts).collect(),
-        other => vec![other],
+        Expr::Not(inner) => match &**inner {
+            Expr::Or(xs) => xs
+                .iter()
+                .flat_map(|x| conjuncts(&Expr::Not(Box::new(x.clone()))))
+                .collect(),
+            _ => vec![e.clone()],
+        },
+        other => vec![other.clone()],
     }
 }

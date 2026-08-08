@@ -15,6 +15,8 @@ import {
 } from "./trees/flatten";
 import * as converters from "./converters/index";
 import { jsonToAst, tagNonFinite } from "./converters/ast-json";
+import { AssumptionStore } from "./assumptions/store";
+import { get_tree } from "./trees/util";
 import { compileRustExpr } from "math-expressions-rs-wasm";
 import type { WasmExpression } from "math-expressions-rs-wasm";
 import type { MathJsInstance } from "mathjs";
@@ -939,6 +941,13 @@ function parseLatex(string, opts?) {
   );
 }
 function createFrom(expr) {
+  // "Nothing" converts to nothing. `fromAst(undefined)` reaches the core as a
+  // literal `undefined` string and dies inside the parser with a
+  // `Cannot read properties of undefined` — but callers do write
+  // `me.from(value)` over a table whose empty rows mean "no expression", and
+  // the legacy library handed those back an expression with an undefined tree
+  // that every consumer treated as absent.
+  if (expr === undefined || expr === null) return undefined;
   if (typeof expr === "string") {
     try {
       return parseText(expr);
@@ -1245,10 +1254,14 @@ const Context = {
   equalWithSignErrors,
 
   // ---- assumptions (context-level) ----
-  // Backed by a wasm `Assumptions` handle plus a parallel text list so
-  // `simplify_with_assumptions` can be fed. `get_assumptions` is best-effort —
-  // the original returned a richly-structured object this does not reproduce.
-  // Constructed lazily, and that is load-bearing. As a plain `new
+  // Two stores, kept in step. The wasm `Assumptions` handle answers the
+  // predicates (`is_real`, `is_positive`, …) and is fed the text spelling of
+  // every assumption; the parallel text list is what `simplify_with_assumptions`
+  // takes. `_assumptionStore` (see `lib/assumptions/store.ts`) holds the same
+  // facts as trees, filed per variable, because `get_assumptions` has to hand a
+  // fact *back* — a shape the wasm handle has no notion of.
+  //
+  // The handle is constructed lazily, and that is load-bearing. As a plain `new
   // wasm.Assumptions()` in this literal it ran while *this module's body* was
   // still evaluating, so any consumer importing `setWasmModule` from the package
   // root forced the wasm load before it had a chance to inject — the injection
@@ -1262,42 +1275,133 @@ const Context = {
     this._assumptionsHandleCache = h;
   },
   _assumptionTexts: [],
+  _assumptionStore: new AssumptionStore(),
   set_to_default() {
     this._assumptionsHandle = new wasm.Assumptions();
     this._assumptionTexts = [];
+    this._assumptionStore.clear();
   },
   clear_assumptions() {
     this.set_to_default();
   },
-  add_assumption(assumption) {
-    const text = toExpr(assumption, this).toString();
-    this._assumptionsHandle.add(text);
-    this._assumptionTexts.push(text);
-    return true;
+  add_assumption(assumption, exclude_generic?) {
+    const tree = syncAssumptionText(this, assumption, "add");
+    if (tree === undefined) return 0;
+    return this._assumptionStore.add_assumption(tree, exclude_generic);
   },
   add_generic_assumption(assumption) {
-    return this.add_assumption(assumption);
+    // A generic assumption is stated in terms of `x` and stands for every
+    // variable, which the wasm store cannot express; it gets the `x` spelling,
+    // which is at least right for `x` itself.
+    const tree = syncAssumptionText(this, assumption, "add");
+    if (tree === undefined) return 0;
+    return this._assumptionStore.add_generic_assumption(tree);
   },
   remove_assumption(assumption) {
-    const text = toExpr(assumption, this).toString();
-    this._assumptionsHandle.remove(text);
-    this._assumptionTexts = this._assumptionTexts.filter((t) => t !== text);
+    const tree = syncAssumptionText(this, assumption, "remove");
+    if (tree === undefined) return 0;
+    return this._assumptionStore.remove_assumption(tree);
   },
   remove_generic_assumption(assumption) {
-    return this.remove_assumption(assumption);
+    const tree = syncAssumptionText(this, assumption, "remove");
+    if (tree === undefined) return 0;
+    return this._assumptionStore.remove_generic_assumption(tree);
   },
-  get_assumptions() {
-    if (!this._assumptionTexts.length) return undefined;
-    try {
-      return Context.fromText(this._assumptionTexts.join(" and "));
-    } catch {
-      return undefined;
-    }
+  get_assumptions(variables_or_expr, params?) {
+    return this._assumptionStore.get_assumptions(variables_or_expr, params);
   },
+  // `me.assumptions` was the assumptions object itself, carrying the same
+  // add/get methods as the context. This port also has to keep answering the
+  // wasm predicates through it, since `lib/assumptions/element_of_sets` reads
+  // `Context.assumptions` as its default source — so the facade forwards those
+  // to the handle rather than replacing it.
+  _assumptionsFacadeCache: undefined,
   get assumptions() {
-    return this._assumptionsHandle;
+    return (this._assumptionsFacadeCache ??= makeAssumptionsFacade());
   },
 };
+
+/**
+ * Mirror an assumption into the wasm handle and the `simplify_with_assumptions`
+ * text list, returning its tree for the JS store to file — or undefined when
+ * there is no assumption at all.
+ *
+ * An empty assumption is a no-op rather than an error: the spec tables drive
+ * `me.add_assumption(me.from(input))` over rows whose input is undefined,
+ * meaning "no assumptions for this row".
+ */
+function syncAssumptionText(
+  context: Ctx,
+  assumption: ExpressionLike,
+  action: "add" | "remove",
+): Tree | undefined {
+  const tree = get_tree(assumption);
+  if (!Array.isArray(tree)) return undefined;
+
+  const text = toExpr(assumption, context).toString();
+  if (action === "add") {
+    context._assumptionsHandle.add(text);
+    context._assumptionTexts.push(text);
+  } else {
+    context._assumptionsHandle.remove(text);
+    context._assumptionTexts = context._assumptionTexts.filter(
+      (t) => t !== text,
+    );
+  }
+  return tree;
+}
+
+/**
+ * `me.assumptions`: the JS assumption API plus the wasm predicates, both
+ * pointing at the live context state (never a snapshot — the spec clears and
+ * re-adds assumptions between calls while holding the same object).
+ */
+function makeAssumptionsFacade() {
+  const facade: Record<string, unknown> = {
+    get _assumptionsHandle() {
+      return Context._assumptionsHandle;
+    },
+    get byvar() {
+      return Context._assumptionStore.byvar;
+    },
+    get derived() {
+      return Context._assumptionStore.derived;
+    },
+    get generic() {
+      return Context._assumptionStore.generic;
+    },
+  };
+  for (const name of [
+    "get_assumptions",
+    "add_assumption",
+    "add_generic_assumption",
+    "remove_assumption",
+    "remove_generic_assumption",
+    "clear_assumptions",
+    "set_to_default",
+  ]) {
+    facade[name] = (...args: unknown[]) => Context[name](...args);
+  }
+  // The three-valued predicates and the raw relation add/remove live on the
+  // wasm handle; keep them reachable so a caller holding `me.assumptions` can
+  // still use it as one.
+  for (const name of [
+    "is_integer",
+    "is_real",
+    "is_complex",
+    "is_nonzero",
+    "is_nonnegative",
+    "is_nonpositive",
+    "is_positive",
+    "is_negative",
+    "add",
+    "remove",
+  ]) {
+    facade[name] = (...args: unknown[]) =>
+      Context._assumptionsHandle[name](...args);
+  }
+  return facade;
+}
 
 // The legacy library exposed every `Expression` method a second time as a free
 // function on the context, expression-first: `me.simplify(expr)` alongside

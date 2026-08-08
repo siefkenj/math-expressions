@@ -2,15 +2,24 @@
 // optional assumptions source) and returns true / false / undefined, mapping to
 // the wasm `Assumptions` three-valued predicates.
 import wasm from "../_wasm";
+import Context from "../math-expressions";
 
-const EMPTY = new wasm.Assumptions();
+// Constructed lazily, like `Context._assumptionsHandle` and for the same
+// reason: a `new wasm.Assumptions()` evaluated in this module's body would
+// force the wasm load before a host had any chance to `setWasmModule`.
+let emptyCache;
+const empty = () => (emptyCache ??= new wasm.Assumptions());
 
 function handleFor(assumptions) {
-  if (!assumptions) return EMPTY;
+  // No explicit source: consult the context's live global assumptions, so
+  // `is_real(me.fromText("x+y"))` sees `me.add_assumption(...)` state. The
+  // original JS predicates defaulted to the global store this way; falling
+  // back to an empty one made every no-argument query answer "unknown".
+  if (!assumptions) return Context.assumptions ?? empty();
   // Our Context exposes its live handle as `.assumptions`.
   if (assumptions._assumptionsHandle) return assumptions._assumptionsHandle;
   if (typeof assumptions.is_integer === "function") return assumptions; // a raw handle
-  return EMPTY;
+  return empty();
 }
 
 function rawExpr(expression) {

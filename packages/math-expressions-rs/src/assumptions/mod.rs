@@ -3,8 +3,9 @@
 //! The store ([`store`]) mirrors the JS `initialize_assumptions` shape:
 //! per-variable facts added via [`Assumptions::add`], retrieved with
 //! [`Assumptions::get`], removed with [`Assumptions::remove`]. A fact is a
-//! canonical relation `Expr` (`x > 0`, `n ∈ Z`, `x ≠ 0`, `x = 3`, chains split
-//! on `And`). Generic assumptions (JS `add_generic_assumption`) are ported.
+//! canonical relation `Expr` (`x > 0`, `n ∈ Z`, `x ≠ 0`, `x = 3`, optionally
+//! wrapped in `not`), with chains split on `And` and on a negated `Or`.
+//! Generic assumptions (JS `add_generic_assumption`) are ported.
 //!
 //! Queries ([`queries`]) are the eight three-valued predicates of
 //! `lib/assumptions/element_of_sets.js` — `is_integer`, `is_real`,
