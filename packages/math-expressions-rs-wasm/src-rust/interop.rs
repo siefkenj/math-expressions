@@ -29,6 +29,27 @@ pub fn from_ast(tree_json: &str) -> Result<Expression, JsError> {
         .map_err(|e| JsError::new(&e))
 }
 
+/// Build an `Expression` from a bare f64 — the fast path for `me.fromAst(n)`.
+///
+/// The general [`from_ast`] takes a JSON string, so passing a single number
+/// through it costs a `JSON.stringify` on the JS side and a full JSON parse
+/// here. Sampling drives this: evaluating an interpolated function over a
+/// domain calls `fromAst` once per sample point on an arbitrary float, which
+/// by design misses the compat layer's atom cache (caching sampled coordinates
+/// is a measured loss — see `ATOM_HANDLES`). Those two JSON traversals were
+/// the largest remaining allocation source in the extrema search.
+///
+/// Non-finite values are accepted and land on `Number::Float`, matching what
+/// the JSON path produces for the `{"$":"NaN"}` / `{"$":"Inf"}` tags. Integral
+/// values demote to `Int` exactly as `from_ast` would, so this is a shortcut,
+/// not a second set of semantics.
+#[wasm_bindgen]
+pub fn from_number(value: f64) -> Expression {
+    Expression::with_default_notation(math_expressions::Expr::Num(
+        math_expressions::num::Number::from_f64(value),
+    ))
+}
+
 /// Revive an expression serialized by [`Expression::to_serialized`] (or by
 /// the JS library's `toJSON`) — the port of `me.reviver`'s object shape:
 /// `{"objectType": "math-expression", "tree": ...}`.
