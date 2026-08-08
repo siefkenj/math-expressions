@@ -521,11 +521,12 @@ fn rounding_functions_fold_through_an_inexact_argument() {
     let num = |n: i64| Expr::Num(Number::Int(n));
     assert_eq!(simp("ceil(log(31.1))"), num(4));
     assert_eq!(simp("floor(log(31.1))"), num(3));
-    // A hair below an integer is that integer — the value got there by
-    // arithmetic, and flooring the shortfall away is an off-by-one.
-    assert_eq!(simp("floor(3.999999999999999)"), num(4));
-    assert_eq!(simp("ceil(-6999.999999999999)"), num(-7000));
-    // ...but the allowance is roundoff-sized, not a rounding rule of its own.
+    // The rounding itself stays exact. A decimal parses to an exact rational,
+    // so `3.999999999999999` *is* that number and its floor is 3 — nudging it
+    // onto 4 would repair an f64 error that is not there, at the cost of
+    // `floor(x) ≤ x`. (The JS library did nudge: its decimals were floats.)
+    assert_eq!(simp("floor(3.999999999999999)"), num(3));
+    assert_eq!(simp("ceil(-6999.999999999999)"), num(-6999));
     assert_eq!(simp("floor(3.99)"), num(3));
     assert_eq!(simp("ceil(2.01)"), num(3));
 }

@@ -64,9 +64,13 @@ fn fold_nodes(e: &Expr) -> Expr {
     // exact value of its own: `ceil(log(31.1))` is 4, whatever log(31.1) is to
     // the last digit. Their *result* is exact even when their input is not,
     // which is what makes this a legitimate exception to the exact-only rule
-    // above — the float never survives the fold. Anything closer to the
-    // decision boundary than the argument's own accuracy is left alone by
-    // `snap_to_integer`'s window rather than guessed at.
+    // above — the float never survives the fold.
+    //
+    // The rounding itself stays exact on whatever value it is handed. Nudging
+    // a near-integer argument onto the integer first would repair accumulated
+    // f64 error (which is what the JS library's decimals always carried), but
+    // it breaks `floor(x) ≤ x`, and a decimal here is an exact rational: there
+    // is no representation error to repair.
     if args.len() == 1 && !matches!(args[0], Expr::Num(_)) && is_integer_valued(head) {
         let approx = fold_nodes_approx(&args[0]);
         if matches!(approx, Expr::Num(_)) {
