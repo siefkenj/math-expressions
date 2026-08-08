@@ -1208,6 +1208,22 @@ const Context = {
   fromAst(ast) {
     const key = atomKey(ast);
     if (key === undefined) {
+      // A bare number skips JSON entirely. This is the sampled-coordinate
+      // case, which `atomKey` deliberately declines to cache (see
+      // `ATOM_HANDLES`: caching arbitrary floats is a measured loss), so it
+      // arrives here on every call — once per sample point when a function is
+      // evaluated over a domain. Going through `from_ast` meant a
+      // `JSON.stringify` here and a full JSON parse in wasm to move one f64.
+      //
+      // Finite only. The JSON path routes a non-finite through `astReplacer`'s
+      // `{"$":"Inf"}` / `{"$":"NaN"}` tags, which `from_ast` revives as the
+      // infinity *constant* — a different expression from a float that happens
+      // to be infinite, and one that `equals`, `simplify` and the interval
+      // endpoints all treat differently. Taking the shortcut there made
+      // `fromAst(Infinity)` stop comparing equal to `fromText("infinity")`.
+      if (typeof ast === "number" && Number.isFinite(ast)) {
+        return new Expression(wasm.from_number(ast), Context);
+      }
       return new Expression(
         wasm.from_ast(JSON.stringify(ast, astReplacer)),
         Context,
