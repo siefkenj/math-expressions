@@ -3,14 +3,19 @@
 // Ops with no Rust backing are omitted (calls throw a TypeError → test fails,
 // suite runs).
 import wasm from "../_wasm";
+import { get_tree } from "../trees/util";
+import { tagNonFinite, jsonToAst } from "../converters/ast-json";
 
 function op(method) {
   return (tree) => {
-    const src = wasm.from_ast(JSON.stringify(tree));
+    // Legacy ops accepted an expression-or-tree; unwrap an Expression to its
+    // AST. Tag non-finite numbers so `from_ast` accepts NaN/±Infinity.
+    tree = get_tree(tree);
+    const src = wasm.from_ast(JSON.stringify(tree, (_k, v) => tagNonFinite(v)));
     try {
       const out = src[method]();
       try {
-        return JSON.parse(out.tree_json());
+        return jsonToAst(out.tree_json());
       } finally {
         out.free(); // throwaway: method result, never returned
       }
