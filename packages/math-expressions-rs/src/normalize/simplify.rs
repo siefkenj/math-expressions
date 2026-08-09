@@ -888,27 +888,28 @@ fn folded_seq_kind(kinds: impl Iterator<Item = SeqKind>) -> SeqKind {
     let mut kinds = kinds.peekable();
     let first = *kinds.peek().expect("group is non-empty");
     let mut all_same = true;
-    let mut all_vector = true;
+    let mut any_vector = false;
     for k in kinds {
         if k != first {
             all_same = false;
         }
-        if !matches!(k, SeqKind::Vector | SeqKind::AltVector) {
-            all_vector = false;
+        if matches!(k, SeqKind::Vector | SeqKind::AltVector) {
+            any_vector = true;
         }
     }
     if all_same {
         return first;
     }
-    // `vector` and `altvector` (`⟨a,b⟩`) are one object in two notations, so a
-    // group of only those stays a vector — collapsing to `tuple` handed
-    // DoenetML's `<vector>` a point instead of a vector. A `tuple` anywhere in
-    // the group is the weaker reading and wins.
+    // A `vector`/`altvector` anywhere in the group is the stronger reading and
+    // wins: `⟨a,b⟩ + (c,d)` and `(a,b) + <vector>(c,d)` are a vector, not a
+    // point — collapsing to `tuple` handed DoenetML's `<vector>` a point. Mixed
+    // `vector`/`altvector` land on the plain `vector` spelling. Only when no
+    // member carries vector-ness does the weaker `tuple` reading remain.
     //
     // There is no `array` case to write: `array` is the only member of its
     // class, so an all-`array` group is `all_same` and a mixed group can never
     // contain one.
-    if all_vector {
+    if any_vector {
         SeqKind::Vector
     } else {
         SeqKind::Tuple

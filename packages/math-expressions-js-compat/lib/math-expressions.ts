@@ -839,6 +839,14 @@ class Expression {
       this.context,
     );
   }
+  // `me.scalar_mul(scalar, vector)` mirrors to `toExpr(scalar).scalar_mul(vector)`,
+  // so `this` is the scalar and `other` the vector.
+  scalar_mul(other) {
+    return wrap(
+      this._w.scalar_mul(toExpr(other, this.context)._w),
+      this.context,
+    );
+  }
 
   // ---- pattern matching (default mode only) ----
   /**
@@ -1252,6 +1260,19 @@ const Context = {
   fromTex: parseLatex,
   parse_tex: parseLatex,
   fromMml: notImplemented("fromMml"),
+  // `me.matrix([[a,b],[c,d]])` — build a matrix literal from a 2-D array of
+  // Expressions (or ASTs). Not expression-first (the argument is an array, not
+  // an expression), so it lives on the Context directly rather than being
+  // mirrored from the `Expression` prototype.
+  matrix(rows: ExpressionLike[][]) {
+    const nr = rows.length;
+    const nc = nr > 0 ? rows[0].length : 0;
+    const body = [
+      "tuple",
+      ...rows.map((row) => ["tuple", ...row.map((e) => toExpr(e, Context).tree)]),
+    ];
+    return Context.fromAst(["matrix", ["tuple", nr, nc], body]);
+  },
   fromAst(ast) {
     const key = atomKey(ast);
     if (key === undefined) {

@@ -125,6 +125,7 @@ export interface WasmExpression {
   cross_prod(other: WasmExpression): WasmExpression;
   vector_add(other: WasmExpression): WasmExpression;
   vector_sub(other: WasmExpression): WasmExpression;
+  scalar_mul(other: WasmExpression): WasmExpression;
 
   free(): void;
 }

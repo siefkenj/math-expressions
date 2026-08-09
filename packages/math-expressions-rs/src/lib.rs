@@ -89,7 +89,7 @@ pub use grade::{
 pub use mathjs_compat::ode::{solve_ode_exprs, solve_ode_with, OdeSolution};
 pub use matrix::{
     char_poly, cross_prod, det, dot_prod, eigenvalues, eigenvectors, matmul, matrix_inverse,
-    nullspace, rank, rref, trace, transpose, vector_add, vector_sub, EigenPair,
+    nullspace, rank, rref, scalar_mul, trace, transpose, vector_add, vector_sub, EigenPair,
 };
 pub use normalize::{
     canonicalize, cmp_default_order, default_order, desugar_units, expand, flatten_logical,

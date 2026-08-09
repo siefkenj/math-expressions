@@ -25,7 +25,7 @@ pub use eigen::{char_poly, eigenvalues};
 pub use eigenvectors::{eigenvectors, EigenPair};
 pub use linalg::{det, matrix_inverse, nullspace, rank, rref};
 pub use ops::{matmul, trace, transpose};
-pub use vector::{cross_prod, dot_prod, vector_add, vector_sub};
+pub use vector::{cross_prod, dot_prod, scalar_mul, vector_add, vector_sub};
 
 // Used by the canonical `pow` to fold `A^(-k)` (see `normalize::pow`).
 pub(crate) use linalg::invert_rational_literal;

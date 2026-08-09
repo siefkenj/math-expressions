@@ -66,6 +66,10 @@ impl Expression {
     pub fn cross_prod(&self, other: &Expression) -> Expression {
         self.derive(math_expressions::cross_prod(&self.0, &other.0))
     }
+    /// Scalar × vector: `self` is the scalar, `other` the vector.
+    pub fn scalar_mul(&self, other: &Expression) -> Expression {
+        self.derive(math_expressions::scalar_mul(&self.0, &other.0))
+    }
 
     /// Determinant (tiered — MATRIX_PLAN §1b). Always an expression: an
     /// opaque `det(…)` node when not decidable.

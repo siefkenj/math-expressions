@@ -76,10 +76,12 @@ fn same_container_vectors_keep_their_container() {
 ///
 /// The container is the class's canonical one rather than "the left operand's":
 /// `Add` is commutative and canonically sorted, so both orders must produce the
-/// same tree. That is what this test pins.
+/// same tree. A vector/altvector anywhere makes the result a `vector` — the
+/// stronger reading wins over a bare `tuple` (matching the JS oracle's
+/// `<vector> + (point)` → vector).
 #[test]
 fn mixed_container_vectors_fold_order_independently() {
-    let expected = r#"["tuple",["+","a","c"],["+","b","d"]]"#;
+    let expected = r#"["vector",["+","a","c"],["+","b","d"]]"#;
     assert_eq!(sum(l(r"\langle a,b\rangle"), t("(c,d)")), expected);
     assert_eq!(sum(t("(c,d)"), l(r"\langle a,b\rangle")), expected);
 }
