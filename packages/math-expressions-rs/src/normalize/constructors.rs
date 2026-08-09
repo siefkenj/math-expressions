@@ -58,6 +58,40 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
         }
     }
 
+    // Infinity arithmetic on an *all-constant* sum: `∞ + finite = ∞`,
+    // `∞ + ∞ = ∞`, but `∞ + (−∞) = NaN`, and any `NaN` poisons. Fires only when
+    // every term is a number or an infinity — a free variable has unknown sign,
+    // so `x + ∞ − ∞` must keep `x` rather than collapse (see the conservative
+    // regression tests). This is purely additive (no zero factor), so the
+    // documented `0/0 → 0` / `0·∞ → 0` annihilation divergences are untouched.
+    if !flat.is_empty()
+        && flat
+            .iter()
+            .all(|t| matches!(t, Expr::Num(_)) || classify_infinity(t).is_some())
+    {
+        let mut pos = false;
+        let mut neg = false;
+        let mut nan = false;
+        for t in &flat {
+            match classify_infinity(t) {
+                Some(1) => pos = true,
+                Some(-1) => neg = true,
+                Some(0) => nan = true,
+                _ => {}
+            }
+        }
+        if pos || neg || nan {
+            if nan || (pos && neg) {
+                return Expr::Const(MathConst::NaN);
+            }
+            return Expr::Const(if pos {
+                MathConst::Inf
+            } else {
+                MathConst::NegInf
+            });
+        }
+    }
+
     let mut constant = Number::zero();
     // (rest, summed coefficient, the coefficients as written) for each distinct
     // non-constant term. The third field only matters under
@@ -417,6 +451,19 @@ fn peel_nonzero_scaling(e: &Expr) -> &Expr {
             }
             _ => return cur,
         }
+    }
+}
+
+/// Classify a term as `+∞` (`Some(1)`), `−∞` (`Some(-1)`), `NaN` (`Some(0)`), or
+/// finite/unknown (`None`), seeing through a leading negation so both `−∞` and
+/// `Neg(∞)` are recognized. Used by `add`'s infinity fold.
+fn classify_infinity(e: &Expr) -> Option<i8> {
+    match e {
+        Expr::Const(MathConst::Inf) => Some(1),
+        Expr::Const(MathConst::NegInf) => Some(-1),
+        Expr::Const(MathConst::NaN) => Some(0),
+        Expr::Neg(b) => classify_infinity(b).map(|s| if s == 0 { 0 } else { -s }),
+        _ => None,
     }
 }
 

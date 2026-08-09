@@ -25,7 +25,6 @@ fn apply1<'a>(e: &'a Expr, name: &str) -> Option<&'a Expr> {
     None
 }
 
-
 /// Evaluate `e` to an [`Exact`] value, or `None` if it falls outside the tower.
 pub fn exact_eval(e: &Expr) -> Option<Exact> {
     let mut budget = crate::resource_limits::current().max_exact_eval_ops;

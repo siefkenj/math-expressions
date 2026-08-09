@@ -189,8 +189,7 @@ pub(crate) fn expand_core(e: &Expr) -> Expr {
             if factors.iter().any(is_differential) {
                 let (diffs, rest): (Vec<Expr>, Vec<Expr>) =
                     factors.iter().cloned().partition(is_differential);
-                let integrand =
-                    distribute_guarded(try_distribute(&rest), mul(rest.clone()));
+                let integrand = distribute_guarded(try_distribute(&rest), mul(rest.clone()));
                 let mut out = vec![expand_container_entries(integrand)];
                 out.extend(diffs);
                 return mul(out);

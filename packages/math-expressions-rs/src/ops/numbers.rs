@@ -43,9 +43,23 @@ pub fn evaluate_numbers(e: &Expr) -> Expr {
     };
     // `fold_units` combines like-unit terms a numeric fold should join
     // (`50% + 75%` → `125%`); canonicalization leaves them written.
+    // `fold_infnan_tree` folds division-by-zero poles and infinity arithmetic
+    // (`1/0 → ∞`, `6/-0 → −∞`, `∞·2 → ∞`) — the same rule `simplify` applies,
+    // which plain canonicalization leaves for later.
     crate::normalize::without_like_term_collection(|| {
-        present(&crate::normalize::fold_units(&canonicalize(&prepped)))
+        let canon = canonicalize(&prepped);
+        let folded = canonicalize(&fold_infnan_tree(&canon));
+        present(&crate::normalize::fold_units(&folded))
     })
+}
+
+/// Apply the ∞/NaN + pole fold ([`rule_infnan`](crate::normalize)) bottom-up
+/// across the tree, so `evaluate_numbers` folds `1/0 → ∞` and `∞·2 → ∞` the way
+/// `simplify` does. Children fold first, so a pole revealed inside a product is
+/// seen by the enclosing node.
+fn fold_infnan_tree(e: &Expr) -> Expr {
+    let e = map_children(e, fold_infnan_tree);
+    crate::normalize::rule_infnan(&e).unwrap_or(e)
 }
 
 /// Whether any number in `e` is inexact — a `Float`, or an exact rational the
@@ -330,7 +344,6 @@ pub fn constants_to_floats(e: &Expr) -> Expr {
         _ => map_children(e, constants_to_floats),
     }
 }
-
 
 /// A rational the *author wrote as a fraction* — as opposed to one that is a
 /// decimal quantity ([`Spelling::Decimal`]) or an integer.

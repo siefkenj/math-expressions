@@ -66,9 +66,9 @@ pub use assumptions::{
     is_nonzero, is_positive, is_real, Assumptions, TreeStore,
 };
 pub use calculus::critical::critical_points;
-pub use constant_policy::ConstantPolicy;
 pub use calculus::diff::derivative;
 pub use calculus::integrate::integrate;
+pub use constant_policy::ConstantPolicy;
 pub use equality::discrete_infinite::{
     create_discrete_infinite_set, equals_discrete_infinite_sets, match_discrete_infinite,
 };

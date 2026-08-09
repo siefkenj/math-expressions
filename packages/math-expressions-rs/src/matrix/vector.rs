@@ -116,7 +116,10 @@ pub fn cross_prod(a: &Expr, b: &Expr) -> Expr {
             ])
         };
         if xa.len() == 3 && xb.len() == 3 {
-            return present(&Expr::Seq(named_op_kind(ka, kb), vec![z(1, 2), z(2, 0), z(0, 1)]));
+            return present(&Expr::Seq(
+                named_op_kind(ka, kb),
+                vec![z(1, 2), z(2, 0), z(0, 1)],
+            ));
         }
         if xa.len() == 2 && xb.len() == 2 {
             return present(&z(0, 1));

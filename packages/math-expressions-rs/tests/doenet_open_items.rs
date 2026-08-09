@@ -169,7 +169,7 @@ fn sqrt_of_negative_folds_to_principal_imaginary() {
     assert_eq!(tree(&simp("sqrt(-4)")), r#"["*",2,"i"]"#); // 2i
     assert_eq!(tree(&simp("sqrt(-2)")), r#"["apply","sqrt",-2]"#); // √(−2)
     assert_eq!(tree(&simp("sqrt(-8)")), r#"["*",2,["apply","sqrt",-2]]"#); // 2√(−2)
-                                                                              // the `^(1/2)` power form agrees with the `sqrt` application
+                                                                           // the `^(1/2)` power form agrees with the `sqrt` application
     assert_eq!(tree(&simp("(-4)^(1/2)")), r#"["*",2,"i"]"#);
     // whatever it folds to must equal the value the numeric evaluator gives
     use math_expressions::equals;
@@ -199,7 +199,10 @@ fn a_variable_radicand_pulls_its_numeric_square() {
     // sign of `y` (`sqrt(-4y) = 2·sqrt(-y)`, valid on either branch); the sign
     // and the variable stay under the root. Matches the JS oracle, which pulls
     // `16 → 4` out of `sqrt(-16x⁵)` with no assumptions on `x`.
-    assert_eq!(tree(&simp("sqrt(-4 y)")), r#"["*",2,["apply","sqrt",["-","y"]]]"#);
+    assert_eq!(
+        tree(&simp("sqrt(-4 y)")),
+        r#"["*",2,["apply","sqrt",["-","y"]]]"#
+    );
 }
 
 #[test]

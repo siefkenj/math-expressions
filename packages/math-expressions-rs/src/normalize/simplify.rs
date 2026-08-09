@@ -413,7 +413,7 @@ fn extract_powers_from_root(q: i64, radicand: &Expr, root: Root, a: &Assumptions
 // comparing equal) is accepted: that matches JS `.simplify()`, which returns
 // the NaN literal for them.
 
-fn rule_infnan(e: &Expr) -> Option<Expr> {
+pub(crate) fn rule_infnan(e: &Expr) -> Option<Expr> {
     match e {
         Expr::Pow(base, exp) => fold_infnan_pow(base, exp),
         Expr::Mul(factors) => fold_infnan_mul(factors),

@@ -491,7 +491,10 @@ class Expression {
     } else if (skipOrdering) {
       result = wrap(this._w.evaluate_numbers_preserve_order(), this.context);
     } else if (evaluateFunctions) {
-      result = wrap(this._w.evaluate_numbers_evaluate_functions(), this.context);
+      result = wrap(
+        this._w.evaluate_numbers_evaluate_functions(),
+        this.context,
+      );
     } else {
       result = wrap(this._w.evaluate_numbers(), this.context);
     }
@@ -1362,7 +1365,10 @@ const Context = {
     const nc = nr > 0 ? rows[0].length : 0;
     const body = [
       "tuple",
-      ...rows.map((row) => ["tuple", ...row.map((e) => toExpr(e, Context).tree)]),
+      ...rows.map((row) => [
+        "tuple",
+        ...row.map((e) => toExpr(e, Context).tree),
+      ]),
     ];
     return Context.fromAst(["matrix", ["tuple", nr, nc], body]);
   },
