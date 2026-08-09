@@ -161,10 +161,14 @@ fn tree(e: &Expr) -> String {
 
 #[test]
 fn sqrt_of_negative_folds_to_principal_imaginary() {
+    // `i` surfaces only when the whole radicand is a perfect square; otherwise
+    // the perfect-square factor comes out and the sign stays under the root
+    // (matching the JS oracle: `sqrt(-810) → 9·sqrt(-10)`). Still numerically
+    // equal to the imaginary form, as the `equals` checks below confirm.
     assert_eq!(tree(&simp("sqrt(-1)")), r#""i""#);
     assert_eq!(tree(&simp("sqrt(-4)")), r#"["*",2,"i"]"#); // 2i
-    assert_eq!(tree(&simp("sqrt(-2)")), r#"["*","i",["apply","sqrt",2]]"#); // i√2
-    assert_eq!(tree(&simp("sqrt(-8)")), r#"["*",2,"i",["apply","sqrt",2]]"#); // 2i√2
+    assert_eq!(tree(&simp("sqrt(-2)")), r#"["apply","sqrt",-2]"#); // √(−2)
+    assert_eq!(tree(&simp("sqrt(-8)")), r#"["*",2,["apply","sqrt",-2]]"#); // 2√(−2)
                                                                               // the `^(1/2)` power form agrees with the `sqrt` application
     assert_eq!(tree(&simp("(-4)^(1/2)")), r#"["*",2,"i"]"#);
     // whatever it folds to must equal the value the numeric evaluator gives
@@ -190,10 +194,12 @@ fn prefer_a_real_root_when_one_exists() {
 }
 
 #[test]
-fn a_variable_radicand_never_folds() {
-    // The sign of `-4 y` is unknown, so there is no principal root to pick —
-    // matches "variables never fold". Stays an application.
-    assert!(matches!(simp("sqrt(-4 y)"), Expr::Apply(..)));
+fn a_variable_radicand_pulls_its_numeric_square() {
+    // The *positive* perfect-square factor pulls out regardless of the unknown
+    // sign of `y` (`sqrt(-4y) = 2·sqrt(-y)`, valid on either branch); the sign
+    // and the variable stay under the root. Matches the JS oracle, which pulls
+    // `16 → 4` out of `sqrt(-16x⁵)` with no assumptions on `x`.
+    assert_eq!(tree(&simp("sqrt(-4 y)")), r#"["*",2,["apply","sqrt",["-","y"]]]"#);
 }
 
 #[test]

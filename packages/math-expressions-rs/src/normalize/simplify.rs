@@ -272,6 +272,19 @@ fn rule_assumptions(e: &Expr, a: &Assumptions) -> Option<Expr> {
         if crate::assumptions::is_nonpositive(arg, a) == Some(true) {
             return Some(super::mul(vec![Expr::int(-1), arg.clone()]));
         }
+        // Distribute over real operands: `|uⁿ| = |u|ⁿ`, `|∏ uᵢ| = ∏ |uᵢ|`. This
+        // is what turns the `sqrt(16x⁶) → 4·|x³|` an even-root extraction yields
+        // into the conventional `4·|x|³`.
+        let abs = |x: &Expr| Expr::Apply(Box::new(Expr::sym("abs")), vec![x.clone()]);
+        match arg {
+            Expr::Pow(b, x) if is_real(b, a) == Some(true) => {
+                return Some(super::pow(abs(b), (**x).clone()));
+            }
+            Expr::Mul(fs) if fs.iter().all(|f| is_real(f, a) == Some(true)) => {
+                return Some(super::mul(fs.iter().map(abs).collect()));
+            }
+            _ => {}
+        }
         return None;
     }
     let (degree, radicand, root) = match (f.name().as_str(), args.as_slice()) {
@@ -1317,15 +1330,14 @@ fn simplify_root(
 
     let negative = cn < 0;
     if negative && q % 2 == 0 {
-        // No real even root of a negative. For a *purely numeric* radicand the
-        // principal value is exact on the imaginary axis at q = 2
-        // (`sqrt(-c) = sqrt(c)·i`), so fold it; a variable radicand has unknown
-        // sign and never folds. Higher even roots (q ≥ 4) need the exact
-        // `cos(π/q) + i·sin(π/q)` surd form we don't build for roots yet.
-        if q == 2 && rest.is_none() {
-            return principal_imaginary_sqrt(cn.unsigned_abs(), cd, spelling);
-        }
-        return None;
+        // No real even root of a negative, but the *positive* perfect-power
+        // factor still comes out — valid on either branch — with the sign (and
+        // any variable part) kept under the root: `sqrt(-16x) → 4·sqrt(-x)`,
+        // `nthroot(-16x³,4) → 2·nthroot(-x³,4)`, `sqrt(-4) → 2i`. A *purely
+        // numeric* higher even root (`nthroot(-16,4)`) has no simpler form we
+        // build — its residual `⁴√(-1)` needs a surd lattice — so it stays
+        // symbolic.
+        return negative_even_root(cn.unsigned_abs(), cd, q, rest.as_ref(), &root, spelling);
     }
 
     // Pulling the sign out of an odd root picks the *real* branch:
@@ -1376,15 +1388,42 @@ fn simplify_root(
 /// so the result is fully reduced — `sqrt(-1) → i`, `sqrt(-4) → 2i`,
 /// `sqrt(-2) → i·sqrt(2)`, `sqrt(-8) → 2·i·sqrt(2)`, `sqrt(-1/4) → i/2`. The
 /// factor order is normalized by the surrounding canonicalization.
-fn principal_imaginary_sqrt(num: u64, den: i64, spelling: Spelling) -> Option<Expr> {
-    let (m, r) = extract_qth_power_rational(num, den, 2, spelling)?;
+/// Even root of a negative `−(num/den)·rest` (`num/den > 0`): pull the positive
+/// perfect-`q`-th-power factor `m` out (`sqrt(−16x) → 4·sqrt(−x)`,
+/// `nthroot(−16x³,4) → 2·nthroot(−x³,4)`), keeping the sign and any variable
+/// `rest` under the root. `i` surfaces only for `q = 2` when the whole radicand
+/// is `−(perfect square)` (`sqrt(−4) → 2i`, `sqrt(−1) → i`). Declines when
+/// nothing extracts (so the fixpoint does not spin on `sqrt(−10)`), and for a
+/// purely numeric `q ≥ 4` root, whose residual (`⁴√(−1)`) has no simpler form.
+fn negative_even_root(
+    num: u64,
+    den: i64,
+    q: u32,
+    rest: Option<&Expr>,
+    root: &Root,
+    spelling: Spelling,
+) -> Option<Expr> {
+    if q > 2 && rest.is_none() {
+        return None;
+    }
+    let (m, r) = extract_qth_power_rational(num, den, q, spelling)?;
     let mut factors = Vec::new();
     if !m.is_one() {
-        factors.push(Expr::Num(m));
+        factors.push(Expr::Num(m.clone()));
     }
-    factors.push(Expr::sym("i"));
-    if !r.is_one() {
-        factors.push(Expr::Apply(Box::new(Expr::sym("sqrt")), vec![Expr::Num(r)]));
+    if q == 2 && r.is_one() && rest.is_none() {
+        // `|radicand|` is a perfect square: `sqrt(−m²) = m·i`.
+        factors.push(Expr::sym("i"));
+    } else {
+        if m.is_one() {
+            return None; // nothing to pull out; the root stays as written
+        }
+        // Residual under the root, negated: `−(r · rest)`.
+        let mut inner = vec![Expr::Num(r.neg())];
+        if let Some(rest) = rest {
+            inner.push(rest.clone());
+        }
+        factors.push(root.rebuild(mul(inner)));
     }
     Some(mul(factors))
 }
