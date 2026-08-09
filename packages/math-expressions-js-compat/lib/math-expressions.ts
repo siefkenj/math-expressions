@@ -924,21 +924,55 @@ for (const name of [
 // `appliedFunctionSymbols`: without it there is no way to get `sum(1,2,3)` to
 // parse as an application rather than as `s·u·m·(1,2,3)`, since neither this
 // library nor the legacy one lists the aggregates by default.
+/**
+ * The legacy library threw a `ParseError` — an `Error` subclass whose `name`
+ * said so — and callers narrow on that name to tell "you typed something I
+ * cannot read", which is worth showing a student, from any other failure, which
+ * is not. `wasm-bindgen` throws a plain `Error`, so that name was lost and the
+ * narrowing silently stopped matching: DoenetML's `<mathInput showPreview>` has
+ * a slot for the parser's complaint and had been rendering nothing in it.
+ *
+ * The message is the engine's own and is already the useful part
+ * (`Expecting } (at 7)`, `Invalid symbol '@' (at 0)`); only the label was
+ * missing. `cause` keeps the original for anyone who wants the stack.
+ */
+function asParseError(e: unknown) {
+  if (e instanceof Error && e.name === "Error") {
+    e.name = "ParseError";
+    return e;
+  }
+  if (e instanceof Error) {
+    return e;
+  }
+  // wasm-bindgen can reject with a bare string.
+  const wrapped = new Error(String(e), { cause: e });
+  wrapped.name = "ParseError";
+  return wrapped;
+}
+
 function parseText(string, opts?) {
-  return new Expression(
-    hasOptions(opts)
-      ? wasm.parse_text_with_options(string, JSON.stringify(opts))
-      : wasm.parse_text(string),
-    Context,
-  );
+  try {
+    return new Expression(
+      hasOptions(opts)
+        ? wasm.parse_text_with_options(string, JSON.stringify(opts))
+        : wasm.parse_text(string),
+      Context,
+    );
+  } catch (e) {
+    throw asParseError(e);
+  }
 }
 function parseLatex(string, opts?) {
-  return new Expression(
-    hasOptions(opts)
-      ? wasm.parse_latex_with_options(string, JSON.stringify(opts))
-      : wasm.parse_latex(string),
-    Context,
-  );
+  try {
+    return new Expression(
+      hasOptions(opts)
+        ? wasm.parse_latex_with_options(string, JSON.stringify(opts))
+        : wasm.parse_latex(string),
+      Context,
+    );
+  } catch (e) {
+    throw asParseError(e);
+  }
 }
 function createFrom(expr) {
   // "Nothing" converts to nothing. `fromAst(undefined)` reaches the core as a
