@@ -43,6 +43,18 @@ fn read_render_opts(
     super::parse::read_opt_bool(v, "avoidScientificNotation", avoid_scientific_notation);
 }
 
+/// Validate a `matrixEnvironment` name against the environments the LaTeX
+/// *parser* accepts, so rendered output keeps round-tripping — and so the option
+/// can never inject arbitrary LaTeX.
+fn matrix_environment(env: &str) -> Result<&str, JsError> {
+    match env {
+        "matrix" | "pmatrix" | "bmatrix" => Ok(env),
+        _ => Err(JsError::new(&format!(
+            "unsupported matrixEnvironment {env:?} (expected matrix, pmatrix or bmatrix)"
+        ))),
+    }
+}
+
 #[wasm_bindgen]
 impl Expression {
     /// Render back to text syntax — in the notation this expression was
@@ -110,15 +122,8 @@ impl Expression {
             &mut o.explicit_multiplication_symbols,
             &mut o.avoid_scientific_notation,
         );
-        // Only the environments the LaTeX *parser* accepts, so output keeps
-        // round-tripping — and so this option can never inject arbitrary LaTeX.
         if let Some(env) = v.get("matrixEnvironment").and_then(|e| e.as_str()) {
-            match env {
-                "matrix" | "pmatrix" | "bmatrix" => o.matrix_environment = env.to_string(),
-                _ => return Err(JsError::new(&format!(
-                    "unsupported matrixEnvironment {env:?} (expected matrix, pmatrix or bmatrix)"
-                ))),
-            }
+            o.matrix_environment = matrix_environment(env)?.to_string();
         }
         Ok(to_latex(&self.0, &o))
     }
