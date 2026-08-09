@@ -38,9 +38,12 @@ describe("display rounding is exact at large magnitudes (08)", () => {
     expect(
       me.round_numbers_to_precision_plus_decimals(12345.6789, 3, 2).tree,
     ).toBe(12345.68);
-    // Rounding is of the value the float holds, not of its shortest spelling:
-    // 2.675 is stored as 2.67499999999999982…, so two decimals is 2.67.
-    expect(me.round_numbers_to_decimals(2.675, 2).tree).toBe(2.67);
+    // Rounding is of the float's *shortest decimal spelling* — what a reader
+    // sees — not of the exact binary value it holds. 2.675 is stored as
+    // 2.67499999999999982…, so reading the stored value would give 2.67; this
+    // asserted that until it was checked against mathjs, which legacy rounded
+    // through: `format(2.675, {notation:"fixed", precision:2})` is "2.68".
+    expect(me.round_numbers_to_decimals(2.675, 2).tree).toBe(2.68);
   });
 
   // A non-finite value has no decimal expansion to round. (`.tree` reports it

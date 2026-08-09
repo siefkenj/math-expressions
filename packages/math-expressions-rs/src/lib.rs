@@ -67,7 +67,9 @@ pub use assumptions::{
 pub use calculus::critical::critical_points;
 pub use calculus::diff::derivative;
 pub use calculus::integrate::integrate;
-pub use equality::discrete_infinite::{create_discrete_infinite_set, match_discrete_infinite};
+pub use equality::discrete_infinite::{
+    create_discrete_infinite_set, equals_discrete_infinite_sets, match_discrete_infinite,
+};
 pub use equality::{
     contains_blank, equals, equals_syntactic, equals_via_real, finite_field_evaluate, EqOptions,
 };

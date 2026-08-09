@@ -26,7 +26,35 @@ pub fn evaluate_numbers(e: &Expr) -> Expr {
     if crate::equality::contains_blank(e) {
         return e.clone();
     }
-    crate::normalize::without_like_term_collection(|| present(&canonicalize(e)))
+    // Float contagion: a decimal or float already spent its precision, so exact
+    // constants (`π`, `e`) and rationals sharing the expression fold to floats
+    // too — `0.5·π` → `1.5707…`, matching mathjs. Purely exact input (`π/2`,
+    // `1/3`) stays exact.
+    // Fold only the *constants* (`π`, `e`) to floats when a decimal/float is
+    // present; the decimal then floats the arithmetic around them by contagion
+    // (`Rat·Float → Float`). Exact rationals are left exact, so `0.1 + 0.2`
+    // still folds to an exact `0.3` rather than the `0.30000…4` a blanket float
+    // conversion would give.
+    let prepped = if contains_inexact(e) {
+        constants_to_floats(e)
+    } else {
+        e.clone()
+    };
+    // `fold_units` combines like-unit terms a numeric fold should join
+    // (`50% + 75%` → `125%`); canonicalization leaves them written.
+    crate::normalize::without_like_term_collection(|| {
+        present(&crate::normalize::fold_units(&canonicalize(&prepped)))
+    })
+}
+
+/// Whether any number in `e` is inexact — a `Float`, or an exact rational the
+/// author spelled as a decimal (`0.5` parses to `Rat(1, 2, Decimal)`). This is
+/// what triggers float contagion in [`evaluate_numbers`].
+fn contains_inexact(e: &Expr) -> bool {
+    if let Expr::Num(n) = e {
+        return matches!(n, Number::Float(_)) || n.spelling() == Spelling::Decimal;
+    }
+    e.children().iter().any(|c| contains_inexact(c))
 }
 
 /// [`evaluate_numbers`] plus the special-value folds, so a function applied to

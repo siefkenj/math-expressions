@@ -116,7 +116,7 @@ fn fold_node(e: &Expr) -> Expr {
 /// `equals` already knows `i² = −1` numerically, so only `simplify`/`.tree`
 /// display was affected. DoenetML open item 9 (the unambiguous half; the root
 /// cases await the corpus). `n mod 4` is Euclidean so `i^{-1} = −i` folds too.
-fn fold_imaginary_power(base: &Expr, exp: &Expr) -> Option<Expr> {
+pub(crate) fn fold_imaginary_power(base: &Expr, exp: &Expr) -> Option<Expr> {
     if !util::is_i(base) {
         return None;
     }

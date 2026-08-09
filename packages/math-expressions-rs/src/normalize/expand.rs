@@ -32,7 +32,27 @@ use crate::expr::map_children;
 /// Fully expand `e`, in display form (`normalize::present`). Internal callers
 /// that pattern-match on canonical shapes use [`expand_core`].
 pub fn expand(e: &Expr) -> Expr {
-    super::present(&expand_core(e))
+    super::present(&fold_i_powers(&expand_core(e)))
+}
+
+/// Fold integer powers of the imaginary unit throughout an expanded result
+/// (`i² → −1`, so `(x−i)(x+i)` expands to `x²+1`). `expand` multiplies out
+/// through the canonical `mul`/`pow` constructors, which — matching
+/// `canonicalize` — leave `i^n` symbolic; only `simplify` folds it. `expand`'s
+/// job is to multiply out *and* combine, and mathjs's `expand` collapses `i²`,
+/// so apply the (unconditionally sound) fold here. Rebuilds through the smart
+/// constructors so a folded power recombines with the rest (`x² − (−1) → x²+1`).
+fn fold_i_powers(e: &Expr) -> Expr {
+    match e {
+        Expr::Pow(b, x) => {
+            let (b, x) = (fold_i_powers(b), fold_i_powers(x));
+            super::fold_imaginary_power(&b, &x).unwrap_or_else(|| pow(b, x))
+        }
+        Expr::Add(ts) => add(ts.iter().map(fold_i_powers).collect()),
+        Expr::Mul(fs) => mul(fs.iter().map(fold_i_powers).collect()),
+        Expr::Neg(a) => mul(vec![Expr::int(-1), fold_i_powers(a)]),
+        _ => map_children(e, fold_i_powers),
+    }
 }
 
 /// Contract the first matrix/vector product step inside a `Mul`, if there is one.
@@ -109,6 +129,12 @@ fn expand_container_entries(e: Expr) -> Expr {
     }
 }
 
+/// A differential factor `dx` — parsed as `OtherOp("d", [x])` inside an
+/// integrand. Distribution must not cross it (a sum times `dx` is one integrand).
+fn is_differential(e: &Expr) -> bool {
+    matches!(e, Expr::OtherOp(s, _) if s.name().as_str() == "d")
+}
+
 /// [`expand`] without the final presentation pass: the result is canonical.
 pub(crate) fn expand_core(e: &Expr) -> Expr {
     match e {
@@ -154,6 +180,20 @@ pub(crate) fn expand_core(e: &Expr) -> Expr {
             }
             if let Some(scaled) = super::simplify::distribute_mul_over_seq(&factors) {
                 return expand_core(&scaled);
+            }
+            // A differential (`dx` = `OtherOp("d", …)`) binds the integrand:
+            // expand the integrand but keep it whole beside the `dx`. So
+            // `∫(x²+x)x dx` → `∫(x³+x²)dx` (the `x` distributes *into* the sum),
+            // never `∫x²dx + ∫x·dx` (the sum must not distribute *across* the
+            // `dx`).
+            if factors.iter().any(is_differential) {
+                let (diffs, rest): (Vec<Expr>, Vec<Expr>) =
+                    factors.iter().cloned().partition(is_differential);
+                let integrand =
+                    distribute_guarded(try_distribute(&rest), mul(rest.clone()));
+                let mut out = vec![expand_container_entries(integrand)];
+                out.extend(diffs);
+                return mul(out);
             }
             let fallback = mul(factors.clone());
             let result = distribute_guarded(try_distribute(&factors), fallback);

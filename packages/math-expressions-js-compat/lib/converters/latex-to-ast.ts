@@ -4,7 +4,7 @@ import wasm from "../_wasm";
 import { jsonToAst } from "./ast-json";
 
 export default class LatexToAst {
-  constructor(params) {
+  constructor(params?) {
     this.params = params || {};
   }
   convert(latex) {

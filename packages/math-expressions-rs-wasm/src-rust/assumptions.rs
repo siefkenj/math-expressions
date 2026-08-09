@@ -5,8 +5,8 @@ use super::Expression;
 use math_expressions::assumptions::tree_store::{Facts, VarMap};
 use math_expressions::expr::serde::{to_js, try_from_js};
 use math_expressions::{
-    create_discrete_infinite_set, simplify_with as rust_simplify_with, Assumptions, Expr,
-    TextToAst, TextToAstOptions,
+    canonicalize, create_discrete_infinite_set, simplify_with as rust_simplify_with, Assumptions,
+    EqOptions, Expr, TextToAst, TextToAstOptions,
 };
 use wasm_bindgen::prelude::*;
 
@@ -218,6 +218,62 @@ impl WasmAssumptions {
     pub fn is_nonpositive(&self, expr: &Expression) -> Option<bool> {
         math_expressions::is_nonpositive(&expr.0, &self.0)
     }
+
+    // ---- the equality stage that needs an assumption store ----
+    //
+    // `Expression::equals` is assumption-free, and for every stage but one that
+    // is the right answer. Discrete infinite sets are the exception: comparing
+    // them divides by the period, so a symbolic period (`c`) means nothing
+    // until `c != 0` is *stated* — the JS took the assumptions from the
+    // expression's context for exactly this reason. These two live on the
+    // store rather than on `Expression` because the store is the argument that
+    // matters.
+
+    /// Full `equals`, routed through the discrete-infinite-set stage with these
+    /// assumptions when either side is such a set, and through the ordinary
+    /// (assumption-free) chain otherwise. `options_json` is the grading-options
+    /// object shared with [`Expression::equals_with_options`]; `undefined` for
+    /// the defaults.
+    pub fn equals_expressions(
+        &self,
+        a: &Expression,
+        b: &Expression,
+        options_json: Option<String>,
+    ) -> Result<bool, JsError> {
+        let opts = match &options_json {
+            Some(json) => super::grading::eq_options_from_json(json)?,
+            None => EqOptions::default(),
+        };
+        Ok(
+            match math_expressions::equals_discrete_infinite_sets(&a.0, &b.0, &opts, &self.0) {
+                Some(answer) => answer,
+                None => math_expressions::equals(&a.0, &b.0, &opts),
+            },
+        )
+    }
+
+    /// How much of the discrete infinite set `a` is matched by `b` (another
+    /// set, or a list ending in `…`): 1 for equal, 0 for no match, and — under
+    /// `match_partial` — the fraction of residue classes covered, which is the
+    /// partial-credit grading signal a boolean `equals` cannot express.
+    ///
+    /// Both sides are canonicalized first, mirroring what the `equals` chain
+    /// does before it reaches this stage; without it a set built from
+    /// unnormalized text would score differently here than through `equals`.
+    pub fn match_discrete_infinite_set(
+        &self,
+        a: &Expression,
+        b: &Expression,
+        match_partial: bool,
+    ) -> f64 {
+        math_expressions::match_discrete_infinite(
+            &canonicalize(&a.0),
+            &canonicalize(&b.0),
+            &EqOptions::default(),
+            match_partial,
+            &self.0,
+        )
+    }
 }
 
 impl Default for WasmAssumptions {
@@ -228,8 +284,28 @@ impl Default for WasmAssumptions {
 
 /// Build a discrete infinite set (periodic solution set) from offsets and
 /// periods expressions (either may be a comma list). `undefined` on
-/// mismatched list lengths.
+/// mismatched list lengths, or on index bounds that do not parse.
+///
+/// The bounds arrive as JS-tree JSON rather than as `Expression` handles
+/// because they are optional and wasm-bindgen has no by-reference
+/// `Option<&Expression>`: the owned `Option<Expression>` it does support would
+/// move the handle out of the caller's wrapper, and the JS side shares handles
+/// between wrappers (the atom cache), so that would null a live expression.
 #[wasm_bindgen]
-pub fn discrete_infinite_set(offsets: &Expression, periods: &Expression) -> Option<Expression> {
-    create_discrete_infinite_set(&offsets.0, &periods.0, None, None).map(|e| offsets.derive(e))
+pub fn discrete_infinite_set(
+    offsets: &Expression,
+    periods: &Expression,
+    min_index_json: Option<String>,
+    max_index_json: Option<String>,
+) -> Option<Expression> {
+    let min = match &min_index_json {
+        Some(json) => Some(read(json)?),
+        None => None,
+    };
+    let max = match &max_index_json {
+        Some(json) => Some(read(json)?),
+        None => None,
+    };
+    create_discrete_infinite_set(&offsets.0, &periods.0, min.as_ref(), max.as_ref())
+        .map(|e| offsets.derive(e))
 }

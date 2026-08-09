@@ -116,7 +116,16 @@ pub fn equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     if discrete_infinite::is_discrete_infinite_set(&ca)
         || discrete_infinite::is_discrete_infinite_set(&cb)
     {
-        return discrete_infinite::equals_discrete_infinite(&ca, &cb, opts);
+        // No assumptions: `equals` is assumption-free by construction. A caller
+        // holding an assumption store (the JS `Context`) reaches the same stage
+        // through `equals_discrete_infinite_sets`, which is the only way a
+        // symbolic period can be known nonzero.
+        return discrete_infinite::equals_discrete_infinite(
+            &ca,
+            &cb,
+            opts,
+            &crate::Assumptions::new(),
+        );
     }
 
     // Stage 1c: certified exact equality (accept-only, sound). When the

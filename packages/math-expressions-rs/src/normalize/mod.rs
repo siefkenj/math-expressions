@@ -43,6 +43,7 @@ pub(crate) use present::{present, split_number};
 pub use simplify::{flatten_logical, push_not, simplify, simplify_logical, simplify_with};
 pub(crate) use simplify::{simplify_base_with, simplify_canonical, simplify_core};
 pub use special_values::fold_special_values;
+pub(crate) use special_values::fold_imaginary_power;
 pub use syntactic::{
     normalize_syntactic, pass_applied_functions as normalize_applied_functions,
     pass_negative_numbers as normalize_negative_numbers,

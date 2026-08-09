@@ -20,9 +20,17 @@ describe("item 8 — rounding preserves an exact fraction", () => {
     expect(r.toLatex()).toBe("\\frac{5}{2}");
   });
 
-  it("still decimalizes 1/3 (rounding changes the value)", () => {
+  it("keeps 1/3 a fraction too, though rounding would change the value", () => {
+    // This asserted `"0.333"` while the rule was "leave it alone only if the
+    // rounding is exact". That rule was superseded (see
+    // `ops::numbers::is_written_as_fraction`): what decides now is the
+    // *spelling*, so a fraction the author wrote stays a fraction however few
+    // digits are asked for — which is what the JS library did, having no
+    // rational type to decimalize in the first place. Deciding by exactness
+    // instead put `1/3` on screen as `0.333` in a fractions lesson, and only
+    // for the rationals that had been through `simplify`.
     expect(me.fromText("1/3").simplify().round_numbers_to_precision(3).toString()).toBe(
-      "0.333",
+      "1/3",
     );
   });
 });

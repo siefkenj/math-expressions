@@ -409,10 +409,17 @@ describe("item 6 — evaluate_numbers / passes", () => {
     expect(skip("x+x")).toEqual(["+", "x", "x"]);
   });
 
-  it("leaves the unimplemented normalization passes as no-ops (not throws)", () => {
-    // A blanket throw here regressed ~170 idempotent-input specs, so these stay
-    // no-ops returning the expression until they are properly implemented.
-    expect(me.fromText("3+x").default_order().tree).toEqual(me.fromText("3+x").tree);
+  it("leaves the still-unimplemented normalization passes as no-ops (not throws)", () => {
+    // A blanket throw here regressed ~170 idempotent-input specs, so what is
+    // left unimplemented stays a no-op returning the expression.
     expect(me.fromText("x").applyAllTransformations().tree).toEqual("x");
+  });
+
+  it("has graduated default_order out of the no-op list", () => {
+    // This asserted `3+x` came back untouched, which was true only while the
+    // pass did nothing. It is implemented now and carries the JS ordering key:
+    // the legacy `trees/default_order.js` also answers `["+","x",3]` here.
+    expect(me.fromText("3+x").default_order().tree).toEqual(["+", "x", 3]);
+    expect(me.fromText("x+3").default_order().tree).toEqual(["+", "x", 3]);
   });
 });

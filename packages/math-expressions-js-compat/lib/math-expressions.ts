@@ -15,6 +15,7 @@ import {
 } from "./trees/flatten";
 import * as converters from "./converters/index";
 import { jsonToAst, tagNonFinite } from "./converters/ast-json";
+import { renderOptions } from "./converters/render-options";
 import * as assumptionStore from "./assumptions/store";
 import { expression_to_polynomial } from "./polynomial/polynomial";
 import { get_tree } from "./trees/util";
@@ -163,6 +164,10 @@ function varName(v: string | Expression): string {
   return String(v);
 }
 
+/** Unit symbols the engine recognizes — excluded from "free variables" when
+ * deciding `evaluate_to_constant`'s null (unknown variable) vs NaN (no value). */
+const UNIT_NAMES = new Set(["%", "$", "deg", "circ"]);
+
 /** The tree heads `get_component` will index — the JS library's set. */
 const COMPONENT_CONTAINERS = new Set([
   "list",
@@ -308,27 +313,30 @@ class Expression {
   }
   // Rendering honors the legacy render options (padToDigits, padToDecimals,
   // showBlanks, explicitMultiplicationSymbols, notation/unicode) by forwarding
-  // a non-empty options object to the `*_with_options` wasm entry points. The
-  // no-arg path stays on the cheap no-options render — `toString()` is what JS
-  // coercion (`String(expr)`) calls.
+  // a non-empty options object to the `*_with_options` wasm entry points.
+  // It goes through `renderOptions` rather than a bare `JSON.stringify` so the
+  // legacy spellings are translated, not silently dropped: callers pass
+  // `output_unicode`, which the Rust side reads as `unicode`. The no-arg path
+  // stays on the cheap no-options render — `toString()` is what JS coercion
+  // (`String(expr)`) calls.
   toString(opts?) {
     return hasOptions(opts)
-      ? this._w.to_text_with_options(JSON.stringify(opts))
+      ? this._w.to_text_with_options(renderOptions(opts))
       : this._w.to_text();
   }
   toText(opts?) {
     return hasOptions(opts)
-      ? this._w.to_text_with_options(JSON.stringify(opts))
+      ? this._w.to_text_with_options(renderOptions(opts))
       : this._w.to_text();
   }
   toLatex(opts?) {
     return hasOptions(opts)
-      ? this._w.to_latex_with_options(JSON.stringify(opts))
+      ? this._w.to_latex_with_options(renderOptions(opts))
       : this._w.to_latex();
   }
   tex(opts?) {
     return hasOptions(opts)
-      ? this._w.to_latex_with_options(JSON.stringify(opts))
+      ? this._w.to_latex_with_options(renderOptions(opts))
       : this._w.to_latex();
   }
   toJSON() {
@@ -351,13 +359,21 @@ class Expression {
   // ---- equality ----
   equals(other, options) {
     const o = toExpr(other, this.context);
-    if (options && Object.keys(options).length > 0) {
-      return this._w.equals_with_options(
-        o._w,
-        JSON.stringify(mapEqOptions(options)),
-      );
-    }
-    return this._w.equals(o._w);
+    // Routed through the context's assumption store, not `this._w.equals`.
+    // Discrete infinite sets are the one stage of the chain that needs it — the
+    // comparison divides by the period, so a symbolic period means nothing
+    // until it is known nonzero — and the legacy `equals` read the context's
+    // assumptions for exactly that stage. Every other stage is assumption-free
+    // and answers identically, so this costs a dispatch, not a second pass:
+    // the store's method falls straight through to the plain chain when neither
+    // side is a set.
+    return this.context._assumptionsHandle.equals_expressions(
+      this._w,
+      o._w,
+      options && Object.keys(options).length > 0
+        ? JSON.stringify(mapEqOptions(options))
+        : undefined,
+    );
   }
   equalsViaReal(other) {
     return this._w.equals_via_real(toExpr(other, this.context)._w);
@@ -466,19 +482,36 @@ class Expression {
     // `evaluate_functions` additionally folds a function applied to a numeric
     // argument (`sin(0)+2` → `2`), which is what `simplify="full"` needs.
     const evaluateFunctions = Boolean(opts?.evaluate_functions);
+    let result;
     if (maxDigits === Infinity) {
-      return wrap(
+      result = wrap(
         this._w.evaluate_numbers_to_floats(skipOrdering, evaluateFunctions),
         this.context,
       );
+    } else if (skipOrdering) {
+      result = wrap(this._w.evaluate_numbers_preserve_order(), this.context);
+    } else if (evaluateFunctions) {
+      result = wrap(this._w.evaluate_numbers_evaluate_functions(), this.context);
+    } else {
+      result = wrap(this._w.evaluate_numbers(), this.context);
     }
-    if (skipOrdering) {
-      return wrap(this._w.evaluate_numbers_preserve_order(), this.context);
+    // `set_small_zero` drops residual round-off (`10x + 5e-15` → `10x`) after the
+    // numeric fold. `true` uses the default tolerance; a number sets it. Mirrors
+    // the standalone `set_small_zero()` method the legacy option delegated to.
+    const ssz = opts?.set_small_zero;
+    if (ssz) {
+      // `set_small_zero` leaves the zeroed term in place (`10x + 0`); re-fold to
+      // drop it (`10x`) and collapse `0·x → 0`. Same options minus `set_small_zero`
+      // so this does not recurse.
+      result = result
+        .set_small_zero(ssz === true ? undefined : ssz)
+        .evaluate_numbers({
+          skip_ordering: skipOrdering,
+          evaluate_functions: evaluateFunctions,
+          max_digits: maxDigits,
+        });
     }
-    if (evaluateFunctions) {
-      return wrap(this._w.evaluate_numbers_evaluate_functions(), this.context);
-    }
-    return wrap(this._w.evaluate_numbers(), this.context);
+    return result;
   }
   collect_like_terms_factors() {
     return wrap(this._w.collect_like_terms_factors(), this.context);
@@ -500,6 +533,9 @@ class Expression {
   }
   normalize_negative_numbers() {
     return wrap(this._w.normalize_negative_numbers(), this.context);
+  }
+  expand_relations() {
+    return wrap(this._w.expand_relations(), this.context);
   }
   constants_to_floats() {
     return wrap(this._w.constants_to_floats(), this.context);
@@ -653,7 +689,10 @@ class Expression {
 
   // ---- units ----
   remove_units(scaleBasedOnUnit) {
-    return wrap(this._w.remove_units(!!scaleBasedOnUnit), this.context);
+    // Legacy default scales (`50%` → `0.5`, `180deg` → `π`); pass `false` to
+    // keep the bare value (`50%` → `50`).
+    const scale = scaleBasedOnUnit === undefined ? true : !!scaleBasedOnUnit;
+    return wrap(this._w.remove_units(scale), this.context);
   }
   remove_scaling_units() {
     return wrap(this._w.remove_scaling_units(), this.context);
@@ -694,11 +733,32 @@ class Expression {
   // which reject a plain object. A consumer that puts one into a *state
   // variable* should flatten it there — it is structured-cloned to the main
   // thread and arrives prototype-stripped either way.
-  evaluate_to_constant() {
-    const v = this._w.evaluate_to_constant();
+  evaluate_to_constant(opts) {
+    // Units are scaled away first by default (`50%` → `0.5`, `180deg` → `π`):
+    // `remove_units_first` (default true) strips them, `scale_based_on_unit`
+    // (default true) applies the unit's factor. With `remove_units_first:false`
+    // a unit-bearing value has no numeric constant, so it falls through to NaN.
+    let e = this as unknown as Expression;
+    if (opts?.remove_units_first ?? true) {
+      e = e.remove_units(opts?.scale_based_on_unit ?? true);
+    }
+    const v = e._w.evaluate_to_constant();
     if (v !== undefined) return v;
-    const c = this._w.evaluate_to_complex();
-    return c === undefined ? null : math.complex(c[0], c[1]);
+    const c = e._w.evaluate_to_complex();
+    if (c !== undefined) return math.complex(c[0], c[1]);
+    // Some constructs only reduce to a number under simplification — `det`/`trace`
+    // of a literal matrix (`\det[[1,2],[3,4]]` → −2). Retry once via the
+    // simplified form before giving up.
+    const s = e.simplify();
+    const sv = s._w.evaluate_to_constant();
+    if (sv !== undefined) return sv;
+    const sc = s._w.evaluate_to_complex();
+    if (sc !== undefined) return math.complex(sc[0], sc[1]);
+    // Not a constant. A free (non-unit) variable means "unknown" → null (as
+    // legacy `x+1` did); anything else that cannot be a number — a blank, a
+    // matrix, a leftover unit — is NaN.
+    const freeVars = e.variables().filter((n) => !UNIT_NAMES.has(String(n)));
+    return freeVars.length > 0 ? null : NaN;
   }
   evaluate_to_complex() {
     const v = this._w.evaluate_to_complex();
@@ -913,7 +973,6 @@ for (const name of [
   "toGLSL",
   "toMathjs",
   "solve_linear",
-  "create_discrete_infinite_set",
   "finite_field_evaluate",
 ]) {
   (Expression.prototype as Record<string, unknown>)[name] =
@@ -930,8 +989,11 @@ for (const name of [
 // the Rust canonical `cmp`, because the order it produces is displayed. So did
 // `normalize_negative_numbers` and `normalize_applied_functions`: the passes
 // they name were already in the Rust core as `normalize_syntactic`'s second and
-// third steps, and are now exported individually.
-for (const name of ["expand_relations", "applyAllTransformations"]) {
+// third steps, and are now exported individually. And so did `expand_relations`,
+// which the assumptions store had been using all along
+// (`assumptions::expand::expand_relations`) — only the public binding was
+// missing.
+for (const name of ["applyAllTransformations"]) {
   (Expression.prototype as Record<string, unknown>)[name] = function (
     this: Expression,
   ) {
@@ -1272,6 +1334,45 @@ const Context = {
       ...rows.map((row) => ["tuple", ...row.map((e) => toExpr(e, Context).tree)]),
     ];
     return Context.fromAst(["matrix", ["tuple", nr, nc], body]);
+  },
+  /**
+   * `me.create_discrete_infinite_set({offsets, periods})` — a periodic solution
+   * set such as `π/4 + nπ`, written as the union of one arithmetic progression
+   * per offset. `offsets` may be a comma list; `periods` is then either a
+   * single shared period or a list of matching length. `min_index`/`max_index`
+   * bound the index `n` (default: all of ℤ).
+   *
+   * Like `matrix`, it takes a config object rather than an expression, so it
+   * lives on the Context directly. It used to be mirrored from the `Expression`
+   * prototype instead, which made the mirror wrapper run `toExpr` over the
+   * config object and reject it as a non-tree — the config is the argument, not
+   * the receiver.
+   *
+   * `undefined` (the legacy failure value) when an operand is missing or the
+   * offset/period list lengths disagree.
+   */
+  create_discrete_infinite_set(config?: {
+    offsets?: ExpressionLike;
+    periods?: ExpressionLike;
+    min_index?: ExpressionLike;
+    max_index?: ExpressionLike;
+  }) {
+    const { offsets, periods, min_index, max_index } = config ?? {};
+    if (offsets === undefined || periods === undefined) return undefined;
+    // The bounds cross as tree JSON because they are optional and wasm-bindgen
+    // has no by-reference `Option<&Expression>`; `tree_json()` is the same wire
+    // form `from_ast` reads, so no re-tagging is needed here.
+    const bound = (b: ExpressionLike | undefined) =>
+      b === undefined ? undefined : toExpr(b, Context)._w.tree_json();
+    return wrap(
+      wasm.discrete_infinite_set(
+        toExpr(offsets, Context)._w,
+        toExpr(periods, Context)._w,
+        bound(min_index),
+        bound(max_index),
+      ),
+      Context,
+    );
   },
   fromAst(ast) {
     const key = atomKey(ast);

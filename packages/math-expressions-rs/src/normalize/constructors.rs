@@ -297,6 +297,14 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
     // contraction itself belongs to `simplify`/`expand`, so here the product is
     // just left written.
     let mut vectors: Vec<Expr> = Vec::new();
+    // Factors carrying a `±` are likewise kept as written. Each `±` is an
+    // *independent* sign choice, so `(±x)·(±x)` ranges over {x², −x²} while
+    // `(±x)²` ranges over {x²} only — merging equal bases into a power would
+    // silently drop half the value set. A product with exactly one top-level
+    // `±` never reaches this loop — the scaling rule above has already pulled
+    // that one sign out front, which is sound precisely because there is no
+    // second sign for it to interact with.
+    let mut plus_minus: Vec<Expr> = Vec::new();
     for f in flat {
         if let Expr::Num(n) = &f {
             coeff = coeff.mul(n);
@@ -304,6 +312,10 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         }
         if is_vector_valued(&f) {
             vectors.push(f);
+            continue;
+        }
+        if crate::ops::pm::contains_pm(&f) {
+            plus_minus.push(f);
             continue;
         }
         let (base, exp) = split_pow(f);
@@ -317,7 +329,7 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         return annihilate(&coeff, parts.iter().any(|(b, x)| is_infinite_factor(b, x)));
     }
 
-    let mut out = Vec::with_capacity(parts.len() + vectors.len() + 1);
+    let mut out = Vec::with_capacity(parts.len() + vectors.len() + plus_minus.len() + 1);
     let mut refold = false;
     for (base, exp) in parts {
         match pow(base, exp) {
@@ -336,8 +348,10 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         }
     }
     // Vectors rejoin the factor list as-is; the product stays written until a
-    // `simplify`/`expand` rule contracts it.
+    // `simplify`/`expand` rule contracts it. So do the `±` factors, which
+    // nothing later contracts.
     out.extend(vectors);
+    out.extend(plus_minus);
     if coeff.is_zero() {
         return annihilate(
             &coeff,

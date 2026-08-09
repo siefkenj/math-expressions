@@ -459,10 +459,15 @@ impl Expression {
     }
 
     /// Remainder `self mod other` (JS `mod`).
+    ///
+    /// Built as an application, not an `OtherOp`, so it is the same tree the
+    /// parser makes from `mod(a, b)` — `["apply", "mod", ["tuple", a, b]]`.
+    /// A builder that spelled it differently would make `a.mod(b)` unequal to
+    /// the parse of its own printed form.
     #[wasm_bindgen(js_name = "mod")]
     pub fn modulo(&self, other: &Expression) -> Expression {
-        self.derive(Expr::OtherOp(
-            math_expressions::expr::sym::Sym::new("mod"),
+        self.derive(Expr::Apply(
+            Box::new(Expr::sym("mod")),
             vec![self.0.clone(), other.0.clone()],
         ))
     }

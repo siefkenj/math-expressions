@@ -140,13 +140,22 @@ describe("§5 — a fraction stays a fraction in the tree", () => {
     expect(me.fromText("3/6").simplify().evaluate_to_constant()).toBe(0.5);
   });
 
-  it("rounds to decimals only when rounding changes the value", () => {
-    // `1/3` is not `0.33`, so rounding it genuinely produces a decimal.
-    expect(me.fromText("1/3").simplify().round_numbers_to_decimals(2).tree).toBe(0.33);
-    // `3/6` is `1/2` is `0.5` exactly, so rounding changes nothing and must not
-    // restyle the fraction as a decimal — a fraction a student sees stays a
-    // fraction (DoenetML open item 8; `displayDigits` defaults to 3, so every
-    // rational passes through this path).
+  it("rounds a decimal quantity, never a written fraction", () => {
+    // A fraction a student sees stays a fraction (DoenetML open item 8;
+    // `displayDigits` defaults to 3, so every rational passes through this
+    // path). What decides is the *spelling*, not whether the rounding happens
+    // to be exact: this line asserted `0.33` under the earlier
+    // exactness-based rule, which kept `5/2` but decimalized `1/3` — and only
+    // once it had been through `simplify`, so the same value displayed two ways
+    // in one document. See `ops::numbers::is_written_as_fraction`.
+    expect(me.fromText("1/3").simplify().round_numbers_to_decimals(2).tree).toEqual([
+      "/",
+      1,
+      3,
+    ]);
+    // A decimal-spelled rational still rounds — that is what the spelling is
+    // for, and it is what keeps `<round>0.5</round>` meaningful.
+    expect(me.fromText("0.5").simplify().round_numbers_to_decimals(0).tree).toBe(1);
     expect(me.fromText("3/6").simplify().round_numbers_to_decimals(3).tree).toEqual([
       "/",
       1,

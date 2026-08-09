@@ -4,8 +4,14 @@ Snapshot of `packages/math-expressions-js-compat` (`npx vitest run`) on branch
 `doenet`, after rebuilding `vendor/wasm` (`bash build-wasm.sh`) so results reflect
 current Rust source.
 
-**Current totals (2026-08-09): 162 failed / 6153 passed / 6318 total**
-(2 files skipped, 1 test skipped, 2 todo). Previous snapshot was 380 failed.
+**Current totals (2026-08-09): 97 failed / 6222 passed / 6319 total**
+(2 files skipped, 1 test skipped, 2 todo). Previous snapshots: 380, then 162.
+
+Caveat on this snapshot: the working tree also carried uncommitted in-progress
+work on `evaluate_to_constant`, `fold_apply`, `units` and the matrix pipeline
+that is not part of the session below. That work accounts for 8 of the fixes
+(`slow_simplify`'s `evaluate_to_constant` and matrix cases) and for the single
+regression noted at the end.
 
 Judge changes by name-level diff against a baseline worktree, never by aggregate
 counts (see memory `js-compat-suite-baseline-diff`). The AST session below was
@@ -17,6 +23,70 @@ count is unchanged at 6318.
 
 Note when diffing: several spec files contain **duplicate test names**, so keying a
 comparison by name alone silently drops results. Key by (file, name, occurrence).
+
+## AST tail session — 130 → 97
+
+The nine converter specs were already at zero; this pass took the AST-shaped
+failures that live *outside* them. All of these buckets are now at zero:
+`quick_pm`, `quick_sets`, `quick_transformation`, `quick_mml-to-latex`,
+`quick_arithmetic`, `quick_rounding`, and the three `quick_doenet_*` rounding
+specs.
+
+### Bindings that were missing, not features that were missing
+
+Four of these looked like unimplemented functionality and turned out to be
+plumbing — the engine already did the work and nothing was wired to it:
+
+| what | where it already lived |
+| ---- | ---------------------- |
+| `expand_relations` (2 tests) | `assumptions::expand::expand_relations`, used by the assumptions store all along; only the public binding was absent. |
+| `create_discrete_infinite_set` (7) | `equality::discrete_infinite`, complete. Needed a `Context`-level factory (the prototype mirror ran `toExpr` over the `{offsets, periods}` config and rejected it), plus `min_index`/`max_index` on the wasm entry point. |
+| `output_unicode` on `toString`/`toText`/`toLatex` (1) | `renderOptions` already translated the legacy key; these four methods bypassed it with a bare `JSON.stringify`, so the option was silently dropped. |
+| `pm` helpers (7) | Nothing — a genuine port of `lib/expression/pm.js`. Kept in JS: `expand_pm_signs` returns up to 1024 trees and crossing the boundary per tree costs more than building them. |
+
+### Real engine defects
+
+- **`(±x)·(±x)` folded to `(±x)²`** (`normalize::constructors::mul`). Each `±`
+  is an independent sign, so the product ranges over {x², −x²} and the power
+  over {x²} only — the fold silently dropped half the value set. Factors
+  carrying a `±` now stay written, the way coordinate vectors already did. A
+  product with exactly one top-level `±` is unaffected: the scaling rule pulls
+  that sign out earlier, which is sound precisely because there is no second
+  sign to interact with.
+- **`a.mod(b)` disagreed with the parser.** The builder made
+  `OtherOp("mod",[a,b])` while `mod(a, b)` parses to
+  `["apply","mod",["tuple",a,b]]`. Same operator, two spellings.
+- **Discrete-infinite-set equality divided by a possibly-zero period.** The
+  canonicalizer folded `2c/c` unconditionally, so `{a + kc}` and
+  `{a, a+c} + 2kc` compared equal whether or not `c ≠ 0` was assumed — which
+  made the assumption unobservable. `progression_contained` now requires
+  `is_nonzero(period) == Some(true)`. This replaces an accepted divergence
+  recorded in `tests/sets.rs`.
+- **`mmlToLatex`** was a throwing stub; ported from legacy (309 lines), with
+  `xml-parser`'s `parse()` inlined rather than adding an unmaintained CJS
+  dependency — its unescaped-text behaviour is load-bearing for the entity table.
+
+### Four stale expectations updated instead
+
+Each of these asserted behaviour that a later, documented decision had already
+superseded; the specs were simply never updated. Verified case by case rather
+than assumed:
+
+- **`1/3` under display rounding** (2 specs). These wanted "decimalize when the
+  rounding changes the value". `ops::numbers::is_written_as_fraction` had
+  deliberately replaced that rule with a spelling-based one two commits later,
+  with the reasoning written down. I implemented the exactness rule first, found
+  it broke the Rust mirror test, and reverted it — dates settled it (spec Aug 5,
+  rule Aug 7/9).
+- **`2.675` rounds to `2.68`, not `2.67`.** Checked against mathjs itself, which
+  legacy rounded through: `format(2.675, {notation:"fixed", precision:2})` is
+  `"2.68"`. Rounding reads the shortest decimal spelling, not the stored binary.
+- **`round_numbers_to_decimals(100)` on an over-long literal.** The expected
+  values were the f64 readings of the input, because in the JS library a decimal
+  became a double at parse time. Decimals are exact rationals here, so a no-op
+  rounding returns what was typed.
+- **`default_order` is no longer a no-op.** Confirmed against the legacy
+  `trees/default_order.js`, which also answers `["+","x",3]` for `3+x`.
 
 ## AST session — 369 → 162 (−207)
 
@@ -96,20 +166,31 @@ agree exactly.
 
 ## Remaining failures by spec file
 
-| count | spec file                                                                              | root cause / category                                                                                                                                                        |
-| ----: | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|    42 | `slow_simplify`                                                                        | three buckets (see below): canonical **ordering** (~13), **number folding** at singular values (~10), **radical/matrix/expand algebra** incomplete (~12, incl. one real bug) |
-|    24 | `slow_matrix`                                                                          | `me.matrix is not a function`; vector/tuple typing (`tuple` vs `vector` after add)                                                                                           |
-|    21 | `slow_check-equality-numerical-errors`                                                 | numerical-tolerance equality returns false                                                                                                                                   |
-|    18 | `slow_check-symbolic-equality-numerical-errors`                                        | as above (symbolic variant)                                                                                                                                                  |
-|    17 | `quick_trees`                                                                          | tree matching with predicate/regex conditions can't cross the wasm boundary                                                                                                  |
-|    10 | `quick_pm`                                                                             | —                                                                                                                                                                            |
-|     7 | `quick_sets`                                                                           | —                                                                                                                                                                            |
-|     5 | `slow_assumptions`                                                                     | see below                                                                                                                                                                    |
-|     4 | `slow_math-expressions`                                                                | —                                                                                                                                                                            |
-|     3 | `quick_solve`                                                                          | —                                                                                                                                                                            |
-|     2 | `quick_transformation`, `slow_rational`                                                | —                                                                                                                                                                            |
-|     1 | `quick_arithmetic`, `quick_rounding`, `quick_mml-to-latex`, + 4 `quick_doenet_*` specs | —                                                                                                                                                                            |
+| count | spec file                                       | root cause / category                                                                                             |
+| ----: | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+|    26 | `slow_simplify`                                 | canonical **ordering**, **number folding** at singular values, **radical/expand algebra** incomplete — see below   |
+|    21 | `slow_check-equality-numerical-errors`          | numerical-tolerance equality returns false                                                                        |
+|    18 | `slow_check-symbolic-equality-numerical-errors` | as above (symbolic variant)                                                                                       |
+|    17 | `quick_trees`                                   | tree matching with predicate/regex conditions can't cross the wasm boundary                                       |
+|     5 | `slow_assumptions`                              | see below                                                                                                         |
+|     4 | `slow_math-expressions`                         | —                                                                                                                 |
+|     3 | `quick_solve`                                   | `solve_linear()` unimplemented                                                                                    |
+|     2 | `slow_rational`                                 | —                                                                                                                 |
+|     1 | `quick_doenet_compat_pr84`                      | `0*blank` → `NaN` where the spec wants `null`; from the in-flight `evaluate_to_constant` work, see the note below  |
+
+`slow_matrix` (was 24) went to zero on the in-flight matrix-pipeline work, as did
+8 of the `slow_simplify` cases.
+
+### The one regression in this snapshot
+
+`quick_doenet_compat_pr84 > "does not collapse 0*blank to a number"` expects
+`me.fromText("0*_").evaluate_to_constant()` to be `null`; it now returns `NaN`.
+The final line of the rewritten `evaluate_to_constant` is
+`return freeVars.length > 0 ? null : NaN`, and a blank is not a variable, so
+`0*_` has no free variables and takes the `NaN` branch. Two specs currently
+disagree about blanks — `slow_simplify`'s "evaluate_to_constant with blanks
+gives NaN" (now passing) and this one — so the fix is a decision about which
+reading of "undefined" wins, not a typo.
 
 ### The 5 remaining `slow_assumptions` failures
 
@@ -122,9 +203,11 @@ agree exactly.
 - `logical combinations`, `combined assumptions`, `combined assumptions, negated` —
   or-disjunction and interval-membership _reasoning_ (as opposed to retrieval).
 
-### The 42 `slow_simplify` failures
+### The 26 `slow_simplify` failures
 
-Three root causes, not the single "Infinity/neg-zero" this row used to claim:
+Three root causes, not the single "Infinity/neg-zero" this row used to claim.
+The counts below were taken at 42; the matrix/vector and `evaluate_to_constant`
+cases have since closed, so ordering is now the bulk of what is left.
 
 - **Canonical ordering (~13)** — sums are mathematically correct but ordered
   differently: numeric constants like `e`/`i` float to the front instead of
@@ -145,18 +228,19 @@ Three root causes, not the single "Infinity/neg-zero" this row used to claim:
 
 ## Remaining buckets by theme
 
-**Semantic edge cases (42)** — `slow_simplify`: canonical ordering (~13), number
-folding at singular values (~10), radical/matrix/expand algebra (~12). See the
-per-bucket breakdown above. Now the largest area.
-
 **Numerical-tolerance equality (39)** — the two `check-*-numerical-errors` specs.
-Previously mis-attributed to the assumptions system; they are independent.
+Previously mis-attributed to the assumptions system; they are independent. Now
+the largest single area.
 
-**Unimplemented / unbound APIs (41)** — `slow_matrix` (24, `me.matrix` is not a
-function) and `quick_trees` (17, predicate/regex callback matching cannot cross
-the wasm boundary).
+**Semantic edge cases (26)** — `slow_simplify`: canonical ordering, number
+folding at singular values, radical/expand algebra. See the per-bucket breakdown
+above.
 
-**Printer / formatting (~1)** — was the largest bucket at ~170; the AST session
+**Unimplemented / unbound APIs (20)** — `quick_trees` (17, predicate/regex
+callback matching cannot cross the wasm boundary) and `quick_solve` (3,
+`solve_linear`). `slow_matrix`'s missing `me.matrix` constructor closed.
+
+**Printer / formatting (~1)** — was the largest bucket at ~170; the AST sessions
 closed it. What is left is the `paren_if_spaced` bug noted under
 `slow_assumptions`, which is a printer defect reported through another spec:
 `src/print/text.rs` tests `starts_with('(') && ends_with(')')`, which cannot
@@ -164,6 +248,11 @@ distinguish `(a or b)` from `(a) or (b)`. It needs a paren-balance scan.
 
 ## Highest-leverage remaining item
 
-The `slow_simplify` canonical-ordering bucket (~13) is described above as "likely
-one comparator fix" — the best ratio of tests to change. After that,
-`slow_matrix`'s missing `me.matrix` constructor (24) is a binding, not math.
+The two `check-*-numerical-errors` specs (39) are now the biggest block and share
+one root cause, so they are likely one fix. After that, the `slow_simplify`
+canonical-ordering bucket is described above as "likely one comparator fix".
+
+A note for whoever picks these up: four of the fixes in the tail session were
+bindings for engine code that already existed and was already exercised
+elsewhere. Before implementing anything that looks like a missing feature here,
+grep the Rust core for it first.

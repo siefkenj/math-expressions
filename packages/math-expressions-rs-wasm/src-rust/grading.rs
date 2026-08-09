@@ -130,7 +130,7 @@ impl Expression {
 ///
 /// Malformed JSON is an error rather than a silent default, so one decoder
 /// keeps the numeric and syntactic paths from drifting apart.
-fn eq_options_from_json(options_json: &str) -> Result<EqOptions, JsError> {
+pub(super) fn eq_options_from_json(options_json: &str) -> Result<EqOptions, JsError> {
     let v: serde_json::Value =
         serde_json::from_str(options_json).map_err(|e| JsError::new(&e.to_string()))?;
     let mut o = EqOptions::default();

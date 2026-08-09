@@ -81,6 +81,13 @@ impl Expression {
         self.derive(math_expressions::normalize_negative_numbers(&self.0))
     }
 
+    /// Rewrite every relation carrying more than one fact into the `and`/`or`
+    /// of two-sided comparisons it abbreviates: `a < b < c` → `a < b and b < c`,
+    /// `x ∈ (a,b]` → `x > a and x ≤ b` (JS `expand_relations`).
+    pub fn expand_relations(&self) -> Expression {
+        self.derive(math_expressions::expand_relations(&self.0))
+    }
+
     /// Reinterpret tuples as vectors (JS `tuples_to_vectors`).
     pub fn tuples_to_vectors(&self) -> Expression {
         self.derive(math_expressions::tuples_to_vectors(&self.0))

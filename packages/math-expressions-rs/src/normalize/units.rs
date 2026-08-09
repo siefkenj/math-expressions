@@ -220,6 +220,15 @@ fn as_unit_quantity(e: &Expr) -> Option<(Expr, Expr)> {
 /// builds goes back through the smart constructors.
 pub(crate) fn fold_units(e: &Expr) -> Expr {
     let e = crate::expr::map_children(e, fold_units);
+    // A scalar × unit (or a negated / divided one) absorbs the scalar into the
+    // value: `3·50deg → 150deg`, `$50·3 → $150`, `x·$50·y/10 → $5xy`. The value
+    // is canonicalized so `3·50` folds to `150`. (Sums of like units are handled
+    // by the `Add` arm below.)
+    if matches!(e, Expr::Mul(_) | Expr::Neg(_)) {
+        if let Some((unit, value)) = as_unit_quantity(&e) {
+            return make_unit(&unit, super::canonicalize(&value));
+        }
+    }
     match &e {
         Expr::Add(terms) => {
             // Group by unit symbol, preserving first-seen order.
