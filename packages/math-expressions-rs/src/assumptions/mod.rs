@@ -18,17 +18,30 @@
 //! variable is fully unknown (no default-real), odd powers of negatives get no
 //! sign (`x³ | x<0` → unknown), and sums do no interval arithmetic
 //! (`x−3 | x>4` → unknown sign).
+//!
+//! The [`TreeStore`](tree_store::TreeStore) the store carries alongside answers
+//! the other question the JS API asks of an assumption set — not "is this
+//! real?" but "what is known about `x`?", as a tree with `x` on the left. It
+//! needs its own filing ([`tree_store`]), its own canonical form ([`clean`],
+//! [`expand`]) and a transitive closure over the stored facts ([`derive`]),
+//! none of which the predicate engine has any use for.
 
+mod clean;
+mod derive;
+mod expand;
 mod facts;
 mod infer;
 mod queries;
 mod store;
+pub mod tree_store;
 
 /// Three-valued logic: `Some(true)` / `Some(false)` / `None` = unknown.
 pub type MaybeBool = Option<bool>;
 
+pub use expand::expand_relations;
 pub use queries::{
     is_complex, is_integer, is_negative, is_nonnegative, is_nonpositive, is_nonzero, is_positive,
     is_real,
 };
 pub use store::Assumptions;
+pub use tree_store::TreeStore;

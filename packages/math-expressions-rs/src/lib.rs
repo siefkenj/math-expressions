@@ -61,8 +61,8 @@ pub mod resource_limits;
 pub mod special_functions;
 
 pub use assumptions::{
-    is_complex, is_integer, is_negative, is_nonnegative, is_nonpositive, is_nonzero, is_positive,
-    is_real, Assumptions,
+    expand_relations, is_complex, is_integer, is_negative, is_nonnegative, is_nonpositive,
+    is_nonzero, is_positive, is_real, Assumptions, TreeStore,
 };
 pub use calculus::critical::critical_points;
 pub use calculus::diff::derivative;

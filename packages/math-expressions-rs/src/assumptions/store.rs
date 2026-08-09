@@ -17,11 +17,25 @@ use std::collections::HashMap;
 pub struct Assumptions {
     by_var: HashMap<String, Vec<Expr>>,
     generic: Vec<Expr>,
+    trees: super::TreeStore,
 }
 
 impl Assumptions {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The same facts as *trees*, for the callers that ask what is known about
+    /// a variable rather than whether an expression is real. Filed separately
+    /// (see [`TreeStore`](super::TreeStore)): the predicate engine wants one
+    /// canonical relation per fact, this wants the fact solved for the variable
+    /// it was filed under.
+    pub fn trees(&self) -> &super::TreeStore {
+        &self.trees
+    }
+
+    pub fn trees_mut(&mut self) -> &mut super::TreeStore {
+        &mut self.trees
     }
 
     /// Add an assumption (a relation, or an `And` of relations, in any parse
@@ -64,11 +78,12 @@ impl Assumptions {
     pub fn clear(&mut self) {
         self.by_var.clear();
         self.generic.clear();
+        self.trees.clear();
     }
 
     /// No facts stored at all?
     pub fn is_empty(&self) -> bool {
-        self.by_var.is_empty() && self.generic.is_empty()
+        self.by_var.is_empty() && self.generic.is_empty() && self.trees.is_empty()
     }
 
     /// Add a generic assumption: a pattern in the variable `x` applied to any

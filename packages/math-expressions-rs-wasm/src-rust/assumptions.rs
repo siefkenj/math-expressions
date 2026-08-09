@@ -2,11 +2,35 @@
 //! builders: finite-field evaluation and discrete-infinite-set construction.
 
 use super::Expression;
+use math_expressions::assumptions::tree_store::{Facts, VarMap};
+use math_expressions::expr::serde::{to_js, try_from_js};
 use math_expressions::{
-    create_discrete_infinite_set, simplify_with as rust_simplify_with, Assumptions, TextToAst,
-    TextToAstOptions,
+    create_discrete_infinite_set, simplify_with as rust_simplify_with, Assumptions, Expr,
+    TextToAst, TextToAstOptions,
 };
 use wasm_bindgen::prelude::*;
+
+/// Parse a JS-tree AST, or `None` if the core cannot read it.
+fn read(tree_json: &str) -> Option<Expr> {
+    try_from_js(&serde_json::from_str::<serde_json::Value>(tree_json).ok()?).ok()
+}
+
+fn facts_json(facts: &Facts) -> serde_json::Value {
+    match facts {
+        Facts::Absent => serde_json::Value::Null,
+        Facts::Empty => serde_json::json!([]),
+        Facts::Tree(t) => to_js(t),
+    }
+}
+
+fn var_map_json(map: &VarMap) -> String {
+    serde_json::Value::Object(
+        map.iter()
+            .map(|(k, v)| (k.clone(), facts_json(v)))
+            .collect(),
+    )
+    .to_string()
+}
 
 /// Evaluate `e` in ℤ/`modulus`ℤ with real integer bindings (item 16). Returns
 /// the possible residues, or `undefined` when the field can't represent it.
@@ -65,6 +89,103 @@ impl WasmAssumptions {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    // ---- the assumption *trees* (JSON in / JSON out) ----
+    //
+    // The methods above answer predicates from a relation's text spelling. The
+    // ones below drive the store's other half — the per-variable facts the JS
+    // API hands *back* as trees — and take an AST, because that is what a
+    // caller holding `me.from(...)` has and because a text round trip would
+    // re-parse a tree the caller built by hand.
+    //
+    // An unreadable tree is a no-op rather than an error: these run behind
+    // `me.add_assumption(...)`, whose legacy contract is to count what it filed
+    // and report 0 when it filed nothing.
+
+    /// File an assumption. Unless `exclude_generic`, a variable meeting the
+    /// store for the first time also picks up the generic assumption. Returns
+    /// the number of facts recorded.
+    pub fn add_ast(&mut self, tree_json: &str, exclude_generic: bool) -> u32 {
+        match read(tree_json) {
+            Some(e) => self.0.trees_mut().add_assumption(&e, exclude_generic),
+            None => 0,
+        }
+    }
+
+    /// File a generic assumption: one written in terms of `x`, standing for
+    /// every variable with no assumptions of its own.
+    pub fn add_generic_ast(&mut self, tree_json: &str) -> u32 {
+        match read(tree_json) {
+            Some(e) => self.0.trees_mut().add_generic_assumption(&e),
+            None => 0,
+        }
+    }
+
+    pub fn remove_ast(&mut self, tree_json: &str) -> u32 {
+        match read(tree_json) {
+            Some(e) => self.0.trees_mut().remove_assumption(&e),
+            None => 0,
+        }
+    }
+
+    pub fn remove_generic_ast(&mut self, tree_json: &str) -> u32 {
+        match read(tree_json) {
+            Some(e) => self.0.trees_mut().remove_generic_assumption(&e),
+            None => 0,
+        }
+    }
+
+    /// Everything known about `query_json`, as a tree stating it.
+    ///
+    /// The query is either a variable name, an array holding an array of names
+    /// (`[["a","b"]]`), or an expression — and the first two are not
+    /// expressions, so the shape is decided here rather than by the caller.
+    /// `undefined` when nothing is known.
+    pub fn get_ast(
+        &self,
+        query_json: &str,
+        exclude_variables: Vec<String>,
+        omit_derived: bool,
+    ) -> Option<String> {
+        let value: serde_json::Value = serde_json::from_str(query_json).ok()?;
+        let trees = self.0.trees();
+
+        let vars: Option<Vec<String>> = match &value {
+            serde_json::Value::String(s) => Some(vec![s.clone()]),
+            serde_json::Value::Array(items) => match items.first() {
+                Some(serde_json::Value::Array(names)) => Some(
+                    names
+                        .iter()
+                        .filter_map(|n| n.as_str().map(str::to_string))
+                        .collect(),
+                ),
+                _ => None,
+            },
+            _ => return None,
+        };
+
+        let result = match vars {
+            Some(vars) => trees.facts_for_variables(&vars, &exclude_variables, omit_derived),
+            None => trees.assumptions_for_tree(&try_from_js(&value).ok()?, &exclude_variables),
+        };
+        result.as_ref().map(|e| to_js(e).to_string())
+    }
+
+    /// The per-variable facts, as `{variable: tree}` — the legacy `byvar`,
+    /// `derived` and `generic` inspection surface. A variable recorded with no
+    /// fact is `null` (the legacy `undefined`), one met with nothing known is
+    /// `[]`.
+    pub fn byvar_ast(&self) -> String {
+        var_map_json(self.0.trees().by_var())
+    }
+
+    pub fn derived_ast(&self) -> String {
+        var_map_json(self.0.trees().derived())
+    }
+
+    pub fn generic_ast(&self) -> String {
+        facts_json(self.0.trees().generic()).to_string()
     }
 
     /// Simplify `expr` under these assumptions.

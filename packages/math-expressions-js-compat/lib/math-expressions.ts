@@ -15,7 +15,7 @@ import {
 } from "./trees/flatten";
 import * as converters from "./converters/index";
 import { jsonToAst, tagNonFinite } from "./converters/ast-json";
-import { AssumptionStore } from "./assumptions/store";
+import * as assumptionStore from "./assumptions/store";
 import { get_tree } from "./trees/util";
 import { compileRustExpr } from "math-expressions-rs-wasm";
 import type { WasmExpression } from "math-expressions-rs-wasm";
@@ -1304,12 +1304,11 @@ const Context = {
   equalWithSignErrors,
 
   // ---- assumptions (context-level) ----
-  // Two stores, kept in step. The wasm `Assumptions` handle answers the
-  // predicates (`is_real`, `is_positive`, …) and is fed the text spelling of
-  // every assumption; the parallel text list is what `simplify_with_assumptions`
-  // takes. `_assumptionStore` (see `lib/assumptions/store.ts`) holds the same
-  // facts as trees, filed per variable, because `get_assumptions` has to hand a
-  // fact *back* — a shape the wasm handle has no notion of.
+  // One handle, fed twice. The wasm `Assumptions` handle answers the predicates
+  // (`is_real`, `is_positive`, …) from the text spelling of every assumption,
+  // and holds the same facts as trees — filed per variable, so that
+  // `get_assumptions` can hand a fact *back*. The parallel text list is what
+  // `simplify_with_assumptions` takes.
   //
   // The handle is constructed lazily, and that is load-bearing. As a plain `new
   // wasm.Assumptions()` in this literal it ran while *this module's body* was
@@ -1325,11 +1324,10 @@ const Context = {
     this._assumptionsHandleCache = h;
   },
   _assumptionTexts: [],
-  _assumptionStore: new AssumptionStore(),
   set_to_default() {
+    // A fresh handle is the reset: it carries the per-variable facts too.
     this._assumptionsHandle = new wasm.Assumptions();
     this._assumptionTexts = [];
-    this._assumptionStore.clear();
   },
   clear_assumptions() {
     this.set_to_default();
@@ -1337,7 +1335,11 @@ const Context = {
   add_assumption(assumption, exclude_generic?) {
     const tree = syncAssumptionText(this, assumption, "add");
     if (tree === undefined) return 0;
-    return this._assumptionStore.add_assumption(tree, exclude_generic);
+    return assumptionStore.add_assumption(
+      this._assumptionsHandle,
+      tree,
+      exclude_generic,
+    );
   },
   add_generic_assumption(assumption) {
     // A generic assumption is stated in terms of `x` and stands for every
@@ -1345,20 +1347,27 @@ const Context = {
     // which is at least right for `x` itself.
     const tree = syncAssumptionText(this, assumption, "add");
     if (tree === undefined) return 0;
-    return this._assumptionStore.add_generic_assumption(tree);
+    return assumptionStore.add_generic_assumption(this._assumptionsHandle, tree);
   },
   remove_assumption(assumption) {
     const tree = syncAssumptionText(this, assumption, "remove");
     if (tree === undefined) return 0;
-    return this._assumptionStore.remove_assumption(tree);
+    return assumptionStore.remove_assumption(this._assumptionsHandle, tree);
   },
   remove_generic_assumption(assumption) {
     const tree = syncAssumptionText(this, assumption, "remove");
     if (tree === undefined) return 0;
-    return this._assumptionStore.remove_generic_assumption(tree);
+    return assumptionStore.remove_generic_assumption(
+      this._assumptionsHandle,
+      tree,
+    );
   },
   get_assumptions(variables_or_expr, params?) {
-    return this._assumptionStore.get_assumptions(variables_or_expr, params);
+    return assumptionStore.get_assumptions(
+      this._assumptionsHandle,
+      variables_or_expr,
+      params,
+    );
   },
   // `me.assumptions` was the assumptions object itself, carrying the same
   // add/get methods as the context. This port also has to keep answering the
@@ -1412,13 +1421,13 @@ function makeAssumptionsFacade() {
       return Context._assumptionsHandle;
     },
     get byvar() {
-      return Context._assumptionStore.byvar;
+      return assumptionStore.byvar(Context._assumptionsHandle);
     },
     get derived() {
-      return Context._assumptionStore.derived;
+      return assumptionStore.derived(Context._assumptionsHandle);
     },
     get generic() {
-      return Context._assumptionStore.generic;
+      return assumptionStore.generic(Context._assumptionsHandle);
     },
   };
   for (const name of [
