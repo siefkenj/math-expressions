@@ -49,11 +49,21 @@ pub fn default_order(e: &Expr) -> Expr {
     normalize_negatives(&sort_ast(&t))
 }
 
+/// The comparator [`default_order`] sorts commutative operands with, exposed
+/// for callers that arrange trees themselves rather than through a whole-tree
+/// pass — the compat polynomial engine picks its leading variable this way, and
+/// it has to be *this* order (the legacy JS key below) and not
+/// [`super::order::cmp`], or two polynomials disagree about which of their
+/// variables comes first.
+pub fn cmp_default_order(a: &Expr, b: &Expr) -> std::cmp::Ordering {
+    cmp_key(&sort_key(a, false), &sort_key(b, false))
+}
+
 /// Merge nested same-operator `Add`/`Mul`/`And`/`Or`/`Union`/`Intersect` nodes
 /// into their parent, so the sort sees one flat operand list. The parsers
 /// already produce flat trees; a tree built by hand through the AST boundary
 /// need not be.
-fn flatten(e: &Expr) -> Expr {
+pub(super) fn flatten(e: &Expr) -> Expr {
     fn flat_children(xs: &[Expr], same: impl Fn(&Expr) -> Option<Vec<Expr>>) -> Vec<Expr> {
         let mut out = Vec::with_capacity(xs.len());
         for x in xs {
@@ -828,7 +838,7 @@ fn js_operands_opt(e: &Expr) -> Option<Vec<Expr>> {
     }
 }
 
-fn js_operands(e: &Expr) -> Vec<Expr> {
+pub(crate) fn js_operands(e: &Expr) -> Vec<Expr> {
     match e {
         Expr::Add(xs)
         | Expr::Mul(xs)
@@ -883,7 +893,7 @@ fn js_operands(e: &Expr) -> Vec<Expr> {
     }
 }
 
-fn legacy_operator(e: &Expr) -> String {
+pub(crate) fn legacy_operator(e: &Expr) -> String {
     match e {
         Expr::Pow(..) => "^".to_string(),
         Expr::Prime(_) => "prime".to_string(),

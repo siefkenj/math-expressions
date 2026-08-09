@@ -1,137 +1,54 @@
-// Ported from the legacy library (`lib/expression/variables.js`). The compat
-// polynomial code needs `operators`; `variables`/`functions` are ported for
-// completeness. The legacy default mathjs config defined e/pi/i as constants,
-// so we mirror that here (they are treated as numbers, not free variables).
-import math from "../mathjs";
+// `me.variables` / `me.operators` on a raw tree, backed by the core's
+// `ops::query`. Nothing is decided here: the walk that drops application heads
+// and de-duplicates in first-appearance order is the Rust one, reached through
+// an `Expression` handle because a tree is what the callers hold.
+import wasm from "../_wasm";
+import { astToJson } from "../converters/ast-json";
 import { get_tree } from "../trees/util";
 
-const m = math as any;
-if (m.define_e === undefined) m.define_e = true;
-if (m.define_pi === undefined) m.define_pi = true;
-if (m.define_i === undefined) m.define_i = true;
-
-function leaves(tree: any, include_subscripts?: boolean): any[] {
-  if (!Array.isArray(tree)) return [tree];
-
-  var operator = tree[0];
-  var operands = tree.slice(1);
-
-  if (include_subscripts && operator === "_") {
-    if (
-      typeof operands[0] === "string" &&
-      (typeof operands[1] === "string" || typeof operands[1] === "number")
-    )
-      return [operands[0] + "_" + operands[1]];
-  }
-
-  if (operator === "apply") {
-    operands = tree.slice(2);
-  }
-  if (operands.length === 0) return [];
-
-  return operands
-    .map(function (v: any) {
-      return leaves(v, include_subscripts);
-    })
-    .reduce(function (a: any[], b: any[]) {
-      return a.concat(b);
-    });
-}
-
-function variables(expr_or_tree: any, include_subscripts = false): any[] {
-  var tree = get_tree(expr_or_tree);
-
-  var result = leaves(tree, include_subscripts);
-
-  result = result.filter(function (v: any) {
-    return (
-      typeof v === "string" &&
-      (m.define_e || v !== "e") &&
-      (m.define_pi || v !== "pi") &&
-      (m.define_i || v !== "i")
-    );
-  });
-
-  result = result.filter(function (itm: any, i: number) {
-    return i === result.indexOf(itm);
-  });
-
-  return result;
-}
-
-function operators_list(tree: any): any[] {
-  if (!Array.isArray(tree)) return [];
-
-  var operator = tree[0];
-  var operands = tree.slice(1);
-
-  if (operator === "apply") {
-    operands = tree.slice(2);
-  }
-  if (operands.length === 0) return [operator];
-
-  return [operator].concat(
-    operands
-      .map(function (v: any) {
-        return operators_list(v);
-      })
-      .reduce(function (a: any[], b: any[]) {
-        return a.concat(b);
-      }),
-  );
-}
-
-function operators(expr_or_tree: any): any[] {
-  var tree = get_tree(expr_or_tree);
-
-  var result = operators_list(tree);
-
-  result = result.filter(function (v: any) {
-    return v !== "apply";
-  });
-
-  result = result.filter(function (itm: any, i: number) {
-    return i === result.indexOf(itm);
-  });
-
-  return result;
-}
-
-function functions_list(tree: any): any[] {
-  if (!Array.isArray(tree)) {
+/**
+ * Run a query method over a raw tree.
+ *
+ * A tree the core cannot read answers `[]`. These callers are normalization
+ * passes over trees built by JS-side surgery, and every one of them treats an
+ * empty answer as "nothing to do here" — which is the right outcome for a node
+ * whose variables cannot be determined, and better than throwing out of a
+ * normalization.
+ */
+function query(expr_or_tree: any, run: (src: any) => string[]): string[] {
+  let src;
+  try {
+    src = wasm.from_ast(astToJson(get_tree(expr_or_tree)));
+  } catch {
     return [];
   }
-
-  var operator = tree[0];
-  var operands = tree.slice(1);
-
-  var functions: any[] = [];
-  if (operator === "apply") {
-    functions = [operands[0]];
-    operands = tree.slice(2);
+  try {
+    return run(src);
+  } finally {
+    src.free(); // throwaway: parse source, never returned
   }
-
-  return functions.concat(
-    operands
-      .map(function (v: any) {
-        return functions_list(v);
-      })
-      .reduce(function (a: any[], b: any[]) {
-        return a.concat(b);
-      }, []),
-  );
 }
 
-function functions(expr_or_tree: any): any[] {
-  var tree = get_tree(expr_or_tree);
-
-  var result = functions_list(tree);
-
-  result = result.filter(function (itm: any, i: number) {
-    return i === result.indexOf(itm);
+/**
+ * The free variables, in first-appearance order. `include_subscripts` folds
+ * `x_1` into the single name `x_1` instead of reporting the base `x`.
+ */
+export function variables(
+  expr_or_tree: any,
+  include_subscripts = false,
+): string[] {
+  return query(expr_or_tree, (src) => {
+    if (!include_subscripts) return src.variables();
+    const flat = src.subscripts_to_strings();
+    try {
+      return flat.variables();
+    } finally {
+      flat.free(); // throwaway: method result, never returned
+    }
   });
-
-  return result;
 }
 
-export { variables, operators, functions };
+/** The operator heads used, in first-appearance order. */
+export function operators(expr_or_tree: any): string[] {
+  return query(expr_or_tree, (src) => src.operators());
+}

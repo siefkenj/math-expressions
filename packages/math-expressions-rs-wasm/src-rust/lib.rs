@@ -24,6 +24,8 @@
 //! - [`ode`]         — ODE solving (numeric and expression-RHS)
 //! - [`numeric`]     — f64 numeric utilities (the `me.math` replacements)
 //! - [`interop`]     — JS-tree AST boundary (Doenet interop)
+//! - [`tree_ops`]    — JS-tree operations the compat layer needs without an
+//!   `Expression`'s normalization (default order, not-pushdown, linear solving)
 //! - [`js_match`]    — the JS-tree template-match / flatten-unflatten engine
 //!   backing [`interop`] (JS-shape only, so it lives here rather than in the
 //!   core crate)
@@ -49,6 +51,7 @@ mod numeric;
 mod ode;
 mod parse;
 mod transform;
+mod tree_ops;
 
 /// An opaque handle to a parsed math expression.
 ///

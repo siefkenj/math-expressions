@@ -83,7 +83,8 @@ pub use expr::sym::{interner_len, Sym};
 pub use expr::tear_down;
 pub use expr::{Expr, Mat, MathConst, RelOp};
 pub use grade::{
-    equal_specified_sign_errors, equal_with_sign_errors, evaluate_membership, solve_linear,
+    equal_specified_sign_errors, equal_with_sign_errors, evaluate_membership, linear_decomposition,
+    solve_linear,
 };
 pub use mathjs_compat::ode::{solve_ode_exprs, solve_ode_with, OdeSolution};
 pub use matrix::{
@@ -91,7 +92,8 @@ pub use matrix::{
     nullspace, rank, rref, trace, transpose, vector_add, vector_sub, EigenPair,
 };
 pub use normalize::{
-    canonicalize, default_order, desugar_units, expand, simplify, simplify_logical, simplify_with,
+    canonicalize, cmp_default_order, default_order, desugar_units, expand, flatten_logical,
+    push_not, simplify, simplify_logical, simplify_with,
 };
 pub use notation::{Digits, Grouping, NumberNotation};
 pub use num::Number;

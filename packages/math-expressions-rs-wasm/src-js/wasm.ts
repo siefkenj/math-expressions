@@ -24,6 +24,7 @@ export interface WasmExpression {
   to_serialized(): string;
   variables(): string[];
   functions(): string[];
+  operators(): string[];
 
   equals(other: WasmExpression): boolean;
   equals_with_options(other: WasmExpression, optionsJson: string): boolean;
@@ -166,6 +167,18 @@ export interface WasmModule {
   flatten_ast(treeJson: string): string | undefined;
   unflatten_left(treeJson: string): string | undefined;
   unflatten_right(treeJson: string): string | undefined;
+  /** Order two trees by the legacy `default_order` sort key (-1/0/1). */
+  cmp_default_order(aJson: string, bJson: string): number | undefined;
+  /** Push `not` inward only — no simplification, no relation reorientation. */
+  push_not_ast(treeJson: string): string | undefined;
+  flatten_logical_ast(treeJson: string): string | undefined;
+  /** Restate a relation with `variable` alone on the left. */
+  solve_linear_ast(treeJson: string, variable: string): string | undefined;
+  /** `{"b": tree, "coefficients": [tree, …]}`, positional in `variables`. */
+  linear_decomposition_ast(
+    treeJson: string,
+    variables: string[],
+  ): string | undefined;
   Assumptions: WasmAssumptionsConstructor;
   /** Distinct symbol names interned this session — an append-only memory gauge. */
   interner_size(): number;

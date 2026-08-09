@@ -85,6 +85,19 @@ fn functions_and_operators() {
     assert_eq!(functions(&parse("sin(x)^2+cos(x)")), vec!["sin", "cos"]);
     assert_eq!(operators(&parse("sin(x)+f(y)*g(x)")), vec!["+", "*"]);
     assert_eq!(operators(&parse("x/y - z^2")), vec!["+", "/", "-", "^"]);
+    // Every array head, not just the arithmetic ones: the compat polynomial
+    // parser whitelists `+ - * / ^ _ prime` and needs `tuple` reported or it
+    // reads `(3,4)` as a polynomial.
+    assert_eq!(operators(&parse("(3,4)")), vec!["tuple"]);
+    assert_eq!(operators(&parse("x > 0")), vec![">"]);
+    assert_eq!(operators(&parse("x_1")), vec!["_"]);
+    // `apply` is dropped, head and all — `sin²(x)` contributes no `^`.
+    assert_eq!(operators(&parse("sin(x)^2")), vec!["^"]);
+    assert_eq!(
+        operators(&parse("sin^2 (x)")),
+        Vec::<String>::new(),
+        "an application's head is not walked"
+    );
 }
 
 #[test]

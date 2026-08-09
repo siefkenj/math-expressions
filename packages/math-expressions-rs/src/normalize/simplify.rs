@@ -112,7 +112,14 @@ pub fn simplify_logical(e: &Expr, assumptions: &Assumptions) -> Expr {
 
 /// Rewrite `not(...)` toward the leaves. Recurses into the negated operand
 /// first so nested negations collapse bottom-up.
-fn push_not(e: &Expr) -> Expr {
+///
+/// Public because [`simplify_logical`] is *not* a substitute for it: that one
+/// simplifies and canonicalizes first, and canonicalization turns `x > a` into
+/// `a < x`. A caller filing the relation it was handed — the assumptions store
+/// — needs the not-pushdown without the reorientation, and this is it. Note
+/// that the relation branch below rebuilds the node from the same `operands`
+/// vector, so operand order survives.
+pub fn push_not(e: &Expr) -> Expr {
     if let Expr::Not(inner) = e {
         let inner = push_not(inner);
         let neg = |x: &Expr| push_not(&Expr::Not(Box::new(x.clone())));
@@ -132,6 +139,25 @@ fn push_not(e: &Expr) -> Expr {
         };
     }
     map_children(e, push_not)
+}
+
+/// Merge nested `and`/`or` into their parent and drop a connective left with a
+/// single operand — the JS `flatten_logical`.
+///
+/// [`super::default_order::flatten`] does the merging (for every associative
+/// operator, which is a superset and harmless here). The one-operand collapse
+/// is the part that matters to a caller comparing facts for equality: `and(x)`
+/// and `x` are the same assumption, and a store that filed both would hand back
+/// duplicates.
+pub fn flatten_logical(e: &Expr) -> Expr {
+    fn collapse(e: &Expr) -> Expr {
+        let e = map_children(e, collapse);
+        match &e {
+            Expr::And(xs) | Expr::Or(xs) if xs.len() == 1 => xs[0].clone(),
+            _ => e,
+        }
+    }
+    collapse(&super::default_order::flatten(e))
 }
 
 /// The **base** rewrite rounds without the final presentation pass: the result

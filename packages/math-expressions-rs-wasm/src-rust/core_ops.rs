@@ -391,6 +391,12 @@ impl Expression {
         ops::functions(&self.0)
     }
 
+    /// The operator heads used, first-appearance order, in the JS tree's
+    /// spelling (`+`, `*`, `^`, `and`, …).
+    pub fn operators(&self) -> Vec<String> {
+        ops::operators(&self.0)
+    }
+
     // ---- component access (JS `get_component` / `substitute_component`) ----
 
     /// The component at a 0-based `path` into the operand lists of the JS tree
