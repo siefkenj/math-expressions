@@ -654,10 +654,13 @@ impl Writer<'_> {
         use prec::*;
         let one = |w: &Self, ctx| w.emit(&args[0], ctx);
         match name {
+            // ASCII spells it as the word the lexer keyword-matches. `+-` would
+            // re-lex as two sign operators (`+- 3` parses as `+(-3)`), so it is
+            // not a spelling this printer may emit.
             "pm" => (
                 format!(
                     "{} {}",
-                    if self.opts.unicode { "±" } else { "+-" },
+                    if self.opts.unicode { "±" } else { "plusminus" },
                     one(self, MUL)
                 ),
                 NEG,
@@ -828,28 +831,38 @@ impl Writer<'_> {
 
     fn render_leibniz(&self, sym: &str, args: &[Expr]) -> String {
         // args: [ var1 | (var1, n) ,  tuple-of-denominator-vars ].
-        // Spaces after each differential symbol let multi-character variables
-        // re-lex as their own tokens (`d hello`, not the single symbol `dhello`).
         let (var1, n_deriv) = deriv_var(&args[0]);
-        let num = format!(
-            "{}{} {}",
-            sym,
-            pow_suffix(n_deriv),
-            self.render_symbol(&var1)
-        );
-
-        let den = if let Expr::Seq(SeqKind::Tuple, parts) = &args[1] {
-            parts
+        let den_parts: Vec<(String, i64)> = match &args[1] {
+            Expr::Seq(SeqKind::Tuple, parts) => parts
                 .iter()
                 .map(|part| {
                     let (v, e) = deriv_var(part);
-                    format!("{} {}{}", sym, self.render_symbol(&v), pow_suffix(e))
+                    (self.render_symbol(&v), e)
                 })
-                .collect::<Vec<_>>()
-                .join(" ")
-        } else {
-            String::new()
+                .collect(),
+            _ => Vec::new(),
         };
+        let var1 = self.render_symbol(&var1);
+
+        // `dx/dt` is how the notation is written, and it re-parses: the lexer
+        // reads `dx` as the differential `d` plus the one-character variable.
+        // A *multi*-character variable would be swallowed whole (`dhello` is one
+        // symbol), so those — and only those — need a separating space.
+        let sep = if std::iter::once(&var1)
+            .chain(den_parts.iter().map(|(v, _)| v))
+            .all(|v| v.chars().count() == 1)
+        {
+            ""
+        } else {
+            " "
+        };
+
+        let num = format!("{}{}{}{}", sym, pow_suffix(n_deriv), sep, var1);
+        let den = den_parts
+            .iter()
+            .map(|(v, e)| format!("{}{}{}{}", sym, sep, v, pow_suffix(*e)))
+            .collect::<Vec<_>>()
+            .join(sep);
         format!("{}/{}", num, den)
     }
 }

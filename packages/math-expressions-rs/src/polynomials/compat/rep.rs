@@ -30,7 +30,10 @@ pub enum Poly {
     Coeff(Expr),
     /// Terms are ordered by strictly increasing degree; the last is the leading
     /// term under the lexicographic order this module uses throughout.
-    Rec { var: Expr, terms: Vec<(i64, Poly)> },
+    Rec {
+        var: Expr,
+        terms: Vec<(i64, Poly)>,
+    },
 }
 
 /// A single term: a coefficient times a product of variable powers.

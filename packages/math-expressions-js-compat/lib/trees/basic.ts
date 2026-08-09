@@ -14,7 +14,9 @@ export function equal(a, b) {
 /** Substitute string-leaf variables with their bound subtrees. */
 export function substitute(tree, bindings) {
   if (typeof tree === "string") {
-    return Object.prototype.hasOwnProperty.call(bindings, tree) ? bindings[tree] : tree;
+    return Object.prototype.hasOwnProperty.call(bindings, tree)
+      ? bindings[tree]
+      : tree;
   }
   if (Array.isArray(tree)) {
     // index 0 is the operator/head; never a substitutable variable

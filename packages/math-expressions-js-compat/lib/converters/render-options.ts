@@ -18,6 +18,7 @@ const FORWARDED = [
   "showBlanks",
   "explicitMultiplicationSymbols",
   "avoidScientificNotation",
+  "matrixEnvironment",
 ];
 
 export function renderOptions(params: Record<string, unknown> | undefined) {

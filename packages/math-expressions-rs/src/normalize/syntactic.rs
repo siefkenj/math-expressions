@@ -105,7 +105,10 @@ fn normalize_head_name(head: &Expr) -> Expr {
 
 // ---- Pass 2: normalize_applied_functions ----
 
-fn pass_applied_functions(e: &Expr) -> Expr {
+/// Also the whole of `me.normalize_applied_functions`, which is this pass and
+/// nothing else — unlike [`normalize_syntactic`] it does not flatten first, so
+/// it is exported on its own rather than folded into the four-pass sequence.
+pub fn pass_applied_functions(e: &Expr) -> Expr {
     if let Expr::Apply(head, args) = e {
         let args: Vec<Expr> = args.iter().map(pass_applied_functions).collect();
         match head.as_ref() {
@@ -143,7 +146,10 @@ fn strip_primes(mut head: &Expr) -> (Expr, usize) {
 
 // ---- Pass 3: normalize_negative_numbers ----
 
-fn pass_negative_numbers(e: &Expr) -> Expr {
+/// Also the whole of `me.normalize_negative_numbers`. `default_order` carries a
+/// second copy of this rule, but that one arrives after flattening and sorting;
+/// this pass must leave order alone, so the two stay separate.
+pub fn pass_negative_numbers(e: &Expr) -> Expr {
     if let Expr::Neg(inner) = e {
         match inner.as_ref() {
             // `-(3)` → `-3`

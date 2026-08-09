@@ -29,6 +29,9 @@ pub struct LatexOpts {
     /// (`avoidScientificNotation`). Off by default, matching legacy: a float
     /// outside `0.000001 ..< 1e21` renders as `1.23 \cdot 10^{22}`.
     pub avoid_scientific_notation: bool,
+    /// The `amsmath` environment a matrix renders into (`matrixEnvironment`) —
+    /// `bmatrix` (square brackets) by default, `pmatrix` for round ones.
+    pub matrix_environment: String,
 }
 
 impl Default for LatexOpts {
@@ -40,6 +43,7 @@ impl Default for LatexOpts {
             show_blanks: true,
             explicit_multiplication_symbols: false,
             avoid_scientific_notation: false,
+            matrix_environment: "bmatrix".to_string(),
         }
     }
 }
@@ -440,6 +444,16 @@ impl Writer<'_> {
             },
             _ => self.emit(head, prec::POW),
         };
+        // A multi-argument application *is* an application to a tuple, so its
+        // parentheses are the tuple's and are padded the way `render_seq` pads
+        // every other delimiter pair. A single argument is not a tuple and
+        // stays tight (`\sin\left(x\right)`).
+        if args.len() > 1 {
+            return (
+                format!("{}\\left( {} \\right)", head_str, args_str),
+                prec::ATOM,
+            );
+        }
         (
             format!("{}\\left({}\\right)", head_str, args_str),
             prec::ATOM,
@@ -482,7 +496,8 @@ impl Writer<'_> {
     }
 
     fn render_matrix(&self, rows: u32, cols: u32, entries: &[Expr]) -> String {
-        let mut out = String::from("\\begin{bmatrix} ");
+        let env = &self.opts.matrix_environment;
+        let mut out = format!("\\begin{{{}}} ", env);
         for r in 0..rows as usize {
             let row: Vec<String> = (0..cols as usize)
                 .map(|c| self.emit(&entries[r * cols as usize + c], prec::LIST + 1))
@@ -492,7 +507,7 @@ impl Writer<'_> {
                 out.push_str(" \\\\ ");
             }
         }
-        out.push_str(" \\end{bmatrix}");
+        out.push_str(&format!(" \\end{{{}}}", env));
         out
     }
 
@@ -532,7 +547,7 @@ impl Writer<'_> {
             "unit" => (self.render_unit(args), UNIT),
             "d" => (format!("d{}", one(self, ATOM)), POW),
             "derivative_leibniz" => (self.render_leibniz("d", args), ATOM),
-            "partial_derivative_leibniz" => (self.render_leibniz("\\partial ", args), ATOM),
+            "partial_derivative_leibniz" => (self.render_leibniz("\\partial", args), ATOM),
             _ => (
                 format!(
                     "\\operatorname{{{}}}\\left({}\\right)",
@@ -575,21 +590,19 @@ impl Writer<'_> {
 
     fn render_leibniz(&self, sym: &str, args: &[Expr]) -> String {
         let (var1, n_deriv) = deriv_var(&args[0]);
-        // `sym` carries its own trailing space where needed (`\partial `), so no
-        // extra separator: `d` → `dx`, `\partial ` → `\partial x` (not the
-        // double-spaced `\partial  x`).
-        let num = format!(
-            "{}{}{}",
-            sym,
-            pow_suffix(n_deriv),
-            self.render_symbol(&var1)
+        // The separator belongs *after* the order, not after the symbol: a
+        // hard-coded `\partial ` produced `\partial ^{2}x`. `cat` puts a space
+        // in only where a control word would otherwise swallow what follows.
+        let num = cat(
+            &format!("{}{}", sym, pow_suffix(n_deriv)),
+            &self.render_symbol(&var1),
         );
         let den = if let Expr::Seq(SeqKind::Tuple, parts) = &args[1] {
             parts
                 .iter()
                 .map(|part| {
                     let (v, e) = deriv_var(part);
-                    format!("{}{}{}", sym, self.render_symbol(&v), pow_suffix(e))
+                    format!("{}{}", cat(sym, &self.render_symbol(&v)), pow_suffix(e))
                 })
                 .collect::<Vec<_>>()
                 .join(" ")
@@ -602,6 +615,27 @@ impl Writer<'_> {
 
 fn is_shorthand_angle(e: &Expr) -> bool {
     matches!(e, Expr::OtherOp(name, args) if name.name() == "angle" && args.len() == 1)
+}
+
+/// Concatenate two LaTeX fragments, inserting a space only where one is needed.
+///
+/// A control word (`\partial`) ends at the first non-letter, so `\partial x`
+/// must keep its space or TeX reads the command `\partialx`. Nothing else does:
+/// `dx`, `\partial^{2}`, `d\tau` are all unambiguous. The space also goes in
+/// before another control word, where it is optional but far more readable.
+fn cat(left: &str, right: &str) -> String {
+    let trailing_letters = left.len()
+        - left
+            .trim_end_matches(|c: char| c.is_ascii_alphabetic())
+            .len();
+    let ends_in_control_word =
+        trailing_letters > 0 && left[..left.len() - trailing_letters].ends_with('\\');
+    let starts_a_name = right.starts_with(|c: char| c.is_ascii_alphabetic() || c == '\\');
+    if ends_in_control_word && starts_a_name {
+        format!("{} {}", left, right)
+    } else {
+        format!("{}{}", left, right)
+    }
 }
 
 /// A radical (`\sqrt`, `\sqrt[3]`, `\sqrt[n]`): self-delimiting, but reads

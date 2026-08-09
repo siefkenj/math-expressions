@@ -59,6 +59,18 @@ function asTreeArray(tree: Tree, message = "Badly formed ast"): TreeArray {
   return tree;
 }
 
+/**
+ * True when `tree` is an operator application of `operator`.
+ *
+ * Legacy tested `tree[0] !== "interval"` directly, which on a bare string like
+ * `"A"` reads the first *character* — so a non-interval operand fell through to
+ * the "not implemented" branch rather than a narrowing failure. Callers that
+ * want that ordering ask this first and only narrow afterwards.
+ */
+function isOperator(tree: Tree, operator: string): boolean {
+  return Array.isArray(tree) && tree[0] === operator;
+}
+
 /** True when `node` is a math.js `ArrayNode` (avoids `instanceof` on the ctor). */
 function isArrayNode(node: MathNode): boolean {
   return (node as { isArrayNode?: boolean }).isArrayNode === true;
@@ -266,11 +278,14 @@ export class TreeToMathjs {
       );
     const x = this.convert(rawX);
 
-    const interval = asTreeArray(rawInterval);
-    if (interval[0] !== "interval")
+    // The non-interval check comes *before* the narrowing: an operand of any
+    // shape (a bare set name like `"A"` included) is "not implemented", not
+    // "badly formed".
+    if (!isOperator(rawInterval, "interval"))
       throw new Error(
         "Set membership in non-intervals not implemented for conversion to mathjs",
       );
+    const interval = asTreeArray(rawInterval);
 
     const args = asTreeArray(interval[1]);
     const closed = asTreeArray(interval[2]);
@@ -303,13 +318,18 @@ export class TreeToMathjs {
   private convertContainment(operator: string, operands: Tree[]): MathNode {
     const math = this.math;
     const flipped = operator === "superset" || operator === "notsuperset";
-    const small = asTreeArray(flipped ? operands[1] : operands[0]);
-    const big = asTreeArray(flipped ? operands[0] : operands[1]);
+    const rawSmall = flipped ? operands[1] : operands[0];
+    const rawBig = flipped ? operands[0] : operands[1];
 
-    if (small[0] !== "interval" || big[0] !== "interval")
+    // As in `convertMembership`: reject non-intervals before narrowing, so a
+    // bare set name reports "not implemented" rather than "Badly formed ast".
+    if (!isOperator(rawSmall, "interval") || !isOperator(rawBig, "interval"))
       throw new Error(
         "Set containment of non-intervals not implemented for conversion to mathjs",
       );
+
+    const small = asTreeArray(rawSmall);
+    const big = asTreeArray(rawBig);
 
     const smallArgs = asTreeArray(small[1]);
     const smallClosed = asTreeArray(small[2]);

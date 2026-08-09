@@ -107,7 +107,11 @@ fn lower(m: Mat, kind: Option<SeqKind>) -> Expr {
         return Expr::Matrix(m);
     };
     if m.rows() == 1 && m.cols() == 1 {
-        return m.into_entries().into_iter().next().expect("1×1 has one entry");
+        return m
+            .into_entries()
+            .into_iter()
+            .next()
+            .expect("1×1 has one entry");
     }
     if m.rows() == 1 || m.cols() == 1 {
         return Expr::Seq(k, m.into_entries());

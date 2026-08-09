@@ -27,7 +27,9 @@ export function unflattenRight(tree) {
 export function allChildren(tree) {
   if (!Array.isArray(tree)) return tree;
   const op = tree[0];
-  const associative = ["+", "*", "and", "or", "union", "intersect"].includes(op);
+  const associative = ["+", "*", "and", "or", "union", "intersect"].includes(
+    op,
+  );
   const out = [];
   for (const operand of tree.slice(1)) {
     if (associative && Array.isArray(operand) && operand[0] === op) {

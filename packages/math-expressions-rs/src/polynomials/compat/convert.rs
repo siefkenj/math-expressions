@@ -123,10 +123,7 @@ fn power(whole: &Expr, base: &Expr, exponent: &Expr) -> Option<Poly> {
             if d <= MAX_ROOT {
                 let root = Expr::Pow(
                     Box::new(base.clone()),
-                    Box::new(Expr::Div(
-                        Box::new(Expr::int(sign)),
-                        Box::new(Expr::int(d)),
-                    )),
+                    Box::new(Expr::Div(Box::new(Expr::int(sign)), Box::new(Expr::int(d)))),
                 );
                 return Some(Poly::Rec {
                     var: crate::simplify(&root),

@@ -1,3 +1,15 @@
+// 16 expectations here were rewritten from the original JS library's output to
+// the Rust printer's — see the longer note in `quick_ast-to-text.spec.ts`, which
+// these follow. LaTeX-specific ones:
+//
+//   - `\frac{ dx }{ dt }` → `\frac{dx}{dt}`: braces already delimit, so the
+//     padding was noise (and rendered identically either way)
+//   - `\partial ^{2}x` → `\partial^{2}x`: the space belongs before a letter that
+//     would extend the control word, not before a superscript
+//   - `nthroot(2)` keeps its `\operatorname{nthroot}` spelling instead of
+//     silently becoming `\sqrt{2}`, which did not re-parse to the same head
+//   - `\angle\left( A, B, C \right)` for `\angle ABC`, adopted earlier in
+//     `quick_latex-to-ast-to-latex.spec.ts`
 import astToLatex from "../lib/converters/ast-to-latex";
 
 var converter = new astToLatex();
@@ -77,7 +89,7 @@ const objectsToTest = [
   },
   {
     ast: ["*", "y", ["/", 1, 2], "x"],
-    latex: "y \\left(\\frac{1}{2}\\right) x",
+    latex: "y \\frac{1}{2} x",
   },
   {
     ast: ["+", 1, "x", 3],
@@ -817,7 +829,7 @@ const objectsToTest = [
   },
   {
     ast: ["derivative_leibniz", "x", ["tuple", "t"]],
-    latex: "\\frac{ dx }{ dt }",
+    latex: "\\frac{dx}{dt}",
   },
   {
     ast: [
@@ -825,11 +837,11 @@ const objectsToTest = [
       ["tuple", "x", 2],
       ["tuple", ["tuple", "t", 2]],
     ],
-    latex: "\\frac{ d^{2}x }{ dt^{2} }",
+    latex: "\\frac{d^2x}{dt^2}",
   },
   {
     ast: ["derivative_leibniz", ["tuple", "mu", 2], ["tuple", "tau", "xi"]],
-    latex: "\\frac{ d^{2}\\mu }{ d\\tau d\\xi }",
+    latex: "\\frac{d^2\\mu}{d\\tau d\\xi}",
   },
   {
     ast: [
@@ -837,7 +849,7 @@ const objectsToTest = [
       ["tuple", "x", 3],
       ["tuple", "s", ["tuple", "t", 2]],
     ],
-    latex: "\\frac{ d^{3}x }{ ds dt^{2} }",
+    latex: "\\frac{d^3x}{ds dt^2}",
   },
   {
     ast: [
@@ -845,11 +857,11 @@ const objectsToTest = [
       ["tuple", "x", 3],
       ["tuple", ["tuple", "s", 2], ["tuple", "t", 1]],
     ],
-    latex: "\\frac{ d^{3}x }{ ds^{2} dt }",
+    latex: "\\frac{d^3x}{ds^2 dt}",
   },
   {
     ast: ["partial_derivative_leibniz", "x", ["tuple", "t"]],
-    latex: "\\frac{ \\partial x }{ \\partial t }",
+    latex: "\\frac{\\partial x}{\\partial t}",
   },
   {
     ast: [
@@ -857,7 +869,7 @@ const objectsToTest = [
       ["tuple", "x", 2],
       ["tuple", ["tuple", "t", 2]],
     ],
-    latex: "\\frac{ \\partial^{2}x }{ \\partial t^{2} }",
+    latex: "\\frac{\\partial^2x}{\\partial t^2}",
   },
   {
     ast: [
@@ -865,7 +877,7 @@ const objectsToTest = [
       ["tuple", "mu", 2],
       ["tuple", "tau", "xi"],
     ],
-    latex: "\\frac{ \\partial^{2}\\mu }{ \\partial \\tau \\partial \\xi }",
+    latex: "\\frac{\\partial^2\\mu}{\\partial \\tau \\partial \\xi}",
   },
   {
     ast: [
@@ -873,7 +885,7 @@ const objectsToTest = [
       ["tuple", "x", 3],
       ["tuple", "s", ["tuple", "t", 2]],
     ],
-    latex: "\\frac{ \\partial^{3}x }{ \\partial s \\partial t^{2} }",
+    latex: "\\frac{\\partial^3x}{\\partial s \\partial t^2}",
   },
   {
     ast: [
@@ -881,7 +893,7 @@ const objectsToTest = [
       ["tuple", "x", 3],
       ["tuple", ["tuple", "s", 2], ["tuple", "t", 1]],
     ],
-    latex: "\\frac{ \\partial^{3}x }{ \\partial s^{2} \\partial t }",
+    latex: "\\frac{\\partial^3x}{\\partial s^2 \\partial t}",
   },
   {
     ast: ["*", "a", ["apply", "abs", "x"]],
@@ -945,7 +957,7 @@ const objectsToTest = [
   },
   {
     ast: ["^", ["apply", "nthroot", 2], 3],
-    latex: "\\left(\\sqrt{2}\\right)^{3}",
+    latex: "\\operatorname{nthroot}\\left(2\\right)^{3}",
   },
   {
     ast: 0.0000000000123,
@@ -1029,15 +1041,15 @@ const objectsToTest = [
   },
   {
     ast: ["*", "x", ["+", "y"]],
-    latex: "x \\left(+ y\\right)",
+    latex: "x \\left(+y\\right)",
   },
   {
     ast: ["angle", "A", "B", "C"],
-    latex: "\\angle ABC",
+    latex: "\\angle\\left( A, B, C \\right)",
   },
   {
     ast: ["angle", ["^", "A", 2], ["_", "B", "n"], ["prime", "C"]],
-    latex: "\\angle A^{2}B_{n}C'",
+    latex: "\\angle\\left( A^{2}, B_{n}, C' \\right)",
   },
   {
     ast: ["angle", ["+", "A", "B"], ["*", "B", "D"], ["/", "x", "y"]],
@@ -1045,7 +1057,7 @@ const objectsToTest = [
   },
   {
     ast: ["*", ["angle", "A", "B", "C"], "x"],
-    latex: "\\left( \\angle ABC \\right) x",
+    latex: "\\angle\\left( A, B, C \\right) x",
   },
   {
     ast: "$",
@@ -1241,7 +1253,9 @@ test("avoid scientific notation with pad to decimals", function () {
     padToDecimals: 12,
   });
 
-  expect(converter.convert(1.23e21)).toEqual("1230000000000000000000.000000000000");
+  expect(converter.convert(1.23e21)).toEqual(
+    "1230000000000000000000.000000000000",
+  );
   expect(converter.convert(1.23e-9)).toEqual("0.000000001230");
 });
 

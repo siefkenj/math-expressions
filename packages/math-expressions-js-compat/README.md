@@ -4,8 +4,9 @@ This directory is `math-expressions-js-compat`, but it is **published to npm as
 `math-expressions`** (v3 — see `package.json` `name`). It's a drop-in replacement
 for the original math-expressions JavaScript API, implemented in TypeScript on
 top of the Rust core (`math-expressions-rs`) compiled to wasm. It has no math of
-its own — every method delegates to the wasm bindings — and preserves the legacy
-synchronous surface. (The older published JS library is `2.0.0-alpha94`.)
+its own — every method delegates to the wasm bindings, and the few converters
+that stay in TypeScript (AST ↔ math.js nodes, AST → Guppy XML) only relabel
+notation — and preserves the legacy synchronous surface. (The older published JS library is `2.0.0-alpha94`.)
 
 ```ts
 import me from "math-expressions"; // the published name
@@ -68,7 +69,7 @@ npm test               # vitest run
 The suite is the legacy JS test corpus. It is **not expected to fully pass** yet:
 the Rust core is intentionally not byte-for-byte identical (clean-slate
 formatter, folded normalization passes) and some legacy areas are unported
-(polynomial/Groebner, mathjs/guppy/MathML converters, richly-structured
+(polynomial/Groebner, MathML converters, richly-structured
 `get_assumptions`). Those specs still *run* and fail per-assertion. See
 `../../active-plans/JS_TEST_COVERAGE_AUDIT.md` for the coverage ledger.
 

@@ -495,6 +495,12 @@ class Expression {
   normalize_function_names() {
     return wrap(this._w.normalize_function_names(), this.context);
   }
+  normalize_applied_functions() {
+    return wrap(this._w.normalize_applied_functions(), this.context);
+  }
+  normalize_negative_numbers() {
+    return wrap(this._w.normalize_negative_numbers(), this.context);
+  }
   constants_to_floats() {
     return wrap(this._w.constants_to_floats(), this.context);
   }
@@ -519,8 +525,10 @@ class Expression {
       this.context,
     );
   }
-  subscripts_to_strings() {
-    return wrap(this._w.subscripts_to_strings(), this.context);
+  // `force` also collapses a compound subscript, by its text spelling —
+  // `(x^3)_2` becomes that seven-character symbol name.
+  subscripts_to_strings(force = false) {
+    return wrap(this._w.subscripts_to_strings(force), this.context);
   }
   strings_to_subscripts() {
     return wrap(this._w.strings_to_subscripts(), this.context);
@@ -911,13 +919,11 @@ for (const name of [
 // real fix is implementing them; see DOENET_COMPAT_PLAN R7 and the follow-up note.
 // `default_order` graduated out of this list — it has a real implementation
 // now (`normalize::default_order`), carrying the JS ordering key rather than
-// the Rust canonical `cmp`, because the order it produces is displayed.
-for (const name of [
-  "normalize_negative_numbers",
-  "normalize_applied_functions",
-  "expand_relations",
-  "applyAllTransformations",
-]) {
+// the Rust canonical `cmp`, because the order it produces is displayed. So did
+// `normalize_negative_numbers` and `normalize_applied_functions`: the passes
+// they name were already in the Rust core as `normalize_syntactic`'s second and
+// third steps, and are now exported individually.
+for (const name of ["expand_relations", "applyAllTransformations"]) {
   (Expression.prototype as Record<string, unknown>)[name] = function (
     this: Expression,
   ) {
@@ -1354,7 +1360,10 @@ const Context = {
     // which is at least right for `x` itself.
     const tree = syncAssumptionText(this, assumption, "add");
     if (tree === undefined) return 0;
-    return assumptionStore.add_generic_assumption(this._assumptionsHandle, tree);
+    return assumptionStore.add_generic_assumption(
+      this._assumptionsHandle,
+      tree,
+    );
   },
   remove_assumption(assumption) {
     const tree = syncAssumptionText(this, assumption, "remove");

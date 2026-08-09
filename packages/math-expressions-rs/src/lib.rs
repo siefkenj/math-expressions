@@ -93,7 +93,8 @@ pub use matrix::{
 };
 pub use normalize::{
     canonicalize, cmp_default_order, default_order, desugar_units, expand, flatten_logical,
-    push_not, simplify, simplify_logical, simplify_with,
+    normalize_applied_functions, normalize_negative_numbers, push_not, simplify, simplify_logical,
+    simplify_with,
 };
 pub use notation::{Digits, Grouping, NumberNotation};
 pub use num::Number;
@@ -107,8 +108,8 @@ pub use ops::{
     operators, perform_vector_matrix_additions_scalar_multiplications, reduce_rational,
     remove_scaling_units, remove_units, round_numbers_to_decimals, round_numbers_to_precision,
     round_numbers_to_precision_plus_decimals, set_small_zero, strings_to_subscripts,
-    subscripts_to_strings, substitute, substitute_component, to_intervals, tuples_to_vectors,
-    variables, AnalyticOpts, MaxDigits,
+    subscripts_to_strings, subscripts_to_strings_with, substitute, substitute_component,
+    to_intervals, tuples_to_vectors, variables, AnalyticOpts, MaxDigits,
 };
 pub use parse::latex::{LatexToAst, LatexToAstOptions};
 pub use parse::text::{TextToAst, TextToAstOptions};

@@ -110,6 +110,16 @@ impl Expression {
             &mut o.explicit_multiplication_symbols,
             &mut o.avoid_scientific_notation,
         );
+        // Only the environments the LaTeX *parser* accepts, so output keeps
+        // round-tripping — and so this option can never inject arbitrary LaTeX.
+        if let Some(env) = v.get("matrixEnvironment").and_then(|e| e.as_str()) {
+            match env {
+                "matrix" | "pmatrix" | "bmatrix" => o.matrix_environment = env.to_string(),
+                _ => return Err(JsError::new(&format!(
+                    "unsupported matrixEnvironment {env:?} (expected matrix, pmatrix or bmatrix)"
+                ))),
+            }
+        }
         Ok(to_latex(&self.0, &o))
     }
 

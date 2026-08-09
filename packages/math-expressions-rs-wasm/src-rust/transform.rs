@@ -68,6 +68,19 @@ impl Expression {
         self.derive(math_expressions::normalize_function_names(&self.0))
     }
 
+    /// Move an applied function's exponent or primes outside the application:
+    /// `sin^2(x)` → `(sin x)^2`, `f'(x)` → `(f x)'` (JS
+    /// `normalize_applied_functions`).
+    pub fn normalize_applied_functions(&self) -> Expression {
+        self.derive(math_expressions::normalize_applied_functions(&self.0))
+    }
+
+    /// Push a negation into the leading number of what it negates: `-(3)` → `-3`,
+    /// `-(3 x)` → `(-3) x` (JS `normalize_negative_numbers`).
+    pub fn normalize_negative_numbers(&self) -> Expression {
+        self.derive(math_expressions::normalize_negative_numbers(&self.0))
+    }
+
     /// Reinterpret tuples as vectors (JS `tuples_to_vectors`).
     pub fn tuples_to_vectors(&self) -> Expression {
         self.derive(math_expressions::tuples_to_vectors(&self.0))
@@ -79,8 +92,10 @@ impl Expression {
     }
 
     /// Collapse subscripts into string symbols: `x_1` → the symbol `x_1`.
-    pub fn subscripts_to_strings(&self) -> Expression {
-        self.derive(math_expressions::subscripts_to_strings(&self.0))
+    /// With `force`, a compound subscript collapses too, via its text spelling
+    /// (`(x^3)_2`).
+    pub fn subscripts_to_strings(&self, force: bool) -> Expression {
+        self.derive(math_expressions::subscripts_to_strings_with(&self.0, force))
     }
 
     /// Inverse of [`Self::subscripts_to_strings`].

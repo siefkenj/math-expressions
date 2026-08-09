@@ -283,14 +283,31 @@ fn collect_var_names(e: &Expr, out: &mut BTreeSet<String>) {
 
 /// Replace the constant symbols `pi` and `e` with their floating-point values
 /// (`i` is left as the imaginary unit). Matches `me.constants_to_floats`.
+///
+/// The base of `e^x` is exempt: that `e` is not a constant standing in for a
+/// number, it is half the spelling of the exponential function, and floating it
+/// leaves a tree nothing downstream recognizes as `exp`. The exponent still
+/// converts.
 pub fn constants_to_floats(e: &Expr) -> Expr {
     match e {
+        Expr::Pow(base, exp) if is_e(base) => {
+            Expr::Pow(base.clone(), Box::new(constants_to_floats(exp)))
+        }
         Expr::Sym(s) => match s.name().as_str() {
             "pi" => Expr::Num(Number::from_f64(std::f64::consts::PI)),
             "e" => Expr::Num(Number::from_f64(std::f64::consts::E)),
             _ => e.clone(),
         },
         _ => map_children(e, constants_to_floats),
+    }
+}
+
+/// Euler's number in either spelling the tree may carry it in.
+fn is_e(e: &Expr) -> bool {
+    match e {
+        Expr::Sym(s) => s.name() == "e",
+        Expr::Const(c) => *c == crate::expr::MathConst::E,
+        _ => false,
     }
 }
 

@@ -137,7 +137,11 @@ fn a_reduced_denominator_is_monic() {
 
 #[test]
 fn gcd_and_lcm_agree_on_a_two_variable_ideal() {
-    let f = of(json!(["polynomial", "x", [[1, ["polynomial", "y", [[2, 7]]]]]]));
+    let f = of(json!([
+        "polynomial",
+        "x",
+        [[1, ["polynomial", "y", [[2, 7]]]]]
+    ]));
     let g = of(json!([
         "polynomial",
         "x",

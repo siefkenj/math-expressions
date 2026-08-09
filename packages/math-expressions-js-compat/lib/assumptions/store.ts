@@ -35,10 +35,15 @@ export function add_assumption(
   exclude_generic?: boolean,
 ): number {
   const tree = json(expr_or_tree);
-  return tree === undefined ? 0 : handle.add_ast(tree, Boolean(exclude_generic));
+  return tree === undefined
+    ? 0
+    : handle.add_ast(tree, Boolean(exclude_generic));
 }
 
-export function add_generic_assumption(handle: Handle, expr_or_tree: any): number {
+export function add_generic_assumption(
+  handle: Handle,
+  expr_or_tree: any,
+): number {
   const tree = json(expr_or_tree);
   return tree === undefined ? 0 : handle.add_generic_ast(tree);
 }
@@ -48,7 +53,10 @@ export function remove_assumption(handle: Handle, expr_or_tree: any): number {
   return tree === undefined ? 0 : handle.remove_ast(tree);
 }
 
-export function remove_generic_assumption(handle: Handle, expr_or_tree: any): number {
+export function remove_generic_assumption(
+  handle: Handle,
+  expr_or_tree: any,
+): number {
   const tree = json(expr_or_tree);
   return tree === undefined ? 0 : handle.remove_generic_ast(tree);
 }

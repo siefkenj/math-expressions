@@ -4,6 +4,8 @@
 // `convert()` throws, failing just those tests.
 export default class {
   convert(): never {
-    throw new Error("math-expressions-js-compat: mmlToLatex is not implemented");
+    throw new Error(
+      "math-expressions-js-compat: mmlToLatex is not implemented",
+    );
   }
 }

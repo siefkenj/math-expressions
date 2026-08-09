@@ -1,6 +1,7 @@
 // `new latexToAst(params).convert(latex)` → JS AST array, via the wasm
 // `parse_latex` / `parse_latex_with_options`.
 import wasm from "../_wasm";
+import { jsonToAst } from "./ast-json";
 
 export default class LatexToAst {
   constructor(params) {
@@ -12,7 +13,9 @@ export default class LatexToAst {
         ? wasm.parse_latex_with_options(latex, JSON.stringify(this.params))
         : wasm.parse_latex(latex);
     try {
-      return JSON.parse(handle.tree_json());
+      // `jsonToAst`, not bare `JSON.parse`: `\infty` parses to the wire tag
+      // `{"$":"Inf"}` and callers expect the legacy scalar `Infinity`.
+      return jsonToAst(handle.tree_json());
     } finally {
       handle.free(); // throwaway: created here, never handed to the caller
     }

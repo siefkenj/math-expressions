@@ -32,4 +32,9 @@ export const collect_like_terms_and_factors = op("collect_like_terms_factors");
 export const factor = op("factor");
 export const together = op("together");
 
-export default { simplify, expand, evaluate_numbers, collect_like_terms_and_factors };
+export default {
+  simplify,
+  expand,
+  evaluate_numbers,
+  collect_like_terms_and_factors,
+};

@@ -37,7 +37,7 @@ pub use preserve_order::evaluate_numbers_preserve_order;
 pub use query::{functions, operators, variables};
 pub use transforms::{
     altvectors_to_vectors, normalize_function_names, strings_to_subscripts, subscripts_to_strings,
-    substitute, to_intervals, tuples_to_vectors,
+    subscripts_to_strings_with, substitute, to_intervals, tuples_to_vectors,
 };
 pub use units::{add_unit, remove_scaling_units, remove_units};
 pub use vector_matrix::perform_vector_matrix_additions_scalar_multiplications;
