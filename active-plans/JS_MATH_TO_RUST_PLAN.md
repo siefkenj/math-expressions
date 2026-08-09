@@ -1,5 +1,14 @@
 # Moving the mathematics out of JS
 
+**Status: done.** Phases A (`a5d1867`), B (`133ce6f`), C (`087c3ab`).
+`lib/` went from **5,918 to 2,578 lines** (−3,340, −56%); the Rust core gained
+~3,370. The js-compat suite moved 379 → **377 failing with zero newly-failing
+names** at every phase boundary, and `cargo test` stayed green throughout.
+`slow_polynomial` is 205/205 with no spec expectation touched, and runs in 0.16 s
+instead of dominating the suite.
+
+Outcome per phase, and what was learned, is recorded at the end of this file.
+
 Goal: `packages/math-expressions-js-compat` becomes a binding shim. Every
 algorithm lives in the Rust core. The only substantial JS allowed is glue that
 exists because we *deliberately* chose a Rust API shape that needs reassembling
@@ -139,3 +148,64 @@ concurrently-measuring sibling.
 - Success is measured in **JS lines deleted** with the failure set no worse.
 - Split any Rust file past ~200 lines into a subfolder (memory
   `rust-file-organization`).
+
+---
+
+## Outcome
+
+### Where the plan was wrong
+
+- **`ops::query::operators` was not a faithful port**, though it looked complete.
+  It reported only a fixed operator whitelist rather than every array head. Since
+  `expression_to_polynomial` whitelists operators, an unreported `tuple` made
+  `(3,4)` parse as a polynomial. Fixed and pinned with assertions.
+- **`ops::to_intervals` could not be reused** for `expand_relations`: it recurses,
+  while the JS converts only the top level — a nested 2-tuple endpoint is an
+  endpoint, not an interval.
+- **`ratform::cancel` could not back `reduce_rational_expression`.** On
+  `(t^100 − t)/t` it returns `t^(-1)(t^100 − t)` rather than cancelling; it hands
+  back a product with a reciprocal instead of a numerator/denominator *pair*, so
+  the "denominator leading coefficient is 1" rule has nothing to apply to; and
+  being dense over ℚ it cannot represent the `t^1000000` rows at all.
+- **Kernel interning was not worth lifting.** It only pays off for an engine whose
+  variables are `String` names. The compat engine's variables are `Expr` trees
+  compared structurally, so `sin(x)` is already one variable — which is also why
+  `stringify_vars`/`destringify_vars` vanished rather than moved.
+- **The `push_not` reorientation risk did not materialise.** `simplify.rs` rebuilds
+  `Expr::Relation` from the same operand vector with only `ops[0].negate()`
+  changed, so a standalone binding was safe. Pinned by a test.
+
+### Semantics that had to be preserved rather than tidied
+
+- `grade::linear_decomposition` must **reject exact fractions**, matching the JS
+  `typeof tree === "number"`. The rejection is load-bearing: when decomposition
+  fails, `get_assumptions_for_expr` falls back to per-variable facts, and that
+  fallback is where transitive consequences come from.
+- `byvar` is **insertion-ordered, not a map** — the closure iterates it to build a
+  conjunction and the key order reaches that tree before `default_order` sorts it.
+- A variable **met with no facts differs from one never seen**: only the latter
+  picks up the generic assumption (`Facts::{Absent, Empty, Tree}`).
+- The closure reads the *previous* `derived` map while recomputing it, and
+  `clean_assumptions` can return a childless `["and"]`. Both are observable
+  through `me.assumptions.derived`.
+
+### Deliberate divergences
+
+- Three JS warts were not reproduced, none reachable from the spec: multiplying
+  zero by a polynomial read `p[1]` off a number; negating a zero polynomial
+  returned `false`; `mono_gcd` on two variables the default order cannot separate
+  advanced neither index and looped forever.
+- A generic assumption that cleans to nothing is now a no-op; the JS left
+  `store.generic` undefined so the *next* `add_assumption` threw a `TypeError`.
+
+### Open items
+
+- `lib/assumptions/linear.ts`, `lib/assumptions/logical.ts` and
+  `lib/expression/variables.ts` are now shims with **zero importers**. They were
+  left in place because `package.json` maps `"./lib/*": "./lib/*"`, so every file
+  under `lib/` is a public deep-import path and removing one is an API change.
+- `Expression.expand_relations()` is still a no-op stub. `assumptions::expand_relations`
+  is now `pub` and would back it directly, likely flipping the two failing
+  `quick_transformation.spec.ts :: expand relations …` names.
+- `lib/polynomial/polynomial.ts` remains reachable only from its own spec;
+  `expression_to_polynomial` is now wired up on `Expression` but nothing calls it.
