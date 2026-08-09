@@ -1322,6 +1322,37 @@ const Context = {
   fromTex: parseLatex,
   parse_tex: parseLatex,
   fromMml: notImplemented("fromMml"),
+  /**
+   * `me.setConstantPolicy({define_e: false})` — declare which of `pi`, `e` and
+   * `i` denote mathematical constants here rather than ordinary variable names.
+   *
+   * The original library took this at construction time
+   * (`createInstance({define_e, define_pi, define_i})` in `lib/mathjs.js`); the
+   * Rust core keeps it as ambient state instead, so it is set rather than
+   * baked into an instance. Absent keys keep their current values.
+   *
+   * Turn `define_e` off for a document whose points are `(e, f)`: `e` then
+   * behaves as a variable everywhere — `e^x` stops folding to `exp(x)`, `e` is
+   * sampled as a free variable by `equals`, and it is an indeterminate rather
+   * than a coefficient to the polynomial code. Likewise `define_i` off stops
+   * `i·i` folding to `−1` in a document whose coordinates run `g, h, i`.
+   *
+   * `sort_constants_first` is the one display option here: off (the default),
+   * everything sorts alphabetically, which is what the original library does
+   * under every setting of `define_*`. On, declared constants lead a term, so
+   * `2 π i` reads that way rather than as the alphabetical `2 i π`.
+   *
+   * Ordering aside, this never changes a comparator: canonical trees stay
+   * comparable across policies, so a stored expression does not stop matching
+   * because a document later redeclared a name.
+   */
+  setConstantPolicy(policy: Record<string, boolean>) {
+    wasm.set_constant_policy(JSON.stringify(policy));
+  },
+  /** The constant policy currently in effect. */
+  getConstantPolicy(): Record<string, boolean> {
+    return JSON.parse(wasm.get_constant_policy());
+  },
   // `me.matrix([[a,b],[c,d]])` — build a matrix literal from a 2-D array of
   // Expressions (or ASTs). Not expression-first (the argument is an array, not
   // an expression), so it lives on the Context directly rather than being

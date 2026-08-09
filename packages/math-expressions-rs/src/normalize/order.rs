@@ -16,8 +16,11 @@ use std::cmp::Ordering;
 fn rank(e: &Expr) -> u8 {
     match e {
         Expr::Num(_) => 0,
-        Expr::Const(_) => 1,
-        Expr::Sym(_) => 2,
+        // Only the specials (`∞`, `NaN`, `None`) rank as constants of their own.
+        // `π`/`e`/`i` rank with the symbols and compare by name, so the two
+        // spellings of one constant sort in the same place — see `cmp`.
+        Expr::Const(c) if c.symbol_name().is_none() => 1,
+        Expr::Const(_) | Expr::Sym(_) => 2,
         // Between Sym and Pow (MATRIX_PLAN §2a): an atom that sorts with the
         // other irrational atoms, before compound expressions.
         Expr::RootOf { .. } => 3,
@@ -46,15 +49,25 @@ fn rank(e: &Expr) -> u8 {
     }
 }
 
+/// Order among the specials only — `π`/`e`/`i` never reach this, they compare
+/// by name against the symbols.
 fn const_index(c: MathConst) -> u8 {
     match c {
-        MathConst::Pi => 0,
-        MathConst::E => 1,
-        MathConst::I => 2,
-        MathConst::Inf => 3,
-        MathConst::NegInf => 4,
-        MathConst::NaN => 5,
-        MathConst::None => 6,
+        MathConst::Inf => 0,
+        MathConst::NegInf => 1,
+        MathConst::NaN => 2,
+        MathConst::None => 3,
+        MathConst::Pi | MathConst::E | MathConst::I => 4,
+    }
+}
+
+/// The name a rank-2 leaf sorts under: a symbol's own name, or a named
+/// constant's spelling.
+fn leaf_name(e: &Expr) -> String {
+    match e {
+        Expr::Sym(s) => s.name(),
+        Expr::Const(c) => c.symbol_name().unwrap_or_default().to_string(),
+        _ => String::new(),
     }
 }
 
@@ -86,8 +99,18 @@ pub(crate) fn cmp(a: &Expr, b: &Expr) -> Ordering {
     }
     match (a, b) {
         (Expr::Num(x), Expr::Num(y)) => number_cmp(x, y),
-        (Expr::Const(x), Expr::Const(y)) => const_index(*x).cmp(&const_index(*y)),
-        (Expr::Sym(x), Expr::Sym(y)) => x.name().cmp(&y.name()),
+        // Rank 1: the specials, which have no symbol spelling.
+        (Expr::Const(x), Expr::Const(y)) if x.symbol_name().is_none() => {
+            const_index(*x).cmp(&const_index(*y))
+        }
+        // Rank 2: symbols and the named constants, all by name. `Sym("pi")` and
+        // `Const(Pi)` land together, and neither jumps ahead of the variables —
+        // sorting is alphabetical whatever `constant_policy` declares, because
+        // this comparator is what makes `==` on canonical trees mean equality
+        // (and canonical trees are persisted in DoenetML document state).
+        (Expr::Const(_) | Expr::Sym(_), Expr::Const(_) | Expr::Sym(_)) => {
+            leaf_name(a).cmp(&leaf_name(b))
+        }
         (Expr::Bool(x), Expr::Bool(y)) => x.cmp(y),
         (Expr::Blank, Expr::Blank) | (Expr::Ldots, Expr::Ldots) => Ordering::Equal,
         (
@@ -168,8 +191,9 @@ pub(crate) fn cmp(a: &Expr, b: &Expr) -> Ordering {
             n1.name().cmp(&n2.name()).then_with(|| slice_cmp(a1, a2))
         }
 
-        // Different variants share a rank only if rank() is not 1:1 — it is,
-        // so this is unreachable. Fall back to Equal for totality.
+        // rank() is 1:1 on variants apart from `Const`/`Sym` sharing rank 2,
+        // which the arm above handles, so this is unreachable. Fall back to
+        // Equal for totality.
         _ => Ordering::Equal,
     }
 }

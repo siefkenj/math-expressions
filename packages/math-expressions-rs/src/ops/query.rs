@@ -92,6 +92,18 @@ fn js_head(e: &Expr) -> Option<String> {
 /// Matches `me.variables`: the constant symbols `pi`/`e`/`i` ARE included (they
 /// are ordinary symbols here), but a function-application head (`sin` in
 /// `sin(x)`, `f` in `f(x)`) is NOT.
+///
+/// That the constants are listed looks wrong and is not: alpha94's filter reads
+/// `(math.define_e || v !== "e")`, which *keeps* `e` precisely when `define_e`
+/// is on. The listing is not the crate's constant/variable distinction — that
+/// is [`crate::expr::sym::is_constant_symbol`], which every pass that reduces
+/// or sample-evaluates an expression consults, and which
+/// [`crate::constant_policy`] governs. `variables` reports the names a tree
+/// mentions, and it reports them whatever the policy says.
+///
+/// Only the `Const` *spelling* is excluded, since `∞`/`NaN`/`None` have no name
+/// to report and the three that do are unified into symbols by `canonicalize`
+/// long before a caller asks.
 pub fn variables(e: &Expr) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();

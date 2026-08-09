@@ -67,8 +67,11 @@ fn pass_function_names(e: &Expr) -> Expr {
             let args = args.iter().map(pass_function_names).collect();
             Expr::Apply(Box::new(head), args)
         }
-        // `e^x` → `exp(x)` (math.define_e defaults to true).
-        Expr::Pow(base, exp) if is_sym(base, "e") => {
+        // `e^x` → `exp(x)`, but only while `e` is declared Euler's number
+        // (`define_e`, on by default): in a document whose points are `(e, f)`,
+        // `e^x` is a coordinate raised to a power and folding it to `exp`
+        // silently changes the expression.
+        Expr::Pow(base, exp) if crate::constant_policy::is_e(base) => {
             Expr::Apply(Box::new(Expr::sym("exp")), vec![pass_function_names(exp)])
         }
         // `binom(n, k)` → `nCr(n, k)`.
@@ -234,10 +237,6 @@ fn one_over(n: Expr) -> Expr {
 
 fn pow(base: Expr, exp: Expr) -> Expr {
     Expr::Pow(Box::new(base), Box::new(exp))
-}
-
-fn is_sym(e: &Expr, name: &str) -> bool {
-    matches!(e, Expr::Sym(s) if s.name() == name)
 }
 
 fn is_int(e: &Expr, v: i64) -> bool {

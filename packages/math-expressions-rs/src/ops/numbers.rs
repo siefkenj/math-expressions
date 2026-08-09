@@ -3,6 +3,7 @@
 //! the display-rounding passes (`round_numbers_*`, `set_small_zero`,
 //! `constants_to_floats`).
 
+use crate::constant_policy::{is_e, is_pi};
 use crate::expr::map_children;
 use crate::expr::Expr;
 use crate::normalize::{canonicalize, present};
@@ -321,23 +322,15 @@ pub fn constants_to_floats(e: &Expr) -> Expr {
         Expr::Pow(base, exp) if is_e(base) => {
             Expr::Pow(base.clone(), Box::new(constants_to_floats(exp)))
         }
-        Expr::Sym(s) => match s.name().as_str() {
-            "pi" => Expr::Num(Number::from_f64(std::f64::consts::PI)),
-            "e" => Expr::Num(Number::from_f64(std::f64::consts::E)),
-            _ => e.clone(),
-        },
+        // Only a *declared* constant floats: an undeclared `pi` is a variable
+        // name, and turning it into 3.14159… would be a substitution, not a
+        // conversion.
+        _ if is_pi(e) => Expr::Num(Number::from_f64(std::f64::consts::PI)),
+        _ if is_e(e) => Expr::Num(Number::from_f64(std::f64::consts::E)),
         _ => map_children(e, constants_to_floats),
     }
 }
 
-/// Euler's number in either spelling the tree may carry it in.
-fn is_e(e: &Expr) -> bool {
-    match e {
-        Expr::Sym(s) => s.name() == "e",
-        Expr::Const(c) => *c == crate::expr::MathConst::E,
-        _ => false,
-    }
-}
 
 /// A rational the *author wrote as a fraction* — as opposed to one that is a
 /// decimal quantity ([`Spelling::Decimal`]) or an integer.

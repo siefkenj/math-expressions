@@ -198,11 +198,7 @@ fn log_of(a: Expr) -> Expr {
     Expr::Apply(Box::new(Expr::sym("log")), vec![a])
 }
 
-/// Is `e` the constant `e` (either spelling: the `e` symbol or `MathConst::E`)?
-fn is_e(e: &Expr) -> bool {
-    matches!(e, Expr::Sym(s) if s.name() == "e")
-        || matches!(e, Expr::Const(crate::expr::MathConst::E))
-}
+use crate::constant_policy::is_e;
 
 /// Is `base` a function whose exponent moves outside, so `base^n(x)` means
 /// `(base(x))^n` (trig / hyperbolic / log)? Mirrors `normalize::syntactic`.

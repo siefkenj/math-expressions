@@ -32,11 +32,13 @@ pub fn expression_to_polynomial(expr: &Expr) -> Option<Poly> {
     match expr {
         // `π`, `e` and `i` are numbers, not variables — the distinction the
         // module docs open with. They reach here as symbols, since the JS AST
-        // spells all three as bare strings.
+        // spells all three as bare strings. Only while declared, though: an
+        // undeclared one is an indeterminate like any other name.
         Expr::Sym(s) => {
-            return Some(match s.name().as_str() {
-                "pi" | "e" | "i" => Poly::Coeff(expr.clone()),
-                _ => opaque(expr),
+            return Some(if crate::expr::sym::is_constant_symbol(&s.name()) {
+                Poly::Coeff(expr.clone())
+            } else {
+                opaque(expr)
             })
         }
         // `∞` and `NaN` are numbers too.

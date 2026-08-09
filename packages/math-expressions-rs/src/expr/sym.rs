@@ -9,16 +9,18 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Sym(u32);
 
-/// The symbol names that denote mathematical constants rather than free
+/// The symbol names that *can* denote mathematical constants rather than free
 /// variables (the parsers emit `pi`/`e`/`i` as plain symbols, matching the JS
-/// convention). Single source of truth — the evaluator's sampling filter, the
-/// ∞/NaN fold guard, and `evaluate_to_constant`'s closedness check must all
-/// agree on this set.
+/// convention). Whether a given one *does* is a per-document declaration —
+/// see [`crate::constant_policy`] — so this is the candidate set, not the
+/// answer. Ask [`is_constant_symbol`] for the answer.
 pub const CONSTANT_SYMBOLS: &[&str] = &["pi", "e", "i"];
 
-/// Is `name` one of the constant symbols (`pi`, `e`, `i`)?
+/// Is `name` a mathematical constant under the policy in force? Single source of
+/// truth — the evaluator's sampling filter, the ∞/NaN fold guard, and
+/// `evaluate_to_constant`'s closedness check must all agree.
 pub fn is_constant_symbol(name: &str) -> bool {
-    CONSTANT_SYMBOLS.contains(&name)
+    crate::constant_policy::current().declares(name)
 }
 
 /// The named constants mathjs put in scope, which the JS library evaluated

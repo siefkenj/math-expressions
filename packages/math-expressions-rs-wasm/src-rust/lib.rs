@@ -42,6 +42,7 @@ use wasm_bindgen::prelude::*;
 
 mod assumptions;
 mod calculus;
+mod constants;
 mod core_ops;
 mod grading;
 mod interop;

@@ -180,6 +180,14 @@ export interface WasmModule {
     treeJson: string,
     variables: string[],
   ): string | undefined;
+  /**
+   * Declare which of `pi`/`e`/`i` are mathematical constants here rather than
+   * variable names, from a JSON object of `ConstantPolicy` fields. Absent keys
+   * keep their values; unknown keys throw.
+   */
+  set_constant_policy(optionsJson: string): void;
+  /** The constant policy in effect, as JSON (same keys as the setter takes). */
+  get_constant_policy(): string;
   Assumptions: WasmAssumptionsConstructor;
   /** Distinct symbol names interned this session — an append-only memory gauge. */
   interner_size(): number;

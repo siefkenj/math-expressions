@@ -146,6 +146,26 @@ pub enum MathConst {
     None,
 }
 
+impl MathConst {
+    /// The bare-string spelling this constant has in the JS tree, for the three
+    /// that have one. `Inf`/`NegInf`/`NaN`/`None` serialize as tagged objects
+    /// rather than strings and answer `None` here.
+    ///
+    /// This is the *spelling*, not a claim about meaning: whether the name it
+    /// returns denotes the constant or an ordinary variable is
+    /// [`crate::constant_policy`]'s question. Comparators want the spelling
+    /// (so both forms of one constant sort together); semantics wants the
+    /// policy.
+    pub fn symbol_name(self) -> Option<&'static str> {
+        match self {
+            MathConst::Pi => Some("pi"),
+            MathConst::E => Some("e"),
+            MathConst::I => Some("i"),
+            MathConst::Inf | MathConst::NegInf | MathConst::NaN | MathConst::None => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RelOp {
     Eq,

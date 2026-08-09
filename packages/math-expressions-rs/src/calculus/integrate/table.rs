@@ -105,9 +105,7 @@ fn power_rows(e: &Expr, base: &Expr, exp: &Expr, x: &str) -> Option<Expr> {
     // Exponential: c^u, x-free base.
     if !depends_on(base, x) {
         if let Some(b) = linear_coeff(exp, x) {
-            let is_e = matches!(base, Expr::Const(crate::expr::MathConst::E))
-                || matches!(base, Expr::Sym(s) if s.name() == "e");
-            if is_e {
+            if crate::constant_policy::is_e(base) {
                 return Some(over(e.clone(), &b));
             }
             if matches!(base, Expr::Num(n) if n.is_positive() && !n.is_one()) {

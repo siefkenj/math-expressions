@@ -7,7 +7,8 @@ use num_rational::BigRational;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
 use super::value::{spend, squarefree_part, Exact};
-use crate::expr::{Expr, MathConst};
+use crate::constant_policy::{is_e, is_pi};
+use crate::expr::Expr;
 
 fn br_int(n: i64) -> BigRational {
     BigRational::from_integer(BigInt::from(n))
@@ -24,13 +25,6 @@ fn apply1<'a>(e: &'a Expr, name: &str) -> Option<&'a Expr> {
     None
 }
 
-fn is_e(e: &Expr) -> bool {
-    matches!(e, Expr::Const(MathConst::E)) || matches!(e, Expr::Sym(s) if s.name() == "e")
-}
-
-fn is_pi(e: &Expr) -> bool {
-    matches!(e, Expr::Const(MathConst::Pi)) || matches!(e, Expr::Sym(s) if s.name() == "pi")
-}
 
 /// Evaluate `e` to an [`Exact`] value, or `None` if it falls outside the tower.
 pub fn exact_eval(e: &Expr) -> Option<Exact> {

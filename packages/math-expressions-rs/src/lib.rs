@@ -42,6 +42,7 @@
 
 pub mod assumptions;
 pub mod calculus;
+pub mod constant_policy;
 pub mod equality;
 pub mod equality_structural;
 pub mod eval_exact;
@@ -65,6 +66,7 @@ pub use assumptions::{
     is_nonzero, is_positive, is_real, Assumptions, TreeStore,
 };
 pub use calculus::critical::critical_points;
+pub use constant_policy::ConstantPolicy;
 pub use calculus::diff::derivative;
 pub use calculus::integrate::integrate;
 pub use equality::discrete_infinite::{

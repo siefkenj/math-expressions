@@ -195,19 +195,37 @@ pub(crate) fn split_number(n: &Number) -> (bool, Number, Number) {
     }
 }
 
-/// Sort multiplicands alphabetically by their base symbol (`x² y`, not
-/// `y x²`); constants (`π`) come first, factors with no symbol/constant base
-/// (functions, sums) keep their canonical order at the end.
+/// Sort multiplicands alphabetically by their base symbol (`x² y`, not `y x²`);
+/// factors with no symbol/constant base (functions, sums) keep their canonical
+/// order at the end. `π`/`e`/`i` sort by *name* here, in either spelling, so
+/// they read where an alphabetical reader expects them — unless
+/// [`ConstantPolicy::sort_constants_first`] is on, which is the only thing that
+/// pulls a declared constant to the front.
+///
+/// [`ConstantPolicy::sort_constants_first`]: crate::ConstantPolicy::sort_constants_first
 fn sort_factors(factors: &mut [Expr]) {
     fn key(f: &Expr) -> (u8, String) {
         let base = if let Expr::Pow(b, _) = f { &**b } else { f };
-        match base {
-            Expr::Const(_) => (0, String::new()),
-            Expr::Sym(s) => (1, s.name().to_string()),
-            _ => (2, String::new()),
+        match atom_name(base) {
+            // A bare `+`/`-` inside a `pm` reads as a sign on the product, so it
+            // trails every real factor — `2 π (−)`, not `2 (−) π`. Legacy keys
+            // it `[8, "plus_minus_string", …]`, last of all; same intent here.
+            Some(name) if name == "-" || name == "+" => (ORDINARY_NAME + 2, name),
+            Some(name) => (atom_rank(&name), name),
+            // No symbol base: after every named factor, canonical order kept.
+            None => (ORDINARY_NAME + 1, String::new()),
         }
     }
     factors.sort_by_cached_key(key); // stable: ties keep canonical order
+}
+
+/// The name a leaf sorts under, for either spelling of a named constant.
+fn atom_name(e: &Expr) -> Option<String> {
+    match e {
+        Expr::Sym(s) => Some(s.name()),
+        Expr::Const(_) => crate::constant_policy::constant_spelling(e),
+        _ => None,
+    }
 }
 
 /// Order `Add` terms like a polynomial: descending total degree, then
@@ -226,30 +244,44 @@ fn present_add(ts: &[Expr]) -> Expr {
 /// **Constants count.** `π`, `e` and `i` carry degree here exactly as a
 /// variable does, which is what keeps `a·e + b·f` in the order it was written:
 /// with constants excluded, `a·e` was degree 1 against `b·f`'s 2 and sorted
-/// second. Authors write `e`, `i` and `f` as coordinate names often enough
-/// (`(e,f)`, `(g,h,i)`) that the alternative reads as a bug every time.
+/// second.
 struct DegKey {
     total: f64,
     vars: Vec<(u8, String, f64)>,
 }
 
-/// Which class an atom sorts in: other constants first, then `e` and `i`, then
-/// ordinary variables. Within a class the order is alphabetical.
+/// Which class an atom sorts in. By default there is only one class, so the
+/// order is alphabetical and `π` sits between `n` and `r` like any other name.
 ///
-/// The middle rank is the interesting one. `e` and `i` are constants, so they
-/// belong ahead of variables, but they are also the two an author is most
-/// likely to have meant as a plain name — putting them last among the constants
-/// keeps `π` (never a variable name in practice) leading a term it appears in,
-/// while `i + l` still reads in that order.
+/// That is deliberate, and it is what the JS oracle does under *every* setting
+/// of its own `define_pi`/`define_e`/`define_i` — its `default_order` never
+/// consulted them. A rank that promoted constants was tried and reverted: it
+/// put `e` ahead of `π` in a product while `π` led in a sum, printed `2 i π`
+/// for `2πi`, turned `d + e + f` into `e + d + f`, and broke the compat suite's
+/// `3a+3b+3c+2d+2e+2f+…`. There is no ranking that serves both `2πr` and a
+/// document whose points are `(e, f)` — which is why the question is *declared*
+/// ([`crate::constant_policy`]) rather than guessed.
+///
+/// [`ConstantPolicy::sort_constants_first`] opts a document into the
+/// conventional reading, and only then do declared constants take rank 0.
+///
+/// [`ConstantPolicy::sort_constants_first`]: crate::ConstantPolicy::sort_constants_first
 fn atom_rank(name: &str) -> u8 {
-    if !crate::expr::sym::is_constant_symbol(name) {
-        2
-    } else if matches!(name, "e" | "i") {
-        1
-    } else {
-        0
+    if !crate::constant_policy::current().sorts_first(name) {
+        return ORDINARY_NAME;
+    }
+    // Within the promoted class the order is conventional, not alphabetical:
+    // `2 π i`, never `2 e π` or `2 i π`.
+    match name {
+        "pi" => 0,
+        "e" => 1,
+        _ => 2,
     }
 }
+
+/// Rank of a factor that is neither a promoted constant nor one of the trailing
+/// classes in [`sort_factors`]. Ordinary names sort among themselves by name.
+const ORDINARY_NAME: u8 = 3;
 
 fn deg_key(t: &Expr) -> DegKey {
     let mut vars: Vec<(u8, String, f64)> = Vec::new();
@@ -279,14 +311,10 @@ fn collect_deg(t: &Expr, mult: f64, vars: &mut Vec<(u8, String, f64)>) {
         // depending on how the expression was built; both spellings must land
         // in the same class. The non-finite specials are not atoms of a
         // monomial and are left out.
-        Expr::Const(c) => {
-            let name = match c {
-                crate::expr::MathConst::Pi => "pi",
-                crate::expr::MathConst::E => "e",
-                crate::expr::MathConst::I => "i",
-                _ => return,
-            };
-            vars.push((atom_rank(name), name.to_string(), mult));
+        Expr::Const(_) => {
+            if let Some(name) = crate::constant_policy::constant_spelling(t) {
+                vars.push((atom_rank(&name), name, mult));
+            }
         }
         Expr::Pow(b, x) => {
             if let Expr::Num(n) = &**x {

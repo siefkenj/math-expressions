@@ -5,7 +5,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::Signed;
 
-use crate::expr::{Expr, MathConst};
+use crate::expr::Expr;
 
 pub(super) const TRIG: &[&str] = &["sin", "cos", "tan", "cot", "sec", "csc"];
 pub(super) const INVERSE_TRIG: &[&str] = &["asin", "acos", "atan", "asec", "acsc", "acot"];
@@ -51,17 +51,7 @@ pub(super) fn neg_leading(e: &Expr) -> bool {
     }
 }
 
-pub(super) fn is_pi(e: &Expr) -> bool {
-    matches!(e, Expr::Const(MathConst::Pi)) || matches!(e, Expr::Sym(s) if s.name() == "pi")
-}
-
-pub(super) fn is_e(e: &Expr) -> bool {
-    matches!(e, Expr::Const(MathConst::E)) || matches!(e, Expr::Sym(s) if s.name() == "e")
-}
-
-pub(super) fn is_i(e: &Expr) -> bool {
-    matches!(e, Expr::Const(MathConst::I)) || matches!(e, Expr::Sym(s) if s.name() == "i")
-}
+pub(super) use crate::constant_policy::{is_e, is_i, is_pi};
 
 pub(super) fn is_zero_expr(e: &Expr) -> bool {
     matches!(canon(e), Expr::Num(n) if n.is_zero())

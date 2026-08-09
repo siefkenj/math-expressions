@@ -623,10 +623,10 @@ fn mentions_i(e: &Expr) -> bool {
 }
 
 /// `i` in either spelling. The parser produces the symbol; the constructors
-/// produce the constant, and both reach the rules.
-fn is_imaginary_unit(e: &Expr) -> bool {
-    matches!(e, Expr::Const(MathConst::I)) || matches!(e, Expr::Sym(s) if s.name() == "i")
-}
+/// produce the constant, and both reach the rules. The symbol counts only while
+/// `define_i` holds — a document whose variables run `g, h, i` gets no complex
+/// arithmetic out of its third coordinate.
+use crate::constant_policy::is_i as is_imaginary_unit;
 
 /// `(re, im)` of `e` as exact rationals, or `None` if `e` leaves ℚ(i).
 fn gaussian_eval(e: &Expr) -> Option<(BigRational, BigRational)> {

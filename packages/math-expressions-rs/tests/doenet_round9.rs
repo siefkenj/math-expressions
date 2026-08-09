@@ -56,10 +56,13 @@ fn the_factors_around_a_contraction_are_expanded_too() {
         js(&expand(&l(&format!("2{M}(e,f)")))),
         r#"["tuple",["+",["*",2,"a","e"],["*",2,"b","f"]],["+",["*",2,"c","e"],["*",2,"d","f"]]]"#
     );
-    // `M·M·v`: both matrices contract, left to right.
+    // `M·M·v`: both matrices contract, left to right. The four terms of each
+    // component come out graded-lexicographically (`a²e, abf, bce, bdf`) rather
+    // than grouped by the vector component (`a²e, bce, abf, bdf`): `e` and `f`
+    // are the coordinate names here, and nothing gives `e` precedence over `b`.
     assert_eq!(
         js(&expand(&l(&format!("{M}{M}(e,f)")))),
-        r#"["tuple",["+",["*",["^","a",2],"e"],["*","b","c","e"],["*","a","b","f"],["*","b","d","f"]],["+",["*","a","c","e"],["*","c","d","e"],["*","b","c","f"],["*",["^","d",2],"f"]]]"#
+        r#"["tuple",["+",["*",["^","a",2],"e"],["*","a","b","f"],["*","b","c","e"],["*","b","d","f"]],["+",["*","a","c","e"],["*","b","c","f"],["*","c","d","e"],["*",["^","d",2],"f"]]]"#
     );
 }
 

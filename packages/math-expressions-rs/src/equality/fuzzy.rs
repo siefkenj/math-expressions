@@ -188,12 +188,12 @@ fn replace_numbers(
                 fresh(v, params)
             }
         }
-        Expr::Sym(s) if s.name() == "pi" => fresh(std::f64::consts::PI, params),
-        Expr::Sym(s) if s.name() == "e" => fresh(std::f64::consts::E, params),
-        // Defense: canonicalize unifies Const(Pi/E) → Sym, but this pass can
-        // see pre-canonical trees; both spellings must be parameterized alike.
-        Expr::Const(crate::expr::MathConst::Pi) => fresh(std::f64::consts::PI, params),
-        Expr::Const(crate::expr::MathConst::E) => fresh(std::f64::consts::E, params),
+        // Both spellings must be parameterized alike (canonicalize unifies
+        // `Const(Pi/E)` → `Sym`, but this pass can see pre-canonical trees), and
+        // only while the name is *declared* a constant: an undeclared `e` is a
+        // free variable and gets sampled as one by the caller instead.
+        _ if crate::constant_policy::is_pi(e) => fresh(std::f64::consts::PI, params),
+        _ if crate::constant_policy::is_e(e) => fresh(std::f64::consts::E, params),
         Expr::Pow(b, x) if !include_exponents && is_literal_exponent(x) => Expr::Pow(
             Box::new(replace_numbers(b, vars, include_exponents, params)),
             x.clone(),

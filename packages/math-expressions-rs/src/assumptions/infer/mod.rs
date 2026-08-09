@@ -46,9 +46,16 @@ fn facts_of_node(e: &Expr, a: &Assumptions) -> Facts {
         Expr::Const(MathConst::NaN) => Facts::nan(),
         Expr::Const(_) => Facts::unknown(),
 
+        // A *declared* `pi`/`e`/`i` carries the constant's facts; an undeclared
+        // one is an ordinary variable and knows only what has been assumed
+        // about it — which is the point of declaring, since `π > 0` is not
+        // something to believe about a coordinate that happens to be called
+        // `pi`.
         Expr::Sym(s) => match s.name().as_str() {
-            "pi" | "e" => Facts::positive_transcendental(),
-            "i" => Facts::imaginary_unit(),
+            name @ ("pi" | "e") if crate::expr::sym::is_constant_symbol(name) => {
+                Facts::positive_transcendental()
+            }
+            "i" if crate::expr::sym::is_constant_symbol("i") => Facts::imaginary_unit(),
             name => vars::variable_facts(name, a),
         },
 

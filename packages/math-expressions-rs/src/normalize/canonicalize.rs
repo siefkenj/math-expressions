@@ -14,9 +14,18 @@ pub fn canonicalize(e: &Expr) -> Expr {
         // produce). Canonical form uses `Sym` — unifying here means `==` on
         // canonical trees is semantic equality for constants too, and every
         // downstream pass only needs to match one spelling.
-        Expr::Const(crate::expr::MathConst::Pi) => Expr::sym("pi"),
-        Expr::Const(crate::expr::MathConst::E) => Expr::sym("e"),
-        Expr::Const(crate::expr::MathConst::I) => Expr::sym("i"),
+        //
+        // The unification is sound only while the name is *declared* to be the
+        // constant ([`crate::constant_policy`]). In a document where `e` is a
+        // coordinate, `Const(E)` and `Sym("e")` are two different values and
+        // collapsing them would make `equals` answer yes to a false statement,
+        // so the explicit constant is left standing.
+        Expr::Const(c)
+            if c.symbol_name()
+                .is_some_and(crate::expr::sym::is_constant_symbol) =>
+        {
+            Expr::sym(c.symbol_name().expect("guard matched a named constant"))
+        }
         Expr::Num(_)
         | Expr::Sym(_)
         | Expr::Const(_)
