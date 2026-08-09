@@ -26,6 +26,7 @@
 //! - [`interop`]     — JS-tree AST boundary (Doenet interop)
 //! - [`tree_ops`]    — JS-tree operations the compat layer needs without an
 //!   `Expression`'s normalization (default order, not-pushdown, linear solving)
+//! - [`poly_ops`]    — the compat polynomial / Gröbner engine (JSON in, JSON out)
 //! - [`js_match`]    — the JS-tree template-match / flatten-unflatten engine
 //!   backing [`interop`] (JS-shape only, so it lives here rather than in the
 //!   core crate)
@@ -50,6 +51,7 @@ mod matrix_ops;
 mod numeric;
 mod ode;
 mod parse;
+mod poly_ops;
 mod transform;
 mod tree_ops;
 

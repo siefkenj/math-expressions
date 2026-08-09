@@ -16,6 +16,7 @@ import {
 import * as converters from "./converters/index";
 import { jsonToAst, tagNonFinite } from "./converters/ast-json";
 import * as assumptionStore from "./assumptions/store";
+import { expression_to_polynomial } from "./polynomial/polynomial";
 import { get_tree } from "./trees/util";
 import { compileRustExpr } from "math-expressions-rs-wasm";
 import type { WasmExpression } from "math-expressions-rs-wasm";
@@ -338,6 +339,13 @@ class Expression {
   }
   functions() {
     return this._w.functions();
+  }
+  /**
+   * This expression read as a polynomial — `["polynomial", v, [[deg, coeff], …]]`
+   * — or `false` when it is not one. See `lib/polynomial/polynomial`.
+   */
+  expression_to_polynomial() {
+    return expression_to_polynomial(this.tree);
   }
 
   // ---- equality ----
@@ -890,7 +898,6 @@ for (const name of [
   "toMathjs",
   "solve_linear",
   "create_discrete_infinite_set",
-  "expression_to_polynomial",
   "finite_field_evaluate",
 ]) {
   (Expression.prototype as Record<string, unknown>)[name] =
