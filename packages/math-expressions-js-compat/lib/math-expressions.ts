@@ -1388,7 +1388,19 @@ const Context = {
     min_index?: ExpressionLike;
     max_index?: ExpressionLike;
   }) {
-    const { offsets, periods, min_index, max_index } = config ?? {};
+    // Read the fields one at a time rather than destructuring `config`.
+    // API Extractor — which `vite-plugin-dts`'s `rollupTypes` runs, and which
+    // therefore walks every declaration in this file for any consumer whose
+    // types reach it — cannot resolve an object binding pattern in this
+    // position, and aborts that consumer's build outright with "Unable to
+    // determine semantic information for declaration". A destructuring here is
+    // not worth costing downstream builds their d.ts rollup, so this file keeps
+    // to plain property reads.
+    const opts = config ?? {};
+    const offsets = opts.offsets;
+    const periods = opts.periods;
+    const min_index = opts.min_index;
+    const max_index = opts.max_index;
     if (offsets === undefined || periods === undefined) return undefined;
     // The bounds cross as tree JSON because they are optional and wasm-bindgen
     // has no by-reference `Option<&Expression>`; `tree_json()` is the same wire
