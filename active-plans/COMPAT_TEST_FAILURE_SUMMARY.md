@@ -27,7 +27,7 @@ against the original JS oracle) needed no re-snapshotting.
 |------:|-----------|-----------------------|
 | 71 | `quick_ast-to-text` | text printer parenthesization (`1/2 x` vs `(1/2) x`, `-2 x/3` vs `-(2 x)/3`) |
 | 53 | `quick_text-to-ast-to-text` | same text-printer parenthesization |
-| 45 | `slow_simplify` | `evaluate_numbers` edge cases: Infinity / -Infinity / negative-zero not collapsed |
+| 45 | `slow_simplify` | three buckets (see below): canonical **ordering** (~13), **number folding** at singular values (~10), **radical/matrix/expand algebra** incomplete (~12, incl. one real bug) |
 | 28 | `quick_mathjs-to-ast` | `mathjsToAst is not implemented` (explicit stub) |
 | 26 | `quick_normalization` | function-name normalization not applied (`e^x` stays `^` instead of `apply exp`) |
 | 24 | `slow_matrix` | `me.matrix is not a function`; vector/tuple typing (`tuple` vs `vector` after add) |
@@ -53,6 +53,26 @@ against the original JS oracle) needed no re-snapshotting.
 - `logical combinations`, `combined assumptions`, `combined assumptions, negated` —
   or-disjunction and interval-membership *reasoning* (as opposed to retrieval).
 
+### The 45 `slow_simplify` failures
+Three root causes, not the single "Infinity/neg-zero" this row used to claim:
+
+- **Canonical ordering (~13)** — sums are mathematically correct but ordered
+  differently: numeric constants like `e`/`i` float to the front instead of
+  sorting alphabetically, and mixed containers (tuple/vector/altvector/interval)
+  group by type rather than interleaving by value. Tests: evaluate_numbers
+  combination + the two "sorted the same" cases; collect "speed tests" / "with
+  units" / "lone - or + signs"; every matrix/vector add-subtract and
+  scalar-multiple case. Likely one comparator fix.
+- **Number folding at singular values (~10)** — `Infinity`, `÷0`, negative zero,
+  `x^0` (folded to 1 without an x≠0 assumption), like-unit combination, and
+  `evaluate_to_constant` returning `null`/real where `NaN`/`Infinity`/complex is
+  expected (blanks, det/trace, units, matrices, `Infinity*i`).
+- **Radical / matrix / expand algebra incomplete (~12)** — pulling numeric
+  factors out of roots (`sqrt(-16x^5)`), `abs` distribution into powers,
+  distributing a scalar into matrix-product entries (`(M·N·g).expand()`), matrix
+  powers, and `i^2 → -1` in expand. Includes the one genuine **wrong-output**
+  bug: `int (x^2+x)dx` expand distributes the `dx` differential across the sum.
+
 ## Remaining buckets by theme
 
 **Printer / formatting (~170)** — text parenthesization (124), LaTeX spacing (20),
@@ -66,8 +86,9 @@ Previously mis-attributed to the assumptions system; they are independent.
 **Unimplemented / unbound APIs (~70)** — `quick_mathjs-to-ast` (28, explicit stub),
 `quick_trees` (17, callback matching can't cross wasm), `slow_matrix` (`me.matrix`).
 
-**Semantic edge cases** — `slow_simplify` evaluate_numbers Infinity/neg-zero (45),
-matrix vector/tuple typing.
+**Semantic edge cases (45)** — `slow_simplify`: canonical ordering (~13),
+number folding at singular values (~10), radical/matrix/expand algebra (~12).
+See the per-bucket breakdown above.
 
 ## Highest-leverage remaining item
 The text-printer parenthesization rule: `quick_ast-to-text` (71) +

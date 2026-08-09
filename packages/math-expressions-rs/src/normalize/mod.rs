@@ -51,7 +51,7 @@ pub use default_order::{cmp_default_order, default_order};
 pub(crate) use default_order::{js_operands, legacy_operator};
 pub(crate) use full::full_simplify;
 pub(crate) use matrix_ops::{
-    identity_matrix, is_matrix_valued, is_vector_valued, matmul_literal, matvec_literal,
+    contract_pair, identity_matrix, is_matrix_valued, is_vector_valued, matmul_literal,
 };
 pub use units::desugar_units;
 pub(crate) use units::{fold_units, scaling_unit_and_value, unit_body};

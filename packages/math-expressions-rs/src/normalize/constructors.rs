@@ -291,9 +291,19 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
     let mut coeff = Number::one();
     // (base, summed exponent) for each distinct base.
     let mut parts: Vec<(Expr, Expr)> = Vec::new();
+    // Coordinate vectors are kept as ordered factors, never merged into a power:
+    // `(e,f)·(e,f)` is a row·column dot, not `(e,f)²` — the same reason matrices
+    // are excluded from this pass (they contract via `matmul`, above). The
+    // contraction itself belongs to `simplify`/`expand`, so here the product is
+    // just left written.
+    let mut vectors: Vec<Expr> = Vec::new();
     for f in flat {
         if let Expr::Num(n) = &f {
             coeff = coeff.mul(n);
+            continue;
+        }
+        if is_vector_valued(&f) {
+            vectors.push(f);
             continue;
         }
         let (base, exp) = split_pow(f);
@@ -307,7 +317,7 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         return annihilate(&coeff, parts.iter().any(|(b, x)| is_infinite_factor(b, x)));
     }
 
-    let mut out = Vec::with_capacity(parts.len() + 1);
+    let mut out = Vec::with_capacity(parts.len() + vectors.len() + 1);
     let mut refold = false;
     for (base, exp) in parts {
         match pow(base, exp) {
@@ -325,6 +335,9 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
             other => out.push(other),
         }
     }
+    // Vectors rejoin the factor list as-is; the product stays written until a
+    // `simplify`/`expand` rule contracts it.
+    out.extend(vectors);
     if coeff.is_zero() {
         return annihilate(
             &coeff,

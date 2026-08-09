@@ -106,16 +106,17 @@ fn the_product_is_left_alone_until_expand() {
     assert_eq!(js(&simplify(&l(&format!("{M}(e,f)")))), written);
 }
 
-/// A vector on the *left* is a column and does not conform, so it stays a
-/// product under `expand` too. Transposing it to make the multiplication work
-/// would be answering a question the author did not ask.
+/// A vector on the *left* is a row (1×N) and contracts with the matrix on the
+/// right: `(e,f)·M` → the row-vector product `(ea+fc, eb+fd)`, in the vector's
+/// own notation. (The positional rule: left operand of a `·` is a row, right is
+/// a column — so `M·v` is a column and `v·M` a row.)
 #[test]
-fn a_vector_on_the_left_does_not_contract() {
+fn a_vector_on_the_left_contracts_as_a_row() {
     assert_eq!(
         js(&expand(&l(&format!("(e,f){M}")))),
-        r#"["*",["tuple","e","f"],["matrix",["tuple",2,2],["tuple",["tuple","a","b"],["tuple","c","d"]]]]"#
+        r#"["tuple",["+",["*","a","e"],["*","c","f"]],["+",["*","b","e"],["*","d","f"]]]"#
     );
-    // Nor does a length mismatch.
+    // A length mismatch still does not conform, so it stays a product.
     assert_eq!(
         js(&expand(&l(&format!("{M}(e,f,g)")))),
         r#"["*",["matrix",["tuple",2,2],["tuple",["tuple","a","b"],["tuple","c","d"]]],["tuple","e","f","g"]]"#

@@ -20,7 +20,7 @@
 use crate::expr::Expr;
 use crate::num::Number;
 
-use super::{add, matvec_literal, mul, pow};
+use super::{add, contract_pair, mul, pow};
 use crate::expr::map_children;
 
 // Caps (resource_limits::current().max_expand_power / max_expand_terms): the exponent
@@ -35,34 +35,48 @@ pub fn expand(e: &Expr) -> Expr {
     super::present(&expand_core(e))
 }
 
-/// Contract a `matrix · vector` pair inside a product, if there is one.
+/// Contract the first matrix/vector product step inside a `Mul`, if there is one.
 ///
-/// Multiplying a matrix into a vector is exactly the kind of "multiply it out"
-/// that `expand` is for, and it is the only place it happens: canonicalization
-/// leaves the product written as it stands, because a `<math>` that asked for
-/// nothing should render what the author typed. Scalar factors ride along and
-/// are folded into the resulting components.
+/// Multiplying matrices and vectors together is exactly the "multiply it out"
+/// that `expand` is for, and it is the only place it happens for vectors:
+/// canonicalization leaves such a product written as it stands, because a
+/// `<math>` that asked for nothing should render what the author typed. (The
+/// `mul` constructor already folds matrix·matrix; this covers everything a vector
+/// touches.)
 ///
-/// Only `matrix` *then* `vector`, in that order and adjacent in the ordered
-/// segment. A vector on the left is a column and does not conform; transposing
-/// it to make the product work would be answering a different question.
+/// The *ordered* factors — the matrix- and vector-valued ones — are contracted
+/// left to right through the shared [`contract_pair`] core, which treats a vector
+/// as a row (left operand) or column (right operand): `M·v`→column, `v·M`→row,
+/// `v·w`→row·column dot (a scalar). Scalar factors commute and ride along; they
+/// are not part of the ordered segment, so `M·g·(e,f)` contracts exactly like
+/// `g·M·(e,f)`.
 ///
-/// The contracted product goes back through [`expand_core`] rather than out as
-/// it stands, which is what actually delivers the two claims above. Contracting
-/// leaves a vector where a matrix was, and that changes what the *remaining*
-/// factors can do: a scalar beside it now distributes (`distribute_over_vector`
-/// declines while a matrix is present), and a second matrix now sits next to a
-/// vector and contracts in turn. Without the re-entry `2M(e,f)` came back
-/// `2·(ae+bf, ce+df)` with the scalar stranded outside, and `MN(e,f)` stopped
-/// after one contraction. Each pass consumes one matrix, so this terminates.
-fn contract_matrix_vector(factors: &[Expr]) -> Option<Expr> {
-    let i = factors
-        .windows(2)
-        .position(|w| matches!(w[0], Expr::Matrix(_)) && super::is_vector_valued(&w[1]))?;
-    let contracted = matvec_literal(&factors[i], &factors[i + 1])?;
-    let mut rest: Vec<Expr> = factors[..i].to_vec();
-    rest.push(contracted);
-    rest.extend_from_slice(&factors[i + 2..]);
+/// Only the first two ordered factors are contracted here; the single result
+/// goes back through [`expand_core`], which re-enters this function. That
+/// re-entry is what folds a stranded scalar into the resulting components
+/// (`distribute_over_vector` declines while a matrix is present) and lets a
+/// longer chain contract one step at a time. Each pass replaces two ordered
+/// factors with one, so it strictly shrinks and terminates.
+fn contract_product(factors: &[Expr]) -> Option<Expr> {
+    let ordered: Vec<usize> = factors
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| super::is_matrix_valued(f) || super::is_vector_valued(f))
+        .map(|(i, _)| i)
+        .collect();
+    let [i, j, ..] = ordered[..] else {
+        return None;
+    };
+    let contracted = contract_pair(&factors[i], &factors[j])?;
+    // Rebuild: the contracted result takes the left factor's slot, the right
+    // factor is dropped, and every other factor (scalars, further-right ordered
+    // factors) stays where it was.
+    let rest: Vec<Expr> = factors
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| *k != j)
+        .map(|(k, f)| if k == i { contracted.clone() } else { f.clone() })
+        .collect();
     Some(expand_core(&mul(rest)))
 }
 
@@ -137,7 +151,7 @@ fn distribute_over_vector(factors: &[Expr]) -> Option<Expr> {
         return None;
     };
     // A matrix in the product means the vector is being multiplied, not scaled;
-    // `contract_matrix_vector` has already had its turn and declined (shapes do
+    // `contract_product` has already had its turn and declined (shapes do
     // not conform), so leaving the product alone is the honest answer.
     if factors.iter().any(super::is_matrix_valued) {
         return None;
@@ -157,6 +171,29 @@ fn distribute_over_vector(factors: &[Expr]) -> Option<Expr> {
         })
         .collect();
     Some(Expr::Seq(*kind, scaled))
+}
+
+/// Re-expand the entries of a literal matrix or coordinate vector.
+///
+/// The `mul`/`pow` smart constructors contract `M·N`, raise `M^k`, and fold a
+/// scalar factor into the entries — all *after* `expand_core` has already run on
+/// the operands. The entries they build (`g·(ae+bf)` from `M·N·g`, or the nested
+/// `a·(a²+bc)+b·(ac+cd)` of `M³`) are therefore themselves unexpanded products
+/// over sums that were never handed back to `expand_core`. Do that here.
+///
+/// The `M·vector` path already re-enters `expand_core` (see
+/// [`contract_product`]), so this closes the same gap for the two cases
+/// that don't: a matrix·matrix product and a matrix power, both of which the
+/// constructors collapse straight to an `Expr::Matrix`. Non-container results
+/// pass through untouched, so this is a no-op on the scalar path.
+fn expand_container_entries(e: Expr) -> Expr {
+    match &e {
+        Expr::Matrix(m) => Expr::Matrix(m.map(expand_core)),
+        Expr::Seq(k, comps) if super::is_vector_valued(&e) => {
+            Expr::Seq(*k, comps.iter().map(expand_core).collect())
+        }
+        _ => e,
+    }
 }
 
 /// [`expand`] without the final presentation pass: the result is canonical.
@@ -183,21 +220,23 @@ pub(crate) fn expand_core(e: &Expr) -> Expr {
                 return distributed;
             }
             let fallback = mul(factors.clone());
-            distribute_guarded(try_distribute(&factors), fallback)
+            let result = distribute_guarded(try_distribute(&factors), fallback);
+            expand_container_entries(result)
         }
 
         // Product: distribute the (already-expanded) factors; on cap overflow
         // fall back to the unexpanded (canonical) product.
         Expr::Mul(fs) => {
             let factors: Vec<Expr> = fs.iter().map(expand_core).collect();
-            if let Some(contracted) = contract_matrix_vector(&factors) {
+            if let Some(contracted) = contract_product(&factors) {
                 return contracted;
             }
             if let Some(distributed) = distribute_over_vector(&factors) {
                 return distributed;
             }
             let fallback = mul(factors.clone());
-            distribute_guarded(try_distribute(&factors), fallback)
+            let result = distribute_guarded(try_distribute(&factors), fallback);
+            expand_container_entries(result)
         }
 
         // Division distributes its numerator over the denominator, which is left
@@ -222,7 +261,9 @@ pub(crate) fn expand_core(e: &Expr) -> Expr {
                     return distribute_guarded(try_distribute(&factors), fallback);
                 }
             }
-            pow(base, exp)
+            // A matrix power (`M^k`) collapses to a literal matrix here, with
+            // entries the `matmul` chain built but never expanded.
+            expand_container_entries(pow(base, exp))
         }
 
         // Everything else (function applications, sequences, relations, leaves):

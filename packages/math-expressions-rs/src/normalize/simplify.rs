@@ -923,26 +923,39 @@ fn rule_seq_arith(e: &Expr) -> Option<Expr> {
     }
 }
 
-/// `Mul([… , Seq(k,[s1..sn]), …])` with exactly one vector-like sequence factor
-/// → `Seq(k, [ (rest·s1) .. (rest·sn) ])`. More than one sequence factor is
-/// left alone (the product of two vectors is not componentwise in general).
-fn distribute_mul_over_seq(factors: &[Expr]) -> Option<Expr> {
-    // A matrix among the factors is not a scalar: `M·(e,f)` is a contraction,
-    // handled by `expand`, and distributing `M` into the components instead
-    // would produce the nonsense `(M·e, M·f)`.
+/// Contract a product involving vector-like sequences, matching `expand`:
+/// - **one** vector factor → distribute the scalar rest into its components
+///   (`c·(a,b) → (ca, cb)`);
+/// - **two** vector factors → the row·column dot product (`(a,b)·(c,d) → ac+bd`),
+///   through the shared [`contract_pair`](crate::normalize) core, times the rest.
+///
+/// A matrix among the factors is not a scalar: `M·(e,f)` is a contraction that
+/// belongs to `expand` (canonicalization renders what the author wrote), so we
+/// decline and leave it written.
+pub(crate) fn distribute_mul_over_seq(factors: &[Expr]) -> Option<Expr> {
     if factors.iter().any(crate::normalize::is_matrix_valued) {
         return None;
     }
-    let mut seq_idx = None;
-    for (i, f) in factors.iter().enumerate() {
-        if matches!(f, Expr::Seq(k, _) if is_vectorlike(*k)) {
-            if seq_idx.is_some() {
-                return None; // two or more sequence factors: not our case
-            }
-            seq_idx = Some(i);
-        }
+    let seqs: Vec<usize> = factors
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| matches!(f, Expr::Seq(k, _) if is_vectorlike(*k)))
+        .map(|(i, _)| i)
+        .collect();
+    // Two vectors contract to their dot; the two factors are replaced by that
+    // scalar and the product re-formed (a third vector, if any, is then the
+    // one-vector scalar-distribution case on the next fixpoint pass).
+    if let [i, j, ..] = seqs[..] {
+        let dotted = crate::normalize::contract_pair(&factors[i], &factors[j])?;
+        let rest: Vec<Expr> = factors
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| *k != j)
+            .map(|(k, f)| if k == i { dotted.clone() } else { f.clone() })
+            .collect();
+        return Some(mul(rest));
     }
-    let i = seq_idx?;
+    let i = *seqs.first()?;
     let Expr::Seq(kind, comps) = &factors[i] else {
         return None;
     };
@@ -967,7 +980,7 @@ fn distribute_mul_over_seq(factors: &[Expr]) -> Option<Expr> {
 /// each group of ≥2 with a single componentwise sum. Non-sequence terms and
 /// lone sequences pass through untouched. Returns `None` when no group has ≥2
 /// members (nothing to combine — keeps the pass a strict fixpoint).
-fn combine_seqs_in_add(terms: &[Expr]) -> Option<Expr> {
+pub(crate) fn combine_seqs_in_add(terms: &[Expr]) -> Option<Expr> {
     // Groups keyed by (vector class, len), in first-seen order.
     let mut groups: Vec<((u8, usize), Vec<usize>)> = Vec::new();
     for (i, t) in terms.iter().enumerate() {

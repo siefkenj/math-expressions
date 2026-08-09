@@ -27,55 +27,19 @@ pub(crate) fn identity_matrix(n: u32) -> Expr {
 /// `M·(e,f)` used to partition `(e,f)` into `mul`'s scalar segment, which
 /// distributed it into every entry and produced a matrix of `a·(e,f)`. A vector
 /// is not a scalar; it belongs in the ordered segment beside the matrices, so
-/// the product either contracts (in [`matvec_literal`], under `expand`) or
+/// the product either contracts (in [`contract_pair`], under `expand`) or
 /// stays written as it was.
 pub(crate) fn is_vector_valued(e: &Expr) -> bool {
     matches!(e, Expr::Seq(k, _)
         if matches!(k, SeqKind::Tuple | SeqKind::Array | SeqKind::Vector | SeqKind::AltVector))
 }
 
-/// `M · v` for a literal matrix and a coordinate vector: the contraction
-/// `(Σ a₁ⱼ vⱼ, …)`, in **the vector's own container kind**, so a tuple comes
-/// back a tuple and `⟨p,q⟩` comes back `⟨…⟩`.
-///
-/// `None` when the shapes do not conform (`v` is read as a column, so the
-/// matrix must have as many columns as `v` has entries) or when the work would
-/// exceed the expansion cap. A vector on the *left* is not handled at all: as a
-/// column it is not conformable with a matrix on the right, and silently
-/// transposing it would answer a question the author did not ask.
-pub(crate) fn matvec_literal(m: &Expr, v: &Expr) -> Option<Expr> {
-    let (Expr::Matrix(ma), Expr::Seq(kind, comps)) = (m, v) else {
-        return None;
-    };
-    if ma.cols() as usize != comps.len() {
-        return None;
-    }
-    let (rows, cols) = (ma.rows() as usize, ma.cols() as usize);
-    if rows.saturating_mul(cols) > crate::resource_limits::current().max_expand_terms {
-        return None;
-    }
-    let mut out = Vec::with_capacity(rows);
-    for r in 0..rows {
-        let mut terms = Vec::with_capacity(cols);
-        // Over `comps` rather than `0..cols`: the two are the same length (the
-        // conformability check above is exactly that), and indexing the one
-        // while iterating the other is what clippy's `needless_range_loop`
-        // objects to — CI gates on a warning-free clippy.
-        for (c, v) in comps.iter().enumerate() {
-            terms.push(mul(vec![ma.get(r as u32, c as u32)?.clone(), v.clone()]));
-        }
-        out.push(add(terms));
-    }
-    Some(Expr::Seq(*kind, out))
-}
-
-/// Multiply two literal matrices symbolically (entries built with the smart
+/// Multiply two literal matrices as `Mat`s (entries built with the smart
 /// constructors). `None` on dimension mismatch or when the work exceeds
-/// `limits.max_expand_terms` (the caller keeps the product unevaluated).
-pub(crate) fn matmul_literal(a: &Expr, b: &Expr) -> Option<Expr> {
-    let (Expr::Matrix(ma), Expr::Matrix(mb)) = (a, b) else {
-        return None;
-    };
+/// `limits.max_expand_terms`. This is the shared compute core: matrix·matrix in
+/// the `mul` constructor and every matrix/vector product under `expand` (via
+/// [`contract_pair`]) route through it — a vector is just a 1×N or N×1 `Mat`.
+pub(crate) fn matmul_mats(ma: &Mat, mb: &Mat) -> Option<Mat> {
     if ma.cols() != mb.rows() {
         return None;
     }
@@ -88,10 +52,80 @@ pub(crate) fn matmul_literal(a: &Expr, b: &Expr) -> Option<Expr> {
     // `rows * cols` — in bounds by `Mat`'s invariant, with no length check of
     // our own to get right.
     let (ea, eb) = (ma.entries(), mb.entries());
-    Some(Expr::Matrix(Mat::generate(ma.rows(), mb.cols(), |i, j| {
+    Some(Mat::generate(ma.rows(), mb.cols(), |i, j| {
         let (i, j) = (i as usize, j as usize);
         add((0..c1)
             .map(|k| mul(vec![ea[i * c1 + k].clone(), eb[k * c2 + j].clone()]))
             .collect())
-    })))
+    }))
+}
+
+/// Multiply two literal matrices symbolically. Thin `Expr` wrapper over
+/// [`matmul_mats`]; `None` on non-matrices or the shape/size failures above.
+pub(crate) fn matmul_literal(a: &Expr, b: &Expr) -> Option<Expr> {
+    let (Expr::Matrix(ma), Expr::Matrix(mb)) = (a, b) else {
+        return None;
+    };
+    Some(Expr::Matrix(matmul_mats(ma, mb)?))
+}
+
+/// Which side of a `·` a factor sits on. A coordinate vector is a **row (1×N)**
+/// as a left operand and a **column (N×1)** as a right operand — the positional
+/// rule that makes `M·v` a column, `v·M` a row, and `v·w` a row·column dot.
+#[derive(Clone, Copy)]
+pub(crate) enum Side {
+    Left,
+    Right,
+}
+
+/// Lift a factor into matrix form for [`matmul_mats`], remembering the vector
+/// notation (if any) so the product can be lowered back. A matrix is itself
+/// (kind `None`); a coordinate vector becomes a 1×N row or N×1 column by `side`,
+/// carrying its `SeqKind`. Anything else is not multipliable this way.
+fn lift(e: &Expr, side: Side) -> Option<(Mat, Option<SeqKind>)> {
+    match e {
+        Expr::Matrix(m) => Some((m.clone(), None)),
+        Expr::Seq(k, comps) if is_vector_valued(e) => {
+            let n = comps.len() as u32;
+            let m = match side {
+                Side::Left => Mat::new(1, n, comps.clone()),
+                Side::Right => Mat::new(n, 1, comps.clone()),
+            }?;
+            Some((m, Some(*k)))
+        }
+        _ => None,
+    }
+}
+
+/// Lower a computed product back to the narrowest natural form. `kind` is the
+/// coordinate-vector notation to restore *when a vector was involved*; a pure
+/// matrix·matrix product (`kind == None`) always stays a matrix, even if it came
+/// out 1×N. With a vector involved the result is only ever 1×1, 1×N or N×1:
+/// `1×1` → the scalar entry (a dot product), a lone row/column → `Seq(kind, …)`.
+fn lower(m: Mat, kind: Option<SeqKind>) -> Expr {
+    let Some(k) = kind else {
+        return Expr::Matrix(m);
+    };
+    if m.rows() == 1 && m.cols() == 1 {
+        return m.into_entries().into_iter().next().expect("1×1 has one entry");
+    }
+    if m.rows() == 1 || m.cols() == 1 {
+        return Expr::Seq(k, m.into_entries());
+    }
+    Expr::Matrix(m)
+}
+
+/// Contract one ordered product step `left · right` where each factor is a
+/// literal matrix or a coordinate vector. Vectors are lifted by position (see
+/// [`Side`]), multiplied through the shared [`matmul_mats`] core, and lowered
+/// back ([`lower`]). `None` when the shapes do not conform or a factor is not
+/// liftable — the caller leaves the product written. Subsumes the old
+/// `matvec_literal` (`M·v`) and adds `v·M` (row) and `v·w` (dot).
+pub(crate) fn contract_pair(left: &Expr, right: &Expr) -> Option<Expr> {
+    let (lm, lk) = lift(left, Side::Left)?;
+    let (rm, rk) = lift(right, Side::Right)?;
+    let product = matmul_mats(&lm, &rm)?;
+    // A vector on either side sets the notation to restore; two vectors always
+    // contract to a 1×1 scalar, so their kinds never compete.
+    Some(lower(product, lk.or(rk)))
 }

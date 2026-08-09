@@ -1763,6 +1763,18 @@ describe("expand", function () {
       "\\langle aeg + bfg, ceg + dfg \\rangle",
     ).tree;
 
+    // A vector on the *left* is a row (1×N): (e,f)·M = (ea+fc, eb+fd), in the
+    // vector's own notation. (M·v on the right is a column, above.)
+    let product_tuple_left = me.fromLatex("(ae + cf, be + df)").tree;
+    let product_vector_left = me
+      .fromLatex("(ae + cf, be + df)")
+      .tuples_to_vectors().tree;
+    let product_altvector_left = me.fromLatex(
+      "\\langle ae + cf, be + df\\rangle",
+    ).tree;
+    // Two vectors multiply as row·column — the dot product, a scalar.
+    let dot = me.from("e^2 + f^2").tree;
+
     expect(me.fromAst(["*", matrix1, matrix2]).expand().tree).toEqual(product);
     expect(me.fromAst(["*", matrix2, matrix1]).expand().tree).toEqual([
       "*",
@@ -1782,11 +1794,9 @@ describe("expand", function () {
     expect(me.fromAst(["*", matrix1, tuple]).expand().tree).toEqual(
       product_tuple,
     );
-    expect(me.fromAst(["*", tuple, matrix1]).expand().tree).toEqual([
-      "*",
-      tuple,
-      matrix1,
-    ]);
+    expect(me.fromAst(["*", tuple, matrix1]).expand().tree).toEqual(
+      product_tuple_left,
+    );
     expect(me.fromAst(["*", "g", matrix1, tuple]).expand().tree).toEqual(
       product_tuple_g,
     );
@@ -1800,11 +1810,9 @@ describe("expand", function () {
     expect(me.fromAst(["*", matrix1, vector]).expand().tree).toEqual(
       product_vector,
     );
-    expect(me.fromAst(["*", vector, matrix1]).expand().tree).toEqual([
-      "*",
-      vector,
-      matrix1,
-    ]);
+    expect(me.fromAst(["*", vector, matrix1]).expand().tree).toEqual(
+      product_vector_left,
+    );
     expect(me.fromAst(["*", "g", matrix1, vector]).expand().tree).toEqual(
       product_vector_g,
     );
@@ -1818,11 +1826,9 @@ describe("expand", function () {
     expect(me.fromAst(["*", matrix1, altvector]).expand().tree).toEqual(
       product_altvector,
     );
-    expect(me.fromAst(["*", altvector, matrix1]).expand().tree).toEqual([
-      "*",
-      altvector,
-      matrix1,
-    ]);
+    expect(me.fromAst(["*", altvector, matrix1]).expand().tree).toEqual(
+      product_altvector_left,
+    );
     expect(me.fromAst(["*", "g", matrix1, altvector]).expand().tree).toEqual(
       product_altvector_g,
     );
@@ -1833,28 +1839,11 @@ describe("expand", function () {
       product_altvector_g,
     );
 
-    // TODO: not sure if this is right behavior for multiplying vectors
-    // Also, at some point, we want a way to represent dot/cross products of vectors
-    expect(me.fromAst(["*", tuple, tuple]).expand().tree).toEqual([
-      "^",
-      tuple,
-      2,
-    ]);
-    expect(me.fromAst(["*", tuple, vector]).expand().tree).toEqual([
-      "^",
-      tuple,
-      2,
-    ]);
-    expect(me.fromAst(["*", vector, tuple]).expand().tree).toEqual([
-      "^",
-      vector,
-      2,
-    ]);
-    expect(me.fromAst(["*", vector, vector]).expand().tree).toEqual([
-      "^",
-      vector,
-      2,
-    ]);
+    // Two vectors multiply as row·column — the dot product (a scalar).
+    expect(me.fromAst(["*", tuple, tuple]).expand().tree).toEqual(dot);
+    expect(me.fromAst(["*", tuple, vector]).expand().tree).toEqual(dot);
+    expect(me.fromAst(["*", vector, tuple]).expand().tree).toEqual(dot);
+    expect(me.fromAst(["*", vector, vector]).expand().tree).toEqual(dot);
 
     let matrix3 = me.fromLatex(
       "\\begin{pmatrix}1 & -2\\\\3&-4\\end{pmatrix}",
@@ -2012,6 +2001,18 @@ describe("expand", function () {
       "\\langle aeg + bfg, ceg + dfg \\rangle",
     ).tree;
 
+    // A vector on the *left* is a row (1×N): (e,f)·M = (ea+fc, eb+fd), in the
+    // vector's own notation. (M·v on the right is a column, above.)
+    let product_tuple_left = me.fromLatex("(ae + cf, be + df)").tree;
+    let product_vector_left = me
+      .fromLatex("(ae + cf, be + df)")
+      .tuples_to_vectors().tree;
+    let product_altvector_left = me.fromLatex(
+      "\\langle ae + cf, be + df\\rangle",
+    ).tree;
+    // Two vectors multiply as row·column — the dot product, a scalar.
+    let dot = me.from("e^2 + f^2").tree;
+
     expect(me.fromAst(["*", matrix1, matrix2]).expand().tree).toEqual(product);
     expect(me.fromAst(["*", matrix2, matrix1]).expand().tree).toEqual([
       "*",
@@ -2031,11 +2032,9 @@ describe("expand", function () {
     expect(me.fromAst(["*", matrix1, tuple]).expand().tree).toEqual(
       product_tuple,
     );
-    expect(me.fromAst(["*", tuple, matrix1]).expand().tree).toEqual([
-      "*",
-      tuple,
-      matrix1,
-    ]);
+    expect(me.fromAst(["*", tuple, matrix1]).expand().tree).toEqual(
+      product_tuple_left,
+    );
     expect(me.fromAst(["*", "g", matrix1, tuple]).expand().tree).toEqual(
       product_tuple_g,
     );
@@ -2049,11 +2048,9 @@ describe("expand", function () {
     expect(me.fromAst(["*", matrix1, vector]).expand().tree).toEqual(
       product_vector,
     );
-    expect(me.fromAst(["*", vector, matrix1]).expand().tree).toEqual([
-      "*",
-      vector,
-      matrix1,
-    ]);
+    expect(me.fromAst(["*", vector, matrix1]).expand().tree).toEqual(
+      product_vector_left,
+    );
     expect(me.fromAst(["*", "g", matrix1, vector]).expand().tree).toEqual(
       product_vector_g,
     );
@@ -2067,11 +2064,9 @@ describe("expand", function () {
     expect(me.fromAst(["*", matrix1, altvector]).expand().tree).toEqual(
       product_altvector,
     );
-    expect(me.fromAst(["*", altvector, matrix1]).expand().tree).toEqual([
-      "*",
-      altvector,
-      matrix1,
-    ]);
+    expect(me.fromAst(["*", altvector, matrix1]).expand().tree).toEqual(
+      product_altvector_left,
+    );
     expect(me.fromAst(["*", "g", matrix1, altvector]).expand().tree).toEqual(
       product_altvector_g,
     );
@@ -2082,28 +2077,11 @@ describe("expand", function () {
       product_altvector_g,
     );
 
-    // TODO: not sure if this is right behavior for multiplying vectors
-    // Also, at some point, we want a way to represent dot/cross products of vectors
-    expect(me.fromAst(["*", tuple, tuple]).expand().tree).toEqual([
-      "^",
-      tuple,
-      2,
-    ]);
-    expect(me.fromAst(["*", tuple, vector]).expand().tree).toEqual([
-      "^",
-      tuple,
-      2,
-    ]);
-    expect(me.fromAst(["*", vector, tuple]).expand().tree).toEqual([
-      "^",
-      vector,
-      2,
-    ]);
-    expect(me.fromAst(["*", vector, vector]).expand().tree).toEqual([
-      "^",
-      vector,
-      2,
-    ]);
+    // Two vectors multiply as row·column — the dot product (a scalar).
+    expect(me.fromAst(["*", tuple, tuple]).expand().tree).toEqual(dot);
+    expect(me.fromAst(["*", tuple, vector]).expand().tree).toEqual(dot);
+    expect(me.fromAst(["*", vector, tuple]).expand().tree).toEqual(dot);
+    expect(me.fromAst(["*", vector, vector]).expand().tree).toEqual(dot);
 
     let matrix3 = me.fromLatex(
       "\\begin{pmatrix}1 & -2\\\\3&-4\\end{pmatrix}",

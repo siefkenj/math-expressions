@@ -39,21 +39,3 @@ export function default_order(tree) {
 }
 
 export default default_order;
-
-// ---------------------------------------------------------------------------
-/**
- * A total order on trees — the legacy `compare_function`, backed by the core's
- * `cmp_default_order`. The compat polynomial module orders its variables with
- * it, which is why it has to be the *legacy* sort key and not the core's own
- * canonical order: the chosen leading variable shows up in the polynomial ASTs
- * that API hands back.
- *
- * Additive; it does not affect `default_order` above. A tree the core cannot
- * read ties with everything, leaving the caller's array in the order it was.
- *
- * The legacy `params.ignore_negatives` is gone with the JS key it configured:
- * no caller ever set it.
- */
-export function compare_function(a: any, b: any): number {
-  return wasm.cmp_default_order(astToJson(a), astToJson(b)) ?? 0;
-}
