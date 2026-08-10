@@ -6,8 +6,13 @@ current Rust source.
 
 **Current totals (2026-08-10, at `f84577c` + the two equality fixes below + the
 `trees/basic` port + the `match`-condition wontfix + the three presentation
-fixes and five adopted divergences below): 38 failed / 6279 passed / 6329 total** (10 skipped, 2 todo).
-Previous snapshots: 380, 162, 97, 83, 82, 61, 55, 54, 46, 43.
+fixes and five adopted divergences below + the unordered-`Add` fuzzy compare):
+20 failed / 6297 passed / 6329 total** (10 skipped, 2 todo).
+Previous snapshots: 380, 162, 97, 83, 82, 61, 55, 54, 46, 43, 38.
+
+Both `*-numerical-errors` files are now at **zero**. The 38 → 20 step was
+measured as a matched pair — same tree, same wasm build, diffed by name — and
+shows 18 fixed and **no** test going passing→failing.
 
 The immediately preceding baseline measured **46**, not the 45 recorded in an
 earlier edit of this file; the 43 above is from a matched pair of runs (same
@@ -40,7 +45,6 @@ and the honest check is that no name present in *both* runs went passing→faili
 
 | count | spec file                                       | root cause / category                                                                    |
 | ----: | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
-|    18 | `slow_check-symbolic-equality-numerical-errors` | a perturbed exponent reorders a sum; the fuzzy compare is pairwise — see below           |
 |     2 | `quick_trees`                                   | `allow_extended_match`, and one throw-vs-`false` (+9 skipped wontfix) — see below        |
 |     4 | `slow_simplify`                                 | container ordering (2), `exp` not seen as a power, unit-group order — see below           |
 |     5 | `slow_assumptions`                              | see below                                                                                |
@@ -48,7 +52,7 @@ and the honest check is that no name present in *both* runs went passing→faili
 |     3 | `quick_solve`                                   | `solve_linear()` unimplemented                                                           |
 |     2 | `slow_rational`                                 | `e` is a polynomial *coefficient*, so `e+f` is not seen as a factor — see below          |
 
-### The `*-numerical-errors` failures — 39 investigated, 21 fixed, 18 left
+### The `*-numerical-errors` failures — 39 investigated, 39 fixed
 
 Investigated 2026-08-10 against the legacy library run as a live oracle
 (`legacy-js-oracle-runnable`). **Every** failing block sets
@@ -62,7 +66,7 @@ arithmetic:
 > change the tree's shape, and `fuzzy_tree_eq` — which is structural and
 > order-sensitive — never gets the chance to forgive it.
 
-Two spellings of that, one per file. The first is fixed; the second is not.
+Two spellings of that, one per file. Both are now fixed.
 
 #### FIXED — the root spelling (was 20 tests)
 
@@ -103,16 +107,61 @@ these pairs correctly.
 "Highest-leverage" section — the oracle keeps the two spellings distinct too, and
 `ops/transforms.rs:122` records that as a deliberate decision.
 
-#### STILL OPEN — term order (all 18)
-Every failure perturbs an exponent *downward* — `2*(1-.00009)` or `(2-.00009)`;
-not one upward case fails. Terms are graded-lex by total degree, so `1000q^1.99991`
-has degree 1.99991 and falls behind `0.01xy` at degree 2, while `1000q^2.00009`
-stays in front. `fuzzy_tree_eq` compares children pairwise in order and does not
-re-match, so the reordered sum mismatches. Controls: the same perturbation
-compared bare (`1000q^2` vs `1000q^1.99991`) passes, and so does the same sum
-with a degree-1 companion, where the flip cannot happen. Legacy's sort key does
-not read the exponent's value — it keeps `1000q^…` first at 1.99991, 2, and
-2.00009 alike.
+#### FIXED — term order (was 18 tests)
+
+Every failure perturbed an exponent *downward* — `2*(1-.00009)` or `(2-.00009)`;
+not one upward case failed. That asymmetry is the tell: nothing in the tolerance
+arithmetic is direction-dependent, so the sort had to be the culprit.
+
+**Which sort, precisely** — an earlier draft of this section said "legacy's sort
+key does not read the exponent's value". That is wrong, and the correction is the
+whole diagnosis. There are two sum orderings in this tree:
+
+- **Canonical** (`default_order.rs sort_sum_terms`) keys on a **per-variable
+  exponent vector** over alphabetized names. It *does* read the exponent value,
+  but `q`'s 1.99991 only ever competes against the other term's `q` exponent,
+  which is 0. A perturbation cannot cross that. Faithful port of legacy, which
+  has no other ordering — hence the oracle keeping `1000q^…` first at 1.99991,
+  2, and 2.00009 alike.
+- **Presentation** (`present.rs deg_key`) collapses to a single `total: f64`.
+  Now `q`'s 1.99991 competes against `xy`'s 1+1 = 2, and 9e-5 is enough to cross.
+
+`simplify()` returns `present(simplify_core(…))` (`simplify.rs:73`), so the
+presented order is baked into the compared value, not just into printing. The
+presentation layer is ours; legacy has none.
+
+Controls, all consistent with total-degree and none with per-variable: the
+perturbation compared bare passes; a degree-1 companion (`0.01x`) passes; a
+degree-3 companion (`0.01xyz`) passes; only the exact degree-2 tie fails.
+
+**Fix** (`equality/fuzzy.rs`): when the ordered child compare fails on an `Add`
+under a nonzero `allowed_error_in_numbers`, re-match the terms as a bipartite
+matching under the same fuzzy predicate. The rule it encodes: *a comparison that
+forgives ε in a number must not depend on an ordering derived from that number.*
+
+Three scope decisions, each load-bearing:
+
+- **`Add` only, not `Mul`.** Multiplication is not commutative here — matrices —
+  so re-matching factors would grade `AB` equal to `BA`. Addition is commutative
+  unconditionally.
+- **Only under a tolerance.** With none set the order is a function of numbers
+  being compared exactly, so it cannot drift, and `equals_syntactic`'s documented
+  order-sensitivity (`(x+y)+z` ≠ `z+x+y`) survives untouched on the default path.
+- **Matching, not greedy first-fit.** Fuzzy number equality is not transitive, so
+  greedy can fail on operands a perfect matching would pair. Kuhn's
+  augmenting-path, capped at 32 terms.
+
+Because it only ever runs *after* the ordered compare has failed, the change is
+monotone — it can turn `false` into `true` and never the reverse. The only
+regression it could produce is an expects-`false` test flipping; the name-level
+diff shows none.
+
+**Rejected alternative:** fixing the sort — giving `present.rs deg_key` the
+per-variable vector canonical already uses. That is the parity-restoring change
+and would keep `equals_syntactic` exactly as strict, but `present` exists on
+purpose (`present.rs:363` records the `a·e + b·f` case that motivated the current
+key) and its blast radius is every printed sum in the suite. The comparison was
+the smaller and better-argued surface.
 
 ### FIXED — the `-1` parameter bug (grading was too lenient)
 
@@ -326,9 +375,9 @@ presentation depend on the coefficient's value. The decimal-spelled sibling
 
 ## Remaining buckets by theme
 
-**Numerical-tolerance equality (18)** — all now in
-`slow_check-symbolic-equality-numerical-errors`, one cause, broken down above.
-Was 39; the root-spelling and `-1` fixes closed 21.
+**Numerical-tolerance equality (0)** — was 39, now closed out across three fixes
+(root spelling, the `-1` parameter, term order), all broken down above. Both
+`*-numerical-errors` files are at zero.
 
 **Unimplemented / unbound APIs (5)** — `quick_trees` (2, below) and
 `quick_solve` (3, `solve_linear`).
@@ -413,17 +462,19 @@ distinguish `(a or b)` from `(a) or (b)`. It needs a paren-balance scan.
 
 ## Highest-leverage remaining item
 
-The `*-numerical-errors` bucket. `quick_trees` is closed out: 6 fixed, 9 marked
-wontfix, and the 2 left are small — "fail gracefully" (one arm in `interop.rs`)
-and `allow_extended_match`.
+**`slow_assumptions` (5)**, now the largest single bucket. The two previous
+holders are closed: `*-numerical-errors` is at zero, and `quick_trees` is down to
+2 small items — "fail gracefully" (one arm in `interop.rs`) and
+`allow_extended_match`.
 
-1. **18 tests** — make the fuzzy comparison of a commutative `Add`/`Mul`
-   order-insensitive (match children as a multiset under the same fuzzy
-   predicate) instead of pairwise, gated on `allowed_error_in_numbers > 0` so
-   `equals_syntactic`'s documented order-sensitivity survives at the default.
-   Re-sorting under tolerance is not well-defined — `1.99991 < 2` is a true fact
-   about the key — so the comparison, not the order, is the thing to fix.
-   Bipartite matching, not greedy: fuzzy equality is not transitive.
+Nothing left is a single-cause bucket the way those two were. The remaining 20
+span six files and at least eight distinct causes, so from here the work is
+per-item rather than per-bucket.
+
+One thing worth doing that no failing test covers: **`equality/fuzzy.rs` is now
+~330 lines** and has an obvious seam (structural equality vs. the sensitivity
+tolerance) that the file's own module doc already names. It is over the ~200-line
+split guideline and was over it before this change.
 
 ### Rejected: folding roots to powers in `canonicalize`
 

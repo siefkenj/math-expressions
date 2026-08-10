@@ -358,6 +358,65 @@ fn allowed_error_in_numbers() {
 }
 
 #[test]
+fn a_tolerance_survives_the_term_reordering_it_causes() {
+    // Term order is decided by the *values* of the numbers in the tree, so a
+    // perturbation small enough to forgive at a leaf can still move the term
+    // that contains it: `xy` has total degree 2 and `q^1.99991` has 1.99991, so
+    // the sum comes back in the other order and an order-sensitive walk then
+    // compares `0.01xy` against `1000q^…` — after having already accepted every
+    // number it looked at. The tell is that perturbing the exponent *upward*
+    // always passed; nothing about the arithmetic is direction-dependent.
+    let o = EqOptions {
+        allowed_error_in_numbers: 1e-4,
+        include_error_in_number_exponents: true,
+        ..EqOptions::default()
+    };
+    let form = |a: &str, b: &str| equals_syntactic(&simplify(&parse(a)), &simplify(&parse(b)), &o);
+
+    assert!(form("exp(0.01xy+1000q^2)", "exp(0.01xy+1000q^(2+.00009))"));
+    assert!(form("exp(0.01xy+1000q^2)", "exp(0.01xy+1000q^(2-.00009))"));
+    // Only the exact degree tie was ever fragile — a companion term of degree 1
+    // or 3 cannot be crossed by 9e-5, and those passed all along. They are the
+    // controls that pin the diagnosis to the ordering rather than the arithmetic.
+    assert!(form("0.01x+1000q^2", "0.01x+1000q^(2-.00009)"));
+    assert!(form("0.01xyz+1000q^2", "0.01xyz+1000q^(2-.00009)"));
+
+    // Re-matching terms does not mean forgiving a term that is simply wrong.
+    assert!(!form("0.01xy+1000q^2", "0.01xy+1000q^(2-.5)"));
+    assert!(!form("0.01xy+1000q^2", "0.01xy+2000q^(2-.00009)"));
+    // Nor does it let one term stand in for two. The pairing is a *matching*,
+    // not a covering: every term on the left needs its own partner. Built as
+    // raw sums because `simplify` would collect `x + x` into `2x` and the two
+    // sides would then differ by a coefficient, which proves nothing about the
+    // pairing. Here each `x` on the left is fuzzy-equal to the single `x` on the
+    // right, so a cover-style check would say yes and be wrong.
+    let two_x = Expr::Add(vec![parse("x"), parse("x")]);
+    let x_and_y = Expr::Add(vec![parse("x"), parse("y")]);
+    assert!(!equals_syntactic(&two_x, &x_and_y, &o));
+}
+
+#[test]
+fn order_sensitivity_is_intact_without_a_tolerance() {
+    // The unordered re-match is gated on a nonzero `allowed_error_in_numbers`.
+    // With none set, the order is a function of numbers being compared exactly,
+    // so it cannot drift — and `equals_syntactic`'s documented order-sensitivity
+    // has to survive untouched, since that is the whole point of a form check.
+    let a = Expr::Add(vec![parse("x"), parse("y"), parse("z")]);
+    let b = Expr::Add(vec![parse("z"), parse("x"), parse("y")]);
+    assert!(!equals_syntactic(&a, &b, &EqOptions::default()));
+
+    // Products are excluded even under a tolerance: multiplication is not
+    // commutative here, so re-matching factors would grade `AB` equal to `BA`.
+    let o = EqOptions {
+        allowed_error_in_numbers: 1e-4,
+        ..EqOptions::default()
+    };
+    let ab = Expr::Mul(vec![parse("[[1,2],[3,4]]"), parse("[[5,6],[7,8]]")]);
+    let ba = Expr::Mul(vec![parse("[[5,6],[7,8]]"), parse("[[1,2],[3,4]]")]);
+    assert!(!equals_syntactic(&ab, &ba, &o));
+}
+
+#[test]
 fn sqrt_and_half_power_are_equal() {
     // `sqrt(x)` (Apply) and `x^(1/2)` (Pow) stay distinct canonical trees —
     // matching JS, which keeps them distinct at the tree level and relies on the
@@ -455,7 +514,10 @@ fn the_form_check_carries_the_same_relative_float_floor() {
     // different form, and the structure around the number must match exactly.
     assert!(!equals_syntactic(&coeff(0.6667), &coeff(0.6666), &opts));
     assert!(!equals_syntactic(&float(1.0), &float(1.0000001), &opts));
-    assert!(!syn("x/3", "0.3333333333333333 x"), "a bar is not a decimal");
+    assert!(
+        !syn("x/3", "0.3333333333333333 x"),
+        "a bar is not a decimal"
+    );
     assert!(!syn("3+2", "5"), "still no folding");
 }
 

@@ -47,13 +47,96 @@ pub(super) fn fuzzy_tree_eq(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
                 return false;
             }
             let (ca, cb) = (a.children(), b.children());
-            ca.len() == cb.len()
-                && ca
-                    .iter()
-                    .zip(cb.iter())
-                    .all(|(x, y)| fuzzy_tree_eq(x, y, opts))
+            if ca.len() != cb.len() {
+                return false;
+            }
+            if ca
+                .iter()
+                .zip(cb.iter())
+                .all(|(x, y)| fuzzy_tree_eq(x, y, opts))
+            {
+                return true;
+            }
+            if matches!(a, Expr::Add(_)) && opts.allowed_error_in_numbers > 0.0 {
+                return unordered_eq(&ca, &cb, opts);
+            }
+            false
         }
     }
+}
+
+/// Re-match the terms of a sum without regard to order, as a fallback when the
+/// pairwise compare fails under a nonzero number allowance.
+///
+/// **Why this exists.** Term order is decided by the *values* of the numbers in
+/// the tree, and this comparison was then asked to forgive those same numbers up
+/// to `allowed_error_in_numbers`. The two are in direct conflict: a perturbation
+/// small enough to forgive at a leaf can still be large enough to move the term
+/// that contains it. `exp(0.01xy + 1000q^2)` against
+/// `exp(0.01xy + 1000q^(2−0.00009))` is the whole failure — `xy` has total
+/// degree 2 and `q^1.99991` has 1.99991, so the sum comes back reordered, and a
+/// pairwise walk then compares `0.01xy` against `1000q^…` after having already
+/// accepted every number it looked at. Perturbing the exponent *upward* passes,
+/// which is the tell: nothing about the arithmetic is direction-dependent, only
+/// the sort.
+///
+/// So the rule is: a comparison that forgives ε in a number must not depend on
+/// an ordering derived from that number.
+///
+/// **Scope.** Only `Add`, and only as a fallback after the ordered compare has
+/// already failed. Not `Mul`: multiplication is not commutative here (matrices),
+/// so re-matching factors would grade `AB` equal to `BA`. And only under a
+/// tolerance — with none set, the order is a function of numbers that are being
+/// compared exactly, so it cannot drift, and `equals_syntactic`'s documented
+/// order-sensitivity (`(x+y)+z` ≠ `z+x+y`) is preserved untouched on that path.
+///
+/// **Matching, not greedy pairing.** Fuzzy number equality is not transitive, so
+/// a greedy first-fit can fail on operands a perfect matching would pair up.
+/// This is Kuhn's augmenting-path algorithm over the "these two are fuzzy-equal"
+/// bipartite graph, which answers the actual question — is there *any* pairing
+/// under which every term matches?
+fn unordered_eq(a: &[&Expr], b: &[&Expr], opts: &EqOptions) -> bool {
+    // Guard the O(n²) edge build and O(n³) matching. A sum this wide is not a
+    // graded response, and the ordered compare has already had its say.
+    const MAX_TERMS: usize = 32;
+    let n = a.len();
+    if n > MAX_TERMS {
+        return false;
+    }
+    let edges: Vec<Vec<usize>> = a
+        .iter()
+        .map(|x| {
+            (0..n)
+                .filter(|&j| fuzzy_tree_eq(x, b[j], opts))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let mut paired: Vec<Option<usize>> = vec![None; n];
+    (0..n).all(|i| augment(i, &edges, &mut vec![false; n], &mut paired))
+}
+
+/// Find an augmenting path for left node `i`, repairing earlier pairings if
+/// that is what it takes to fit everyone.
+fn augment(
+    i: usize,
+    edges: &[Vec<usize>],
+    seen: &mut [bool],
+    paired: &mut [Option<usize>],
+) -> bool {
+    for &j in &edges[i] {
+        if seen[j] {
+            continue;
+        }
+        seen[j] = true;
+        if match paired[j] {
+            None => true,
+            Some(other) => augment(other, edges, seen, paired),
+        } {
+            paired[j] = Some(i);
+            return true;
+        }
+    }
+    false
 }
 
 /// Is this exponent a bare number the author typed, like the `2` in `x^2`?
