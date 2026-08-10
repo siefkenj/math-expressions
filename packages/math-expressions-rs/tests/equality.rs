@@ -424,6 +424,41 @@ fn a_computed_float_compares_within_the_relative_tolerance() {
     assert!(!equals(&float(2.0), &float(3.0), &opts));
 }
 
+#[test]
+fn the_form_check_carries_the_same_relative_float_floor() {
+    // `equals_syntactic` compares *trees*, but its number leaves are still
+    // numbers: JS `trees/basic.js equal` floors its tolerance at a 1e-14
+    // relative difference before `allowed_error_in_numbers` is consulted, so
+    // "no allowance" never meant "bit-identical" on this path either.
+    //
+    // The floor is what a whole grading route rests on. DoenetML spends its
+    // digit budget (`max_digits: Infinity`) *before* like terms are collected,
+    // so the same coefficient reaches the comparison by two arithmetic routes:
+    // `x² − x²/3` collects as `1 − 0.3333333333333333` and `2x²/3` folds as
+    // `2/3`. Those are the same number and adjacent f64s, and a form check that
+    // read the last ULP as a different form would grade a correct answer wrong.
+    let opts = EqOptions::default();
+    let x = || parse("x");
+    let coeff = |c: f64| Expr::Mul(vec![float(c), x()]);
+    assert_ne!(
+        0.6666666666666667_f64.to_bits(),
+        0.6666666666666666_f64.to_bits(),
+        "precondition: these are distinct f64s"
+    );
+    assert!(equals_syntactic(
+        &coeff(0.6666666666666667),
+        &coeff(0.6666666666666666),
+        &opts
+    ));
+
+    // Tight, and still relative: a difference a person could have typed is a
+    // different form, and the structure around the number must match exactly.
+    assert!(!equals_syntactic(&coeff(0.6667), &coeff(0.6666), &opts));
+    assert!(!equals_syntactic(&float(1.0), &float(1.0000001), &opts));
+    assert!(!syn("x/3", "0.3333333333333333 x"), "a bar is not a decimal");
+    assert!(!syn("3+2", "5"), "still no folding");
+}
+
 // ===================== intervals, and the finite-field floor =====================
 
 #[test]
