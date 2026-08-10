@@ -264,11 +264,19 @@ pub fn equals_syntactic(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     // `allowed_error_in_numbers` compares number *leaves* within the allowed
     // error while the structure still has to match exactly — the same
     // primitive [`equals`] uses for it, so a tolerance means the same thing on
-    // both paths. With no tolerance set this is plain tree equality.
-    if opts.allowed_error_in_numbers > 0.0 {
-        return super::fuzzy::fuzzy_tree_eq(&na, &nb, opts);
-    }
-    na == nb
+    // both paths.
+    //
+    // The comparison stays fuzzy even with *no* tolerance set, because "no
+    // allowance" was never bit-identical in JS: `trees/basic.js equal` floors
+    // its tolerance at a 1e-14 *relative* difference before `allowed_error_in_
+    // numbers` is consulted at all, so two floats a few ULPs apart have always
+    // compared equal here. That floor is load-bearing rather than incidental:
+    // an author's `x²−x²/3` and `2x²/3` are the same number, but the grading
+    // path floats each *before* like terms are collected, so one arrives as
+    // `1−0.3333333333333333 = 0.6666666666666667` and the other as
+    // `2/3 = 0.6666666666666666`. Exact tree equality reads the last ULP as a
+    // wrong answer.
+    super::fuzzy::fuzzy_tree_eq(&na, &nb, opts)
 }
 
 /// Does the tree contain a `Blank` (missing operand)? A variant check, not a
