@@ -498,6 +498,56 @@ class Expression {
   factor() {
     return wrap(this._w.factor(), this.context);
   }
+  /**
+   * Push every unary minus into the numeric literal it negates, bottom-up:
+   * `-(3x)` → `(-3)x`, `-(3/y)` → `(-3)/y`, `-3` → the number `-3`.
+   *
+   * A normalization for pattern matching, not a simplification — `3x + 4y - 2x`
+   * has to become `3x + 4y + (-2)x` before a `n·x + m·x` rule can see `-2` as a
+   * coefficient. Nothing else changes, and a minus with no literal to fold into
+   * (`-x`) stays where it is.
+   *
+   * Implemented over the raw AST rather than through the core because that is
+   * what it is for: the trees it feeds are matched structurally, and
+   * canonicalizing would reorder and re-fold them out from under the pattern.
+   */
+  collapse_unary_minus() {
+    const collapse = (tree) => {
+      if (!Array.isArray(tree)) return tree;
+      const [operator, ...operands] = tree.map((t, i) =>
+        i === 0 ? t : collapse(t),
+      );
+      if (operator === "-") {
+        const operand = operands[0];
+        if (typeof operand === "number") return -operand;
+        if (Array.isArray(operand)) {
+          // A product whose leading factor is a literal: negate that factor.
+          if (operand[0] === "*" && typeof operand[1] === "number")
+            return ["*", -operand[1], ...operand.slice(2)];
+          // A quotient: the numerator is either a literal itself or a product
+          // led by one. Only the numerator moves; negating a denominator would
+          // change the value's spelling for no gain.
+          if (operand[0] === "/") {
+            const [, numerator, denominator] = operand;
+            if (typeof numerator === "number")
+              return ["/", -numerator, denominator];
+            if (
+              Array.isArray(numerator) &&
+              numerator[0] === "*" &&
+              typeof numerator[1] === "number"
+            )
+              return [
+                "/",
+                ["*", -numerator[1], ...numerator.slice(2)],
+                denominator,
+              ];
+          }
+        }
+      }
+      return [operator, ...operands];
+    };
+    return this.context.fromAst(collapse(this.tree));
+  }
   evaluate_numbers(opts) {
     // `skip_ordering` (DoenetML's `simplify="numberspreserveorder"`) selects a
     // genuinely different core pass: numbers fold only with *adjacent* numbers,

@@ -47,8 +47,10 @@ fn a_sign_that_would_multiply_stays_put() {
     assert_eq!(simplified("-(x+y-z)"), r#"["+",["-","x"],["-","y"],"z"]"#);
     // A *positive* coefficient has no sign to move in the first place.
     assert_eq!(simplified("2(1-x)"), r#"["*",2,["+",["-","x"],1]]"#);
-    // Negative coefficient, but no factor worth giving the sign to.
-    assert_eq!(simplified("-2(x+y)"), r#"["-",["*",2,["+","x","y"]]]"#);
+    // Negative coefficient, but no factor worth giving the sign to. The sign
+    // stays on the coefficient rather than becoming a `Neg`, which is what
+    // alpha94 gives here too (verified against the pinned library).
+    assert_eq!(simplified("-2(x+y)"), r#"["*",-2,["+","x","y"]]"#);
 }
 
 #[test]

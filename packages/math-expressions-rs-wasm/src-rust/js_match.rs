@@ -18,11 +18,31 @@
 //!
 //! [`MatchOptions`] adds the three params Doenet does use: `variables` (which
 //! names are placeholders, and what each may bind), `allow_permutations`, and
-//! `allow_implicit_identities`. `variables` is declarative rather than the JS
-//! predicate functions, which cannot cross the wasm boundary — see
-//! [`VarKind`].
+//! `allow_implicit_identities`.
 //!
-//! Still not ported: `allow_extended_match`, and regex wildcard conditions.
+//! # Deprecated and wontfix: arbitrary per-parameter conditions
+//!
+//! Legacy let a caller give any parameter a **predicate function** or a
+//! **`RegExp`** as its condition. [`VarKind`] replaces both with a closed
+//! vocabulary, and the open forms will not be supported.
+//!
+//! Not merely because a function cannot cross the wasm boundary — a bridge is
+//! buildable. It is that the matcher backtracks, so a predicate would be called
+//! back into JS once per *candidate* binding, on a search whose cost is not
+//! visible to the caller; the matcher would stop being a pure Rust search and
+//! would become uncacheable and untestable in Rust. And the conditions callers
+//! write in practice are two. DoenetML's `<matchesPattern>` — the only real
+//! consumer — passes exactly `(m) => !isNaN(evaluate_to_constant(m))` under
+//! `requireNumericMatches` and `(m) => typeof m === "string"` under
+//! `requireVariableMatches`; those are [`VarKind::Number`] and
+//! [`VarKind::Variable`], which this module already implements. The declarative
+//! form is also the sharper one: `Number` means "evaluates to a real numeric
+//! constant", where a hand-written `typeof s === "number"` quietly rejected `π`.
+//!
+//! The legacy specs covering the open forms are skipped as wontfix; the two
+//! options Doenet does use keep their own coverage in `quick_trees`.
+//!
+//! Still not ported (a gap, not a decision): `allow_extended_match`.
 //! Binding consistency uses structural JSON equality where the JS uses its
 //! syntactic `equal` — stricter in corner cases (e.g. `1` vs `1.0` differ only
 //! in JS number spelling, which JSON round-tripping already collapses).
@@ -111,9 +131,9 @@ fn pattern_variables(pattern: &Value, out: &mut HashSet<String>) {
 
 /// What a declared parameter is allowed to bind.
 ///
-/// The JS API passes predicates (`m => typeof m === "number"`), which cannot
-/// cross the wasm boundary; these are the three DoenetML actually uses,
-/// declared instead of computed.
+/// The closed replacement for legacy's predicate-function and `RegExp`
+/// conditions, which are deprecated and wontfix — see the module docs. These
+/// three are what DoenetML actually asks for, declared instead of computed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum VarKind {
     /// Any subtree (JS `true`).

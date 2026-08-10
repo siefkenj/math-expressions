@@ -64,7 +64,7 @@ fn cancelling_terms_still_reach_zero() {
     // A zero coefficient written out disappears; the rest stay separate.
     assert_eq!(
         tree(&evaluate_numbers(&p("1x^2 + 0x^2 - 2x^2 + 5x^2"))),
-        r#"["+",["^","x",2],["-",["*",2,["^","x",2]]],["*",5,["^","x",2]]]"#
+        r#"["+",["*",-2,["^","x",2]],["^","x",2],["*",5,["^","x",2]]]"#
     );
 }
 

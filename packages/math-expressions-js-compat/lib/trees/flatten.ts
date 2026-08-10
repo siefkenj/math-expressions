@@ -48,17 +48,36 @@ export function allChildren(tree) {
  * *this* one; both entry points share it so they cannot drift, which is what
  * let `me.utils.match` keep dropping its params after `expr.match` learned to
  * honor them.
+ *
+ * **Deprecated, wontfix:** legacy also accepted a predicate function or a
+ * `RegExp` as a parameter's condition. Neither is supported and neither will
+ * be. A function would have to be called back across the wasm boundary once per
+ * candidate binding, inside a matcher that backtracks — the cost is not the
+ * bridge, it is that the matcher stops being a pure Rust search. And the
+ * conditions callers actually write are two: "is a number" and "is a bare
+ * variable". DoenetML's `<matchesPattern>`, the only real consumer, passes
+ * exactly those two closures (`MatchesPattern.js`, under `requireNumericMatches`
+ * / `requireVariableMatches`), and they are already spelled `"number"` and
+ * `"variable"`. Declaring a kind is the supported replacement, and it is
+ * strictly better defined: `"number"` means "evaluates to a real numeric
+ * constant", where a caller's `typeof s === "number"` silently missed `π`.
  */
 export function normalizeMatchOptions(options) {
   const opts: Record<string, unknown> = {};
   if (options.variables !== undefined) {
     const vars: Record<string, unknown> = {};
     for (const [name, kind] of Object.entries(options.variables)) {
-      if (typeof kind === "function") {
+      const arbitrary =
+        typeof kind === "function"
+          ? "a predicate function"
+          : kind instanceof RegExp
+            ? "a regular expression"
+            : null;
+      if (arbitrary !== null) {
         throw new Error(
-          `match: 'variables.${name}' is a predicate function, which cannot cross ` +
-            'the wasm boundary. Declare a kind instead: "number", "variable", ' +
-            '"any" (or true).',
+          `match: 'variables.${name}' is ${arbitrary}. Arbitrary per-parameter ` +
+            "conditions are deprecated and will not be supported — declare a " +
+            'kind instead: "number", "variable", "any" (or true).',
         );
       }
       vars[name] = kind;

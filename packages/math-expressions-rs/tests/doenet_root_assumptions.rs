@@ -85,17 +85,17 @@ fn a_partial_power_leaves_a_residual_under_the_radical() {
 
 #[test]
 fn a_negative_coefficient_still_takes_the_odd_root_sign() {
-    // The extracted `x²` joins the `−2` the odd root already pulled out. The
-    // sign rides on a `Neg` node rather than a `−2` coefficient — that is the
-    // presentation layer's doing (see `normalize::present`), not this rule's,
-    // and it is how every negative product prints.
+    // The extracted `x²` joins the `−2` the odd root already pulled out, and
+    // the sign stays on that coefficient rather than becoming a `Neg` wrapper —
+    // the presentation layer's doing (see `normalize::present`), not this
+    // rule's, and it is how every negative product with a coefficient prints.
     assert_eq!(
         under_latex(&["x > 0"], r"\sqrt[3]{-24x^6}"),
-        r#"["-",["*",2,["^","x",2],["apply","cbrt",3]]]"#
+        r#"["*",-2,["^","x",2],["apply","cbrt",3]]"#
     );
     assert_eq!(
         under_latex(&["x elementof R"], r"\sqrt[3]{-24x^6}"),
-        r#"["-",["*",2,["^","x",2],["apply","cbrt",3]]]"#
+        r#"["*",-2,["^","x",2],["apply","cbrt",3]]"#
     );
 }
 

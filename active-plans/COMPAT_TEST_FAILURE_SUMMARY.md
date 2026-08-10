@@ -4,9 +4,19 @@ Snapshot of `packages/math-expressions-js-compat` (`npx vitest run`) on branch
 `doenet`, after rebuilding `vendor/wasm` (`bash build-wasm.sh`) so results reflect
 current Rust source.
 
-**Current totals (2026-08-10, at `f84577c` + the two equality fixes below):
-61 failed / 6263 passed / 6327 total** (1 test skipped, 2 todo). Previous
-snapshots: 380, 162, 97, 83, 82.
+**Current totals (2026-08-10, at `f84577c` + the two equality fixes below + the
+`trees/basic` port + the `match`-condition wontfix + the three presentation
+fixes below): 43 failed / 6274 passed / 6329 total** (10 skipped, 2 todo).
+Previous snapshots: 380, 162, 97, 83, 82, 61, 55, 54, 46.
+
+The immediately preceding baseline measured **46**, not the 45 recorded in an
+earlier edit of this file; the 43 above is from a matched pair of runs (same
+tree, same wasm build) diffed by name, so the −3 is the reliable figure whatever
+the absolute count.
+
+Nine of the ten skips are new, and are **wontfix, not pending** — the deprecated
+`match` conditions under `quick_trees` below. Read 54 → 46 as a reclassification,
+not nine defects fixed.
 
 `slow_check-equality-numerical-errors` is now at **zero** (was 21).
 
@@ -31,8 +41,8 @@ and the honest check is that no name present in *both* runs went passing→faili
 | count | spec file                                       | root cause / category                                                                    |
 | ----: | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
 |    18 | `slow_check-symbolic-equality-numerical-errors` | a perturbed exponent reorders a sum; the fuzzy compare is pairwise — see below           |
-|    17 | `quick_trees`                                   | tree matching with predicate/regex conditions can't cross the wasm boundary              |
-|    12 | `slow_simplify`                                 | **sign placement**, **folding without assumptions**, **ordering**, algebra — see below   |
+|     2 | `quick_trees`                                   | `allow_extended_match`, and one throw-vs-`false` (+9 skipped wontfix) — see below        |
+|     9 | `slow_simplify`                                 | **folding without assumptions**, **`Add` term order**, container order, algebra — see below |
 |     5 | `slow_assumptions`                              | see below                                                                                |
 |     4 | `slow_math-expressions`                         | equality of containers/unions, an integer assumption, one derivative identity            |
 |     3 | `quick_solve`                                   | `solve_linear()` unimplemented                                                           |
@@ -187,43 +197,195 @@ assertions pass as written. The one that does not is `is_real(i·x)` given
 inference (a product of a nonzero real and the imaginary unit is not real), not
 a declaration problem. Fix that and the test can be un-skipped.
 
-### The 12 `slow_simplify` failures
+### The 9 `slow_simplify` failures
 
-- **Sign placement (3)** — `evaluate_numbers` "multiplication", "unary minus of
-  product", "unary minus of quotient". We emit a negation node wrapping the
-  product, `["-", ["*", 8, "x"]]`, where the JS library folds the sign into the
-  coefficient, `["*", -8, "x"]`. Mathematically equal, structurally different;
-  one normalization rule, and the largest single bucket left in this file.
-- **Folding without an assumption (2)** — `0/x → 0` and `x^0 → 1` fire with no
-  `x ≠ 0` in hand. The spec wants both left written. Same class as the
-  documented `x/x → 1` divergence.
-- **Container ordering (3)** — `evaluate_numbers` "combination" and the two
-  "sorted the same" cases: mixed tuple/vector/altvector/interval and
-  array/interval unions group by container type rather than interleaving by
-  value. Distinct from atom ordering, which is now correct.
-- **Fraction vs decimal spelling (1)** — "to decimals" expects `1/3` to become
-  `0.333…`; `is_written_as_fraction` now keeps it a fraction. This is a
-  deliberate divergence adopted for DoenetML open item 8, so the spec is the
-  thing that is out of date, not the engine.
-- **Collect-like-terms algebra (2)** — "like factors with assumptions" and
-  "treat exp like power".
-- **Unit-group ordering (1)** — "with units". The atoms inside each unit group
-  are correct; the groups are ordered differently. Separate from the container
-  ordering bucket above.
+Re-measured 2026-08-10 by dumping our tree against the legacy oracle for every
+assertion (`legacy-js-oracle-runnable`). Three of the buckets were previously
+misattributed. **A caution the measurement taught:** these tests bundle 5–20
+assertions each, so a per-test bucket count is an upper bound on what any one
+fix buys. Attributing a test to the first assertion that fails hides everything
+behind it — the sign fix below, taken alone, moved three tests' failure point
+*forward* into unrelated bugs without turning any of them green. It took all
+three presentation fixes together to close them.
+
+- **FIXED — sign placement.** `present_mul`
+  ([`normalize/present.rs`](../packages/math-expressions-rs/src/normalize/present.rs))
+  ended by wrapping a negative product in `Expr::Neg` unconditionally. The JS
+  puts the sign on the leading numeric coefficient when there is one, and uses
+  `Neg` only when there is nowhere else for it to go (`−x`):
+
+  | input | was | now (= legacy) |
+  | --- | --- | --- |
+  | `4(x)(-2)` | `["-",["*",8,"x"]]` | `["*",-8,"x"]` |
+  | `x-2uv` | `["-",["*",2,"u","v"]]` | `["*",-2,"u","v"]` |
+  | `x-2/(uv)` | `["-",["/",2,["*","u","v"]]]` | `["/",-2,["*","u","v"]]` |
+  | `-24x⁶` under `cbrt` | `["-",["*",2,x²,cbrt3]]` | `["*",-2,x²,cbrt3]` |
+
+  The rule already existed — `normalize_negative_numbers` in
+  [`normalize/default_order.rs`](../packages/math-expressions-rs/src/normalize/default_order.rs),
+  which `default_order` runs and `present` did not. `present`'s operand is
+  already presented, so it needs only the leading-coefficient case, not that
+  function's recursion; `carry_sign`/`negate_leading_number` is that narrower
+  form.
+
+  Four Rust expectations were updated to the legacy shape, two of which had
+  comments asserting the `Neg` form was correct — it was not; `-2(x+y)` gives
+  `["*",-2,["+","x","y"]]` in alpha94, verified against the pinned library.
+
+- **FIXED — powers of `i` not folded.** `i*i` gave `["^","i",2]` where legacy
+  gives `-1`, and `i*i*i` gave `["^","i",3]` against `["-","i"]`.
+  `fold_imaginary_power` already existed and was already correct; it was only
+  reachable from `fold_special_values`, which `evaluate_numbers` does not run.
+  `fold_i_powers_tree` in
+  [`ops/numbers.rs`](../packages/math-expressions-rs/src/ops/numbers.rs) applies
+  it bottom-up in the `evaluate_numbers` pipeline, re-canonicalizing afterwards
+  so a surrounding product absorbs the `−1` (`2i·3i` = `6·i²` → `−6`).
+
+  Folding `i^n` is arithmetic on a number, not a symbolic identity — the
+  integer powers of the imaginary unit are exact and have no branch cut — so it
+  belongs in a pass that claims to evaluate numbers.
+
+- **FIXED — `Add` term order (coefficient tie-break).** `present_add` sorted by
+  `DegKey` (descending total degree, then graded-lex) and is *stable*, so
+  same-degree terms kept canonical order. Legacy breaks those ties by
+  coefficient, **ascending, with symbolic coefficients last**:
+
+  | input | was | now (= legacy) |
+  | --- | --- | --- |
+  | `1x²-3+0x²+4-2x²-3+5x²` | `x², -2x², 5x², -2` | `-2x², x², 5x², -2` |
+  | `x² + f(t)x² + 2x²` | — | `x², 2x², f(t)x²` |
+  | `$3 + 2` | — | `2, $3` |
+
+  `coeff_key`/`coeff_order` in `present.rs`. A bare monomial counts as
+  coefficient 1, which is what puts `x²` *between* `−2x²` and `5x²` instead of
+  at one end. The tie-break only fires for terms with an identical monomial
+  signature, so it never competes with the degree ordering.
+
+  **Symbolic-last was measured, not assumed.** The instruction that prompted
+  this work said symbolic coefficients should sort *first*; the oracle puts them
+  last (`x²+f(t)x²+2x²` → `x², 2x², f(t)x²`, and `$3+2` → `2, $3`), and
+  symbolic-first immediately broke `unlike_units_and_bare_scalars_never_combine`.
+  Confirmed with the user before switching to the legacy order.
+
+**Net for the three fixes together: 46 → 43, three tests green** ("unary minus
+of product", "multiplication", "combination"), **0 regressions**, verified by a
+name-level diff over a matched pair of runs.
+
+- **STILL OPEN — one `Add` order case, 1 test.** "unary minus of quotient", on
+  `x-2u/v`: ours `x, (-2u)/v`, legacy `(-2u)/v, x`. This is *not* a coefficient
+  tie — `x` is degree 1 and `u/v` degree 0 — so it contradicts the
+  descending-degree key rather than its tie-break. Legacy's comparator needs
+  reading before this is attempted. `skip_ordering` matches exactly, so the
+  divergence is purely in the sort.
+
+- **Folding without an assumption — 3 tests.** `0/x → 0`, `x^0 → 1`, and
+  `y/y/y^2 → 1/y²` (the last is "like factors with assumptions", previously
+  filed under algebra) all fire with no `x ≠ 0` / `y ≠ 0` in hand. Legacy leaves
+  `["/",0,"x"]`, `["^","x",0]`, `["/","y",["^","y",3]]` written. Same class as
+  the documented `x/x → 1` divergence, so this is one policy decision covering
+  three tests.
+
+- **Container ordering — 2 tests.** The two "sorted the same" cases. Legacy's
+  sort key is *(component count, then component values)*, with container type
+  not in the key at all, so containers interleave:
+  `[1,6] [1,9) [9,5) [9,8] [0,4,4]`. We sort by container type first, then by
+  value within each type: `[0,4,4] [1,6] [9,8] [1,9) [9,5)`.
+
+- **`exp` not treated as a power of `e` — 1 test.** "treat exp like power".
+  `collect_like_terms_factors` handles `e^3·e^5 → e^8` but leaves
+  `exp(3)·exp(5)` and `exp(3)/exp(5)` completely uncollected — the `Apply` form
+  is never recognised as a power. (This test also trips the sign bug above.)
+
+- **Rational coefficient across the fraction bar — 1 test.** "to decimals". The
+  `1/3 → 0.333…` claim in the older note was wrong: `1/3` matches. The real
+  divergence is `(1/2)i`, where `present_mul`'s numerator/denominator split
+  gives `["/","i",2]` and legacy keeps the coefficient multiplicative,
+  `["*","i",["/",1,2]]`.
+
+- **Unit-group ordering — 1 test.** "with units". Our
+  `collect_like_terms_factors` emits `$, deg, %`; legacy emits `$, %, deg`.
+  Note our *own* `default_order()` produces the legacy order on the same
+  expression, so this is an internal inconsistency between the two paths, not a
+  missing comparator.
 
 ## Remaining buckets by theme
-
-These add to 61.
 
 **Numerical-tolerance equality (18)** — all now in
 `slow_check-symbolic-equality-numerical-errors`, one cause, broken down above.
 Was 39; the root-spelling and `-1` fixes closed 21.
 
-**Unimplemented / unbound APIs (20)** — `quick_trees` (17, predicate/regex
-callback matching cannot cross the wasm boundary) and `quick_solve` (3,
-`solve_linear`).
+**Unimplemented / unbound APIs (5)** — `quick_trees` (2, below) and
+`quick_solve` (3, `solve_linear`).
 
-**Semantic edge cases (18)** — `slow_simplify` (12, broken down above),
+### The `quick_trees` failures — 17 investigated, 6 fixed, 9 wontfix, 2 left
+
+An earlier note called this "a single binding problem, not seventeen". That was
+wrong; it was three problems, and only nine were the binding one. The other
+eight were **missing functions**, now ported:
+
+- `replaceSubtree`, `traverse`, `transform`, `applyAllTransformations`,
+  `applyTransformationEachSubtree`, `patternTransformer`,
+  `equalAfterTransformations` — legacy `trees/basic.js:603-828`, absent from the
+  port's 26-line `lib/trees/basic.ts`. Pure tree rewriting over the raw ASTs,
+  nothing to do with the wasm boundary. **6 tests fixed.**
+- `Expression.collapse_unary_minus()` — legacy `expression/simplify.js:34`.
+  Ported and checked against the live oracle on 11 inputs, identical on all of
+  them. Its own test is skipped, for the predicate reason below.
+
+None of the eight has a single call site anywhere in DoenetML (grepped
+`tmp/DoenetML`), so this is spec-compat only.
+
+#### WONTFIX — arbitrary per-parameter `match` conditions (9 tests, now skipped)
+
+Legacy let `variables` map a parameter to a **predicate function** (8 tests) or
+a **`RegExp`** (1). [`VarKind`] is the closed replacement and the open forms are
+deprecated; the specs are `it.skip`ped with a `[wontfix: …]` name prefix and a
+block comment, so they stay as the record of what legacy accepted rather than
+sitting in the failing bucket forever.
+
+Two reasons, and the second is the real one:
+
+1. A predicate would be called back into JS once per **candidate** binding —
+   the matcher backtracks, so the call count is a function of the search, not of
+   the input. It would stop being a pure Rust search.
+2. **Nobody needs it.** DoenetML's `<matchesPattern>`
+   ([`MatchesPattern.js:259-274`](../tmp/DoenetML/packages/doenetml-worker-javascript/src/components/MatchesPattern.js#L259-L274))
+   is the only real consumer and passes exactly two closures —
+   `(m) => !Number.isNaN(me.fromAst(m).evaluate_to_constant())` under
+   `requireNumericMatches`, `(m) => typeof m === "string"` under
+   `requireVariableMatches`. Those *are* `VarKind::Number` and
+   `VarKind::Variable`. No `RegExp` condition appears anywhere in DoenetML.
+
+The declarative form is also sharper: `Number` means "evaluates to a real
+numeric constant", where the legacy specs' hand-written `typeof s === "number"`
+quietly rejected `π`.
+
+Cost of the skip, and how it was covered: every legacy test exercising
+`allow_permutations` and `allow_implicit_identities` *also* declared its
+parameters with predicates, and those two options are supported and are what
+Doenet passes. Skipping blind would have left both with **zero** coverage in the
+suite. Two replacement tests ("… with parameters declared by kind") re-express
+the same scenarios with declared kinds, including a negative control confirming
+the kind is what fails the match (`e^(0.3s^2+3s+q)` matches under `true`, not
+under `"number"`).
+
+#### Still open — 2 tests
+
+- **Throwing where legacy returned `false` — 1 test**, named "invalid matching
+  conditions fail gracefully". Not part of the wontfix: the condition here is
+  `{a: false, b: "h"}`, neither a predicate nor a regex. Legacy's
+  `else { return false }` makes any unrecognized condition simply never match;
+  [`interop.rs:172`](../packages/math-expressions-rs-wasm/src-rust/interop.rs#L172)
+  reasons that `false` "is never what a caller means" and raises instead. The
+  spec name states the contract. Cheapest item here.
+- **`allow_extended_match` — 1 test**, "trig transformation". A gap, not a
+  decision: unported in `js_match.rs`, and the matcher never emits the
+  `_skipped`/`_skipped_before` bindings that go with it. (Two more tests need it,
+  but they need predicates too and are skipped above.) `applyAllTransformations`
+  already carries the splice logic for those bindings, so only the Rust side is
+  missing.
+
+**Semantic edge cases (15)** — `slow_simplify` (9, broken down above),
 `slow_math-expressions` (4), `slow_rational` (2). No single root cause; these are
 a scatter of individual normalization decisions rather than one bucket.
 
@@ -235,12 +397,9 @@ distinguish `(a or b)` from `(a) or (b)`. It needs a paren-balance scan.
 
 ## Highest-leverage remaining item
 
-`quick_trees` (17) is now the largest bucket, and it is a single binding
-problem, not seventeen: the matcher takes JS predicate and `RegExp` conditions,
-which cannot cross the wasm boundary. It needs either a callback bridge or a
-Rust-side condition vocabulary.
-
-Next after that is the remaining numerical-errors bucket:
+The `*-numerical-errors` bucket. `quick_trees` is closed out: 6 fixed, 9 marked
+wontfix, and the 2 left are small — "fail gracefully" (one arm in `interop.rs`)
+and `allow_extended_match`.
 
 1. **18 tests** — make the fuzzy comparison of a commutative `Add`/`Mul`
    order-insensitive (match children as a multiset under the same fuzzy

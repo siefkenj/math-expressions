@@ -172,9 +172,16 @@ pub fn match_template_with_options(
                 // `true` is the legacy "any subtree"; `false` declares the name
                 // and then admits nothing, which is never what a caller means.
                 serde_json::Value::Bool(true) => crate::js_match::VarKind::Any,
+                // A `RegExp` arrives here as `{}` — `JSON.stringify` has no
+                // spelling for one. Legacy matched a parameter against a caller's
+                // regex; that is deprecated and wontfix, along with predicate
+                // functions, for the reasons in `js_match`'s module docs.
                 other => {
                     return Err(JsError::new(&format!(
-                        "match: invalid parameter kind {other} for {name:?}"
+                        "match: invalid parameter kind {other} for {name:?}. \
+                         Per-parameter regular expressions and predicate \
+                         functions are deprecated and unsupported — declare a \
+                         kind instead: \"number\", \"variable\", \"any\", or true"
                     )))
                 }
             };

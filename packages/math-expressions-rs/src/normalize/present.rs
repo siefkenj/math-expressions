@@ -145,9 +145,49 @@ fn present_mul(fs: &[Expr]) -> Expr {
         Expr::Div(Box::new(num), Box::new(assemble(coeff_den, den_factors)))
     };
     if negative {
-        Expr::Neg(Box::new(out))
+        carry_sign(out)
     } else {
         out
+    }
+}
+
+/// Put the sign back on a presented product: onto the leading numeric
+/// coefficient when there is one, and only otherwise as a `Neg` wrapper.
+///
+/// `4·x·(−2)` reads as `−8x`, not `−(8x)`, and a student writes the second only
+/// when there is no number to carry the sign — `−x`. That is the JS
+/// `normalize_negative_numbers` rule, and this is its third implementation in
+/// the tree; the other two are
+/// [`normalize_negative_numbers`](super::default_order) (which `default_order`
+/// runs, and which additionally recurses, because it walks uncanonicalized
+/// input) and syntactic pass 3. Here the operand is already presented, so the
+/// leading coefficient is the only place a sign can land.
+///
+/// `assemble` drops a coefficient of 1, so "no leading number" is exactly the
+/// case where the sign has nowhere to go.
+fn carry_sign(out: Expr) -> Expr {
+    negate_leading_number(&out).unwrap_or_else(|| Expr::Neg(Box::new(out)))
+}
+
+/// `Some(−node)` when `node` leads with a number that can absorb the sign,
+/// `None` when there is nowhere for it to go. The sign rides the numerator of a
+/// fraction — `−(2/(u v))` is `−2/(u v)` — but only when the numerator itself
+/// has somewhere to put it, so `−(x/2)` keeps its wrapper.
+fn negate_leading_number(node: &Expr) -> Option<Expr> {
+    match node {
+        Expr::Num(n) => Some(Expr::Num(n.neg())),
+        Expr::Mul(fs) => match fs.first() {
+            Some(Expr::Num(n)) => {
+                let mut out = fs.clone();
+                out[0] = Expr::Num(n.neg());
+                Some(Expr::Mul(out))
+            }
+            _ => None,
+        },
+        Expr::Div(num, den) => {
+            negate_leading_number(num).map(|n| Expr::Div(Box::new(n), den.clone()))
+        }
+        _ => None,
     }
 }
 
@@ -229,12 +269,89 @@ fn atom_name(e: &Expr) -> Option<String> {
 }
 
 /// Order `Add` terms like a polynomial: descending total degree, then
-/// graded-lexicographic on the (alphabetized) variables. The sort is stable,
-/// so equal keys keep their canonical order.
+/// graded-lexicographic on the (alphabetized) variables, then ascending
+/// coefficient with symbolic coefficients last. The sort is stable, so fully
+/// equal keys keep canonical order.
 fn present_add(ts: &[Expr]) -> Expr {
-    let mut items: Vec<(DegKey, Expr)> = ts.iter().map(|t| (deg_key(t), present(t))).collect();
-    items.sort_by(|a, b| key_order(&a.0, &b.0));
-    Expr::Add(items.into_iter().map(|p| p.1).collect())
+    // The coefficient is read off the *presented* term, not the canonical one,
+    // because that is the form whose order is being decided — a presented `Div`
+    // carries its coefficient in the numerator.
+    let mut items: Vec<(DegKey, Coeff, Expr)> = ts
+        .iter()
+        .map(|t| {
+            let p = present(t);
+            (deg_key(t), coeff_key(&p), p)
+        })
+        .collect();
+    items.sort_by(|a, b| key_order(&a.0, &b.0).then_with(|| coeff_order(&a.1, &b.1)));
+    Expr::Add(items.into_iter().map(|p| p.2).collect())
+}
+
+/// A term's coefficient for ordering: the numeric factor it leads with, or
+/// [`Coeff::Symbolic`] when the part of the term that is not counted in its
+/// [`DegKey`] is not a number at all (`f(t)·x²`).
+enum Coeff {
+    Symbolic,
+    Num(f64),
+}
+
+/// Break a monomial-signature tie by coefficient: numbers ascending, then
+/// symbolic coefficients last — `−2x², x², 5x², f(t)x²`.
+///
+/// Only reached for terms with the *same* monomial signature, so this never
+/// competes with the degree ordering: `2x²` still precedes `5x`. A bare
+/// monomial counts as coefficient 1, which is what places `x²` between `−2x²`
+/// and `5x²` rather than at one end.
+///
+/// Symbolic goes *last*, which is where alpha94 puts it — verified against the
+/// pinned library on `x² + f(t)x² + 2x²` (`x², 2x², f(t)x²`) and on `$3 + 2`
+/// (`2, $3`, the unit term trailing the bare number).
+fn coeff_order(a: &Coeff, b: &Coeff) -> Ordering {
+    match (a, b) {
+        (Coeff::Symbolic, Coeff::Symbolic) => Ordering::Equal,
+        (Coeff::Symbolic, Coeff::Num(_)) => Ordering::Greater,
+        (Coeff::Num(_), Coeff::Symbolic) => Ordering::Less,
+        // NaN is not orderable; leaving such a pair `Equal` keeps the sort
+        // stable rather than letting an inconsistent comparator scramble it.
+        (Coeff::Num(x), Coeff::Num(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+    }
+}
+
+fn coeff_key(t: &Expr) -> Coeff {
+    match t {
+        Expr::Num(n) => Coeff::Num(n.to_f64()),
+        Expr::Neg(a) => match coeff_key(a) {
+            Coeff::Num(c) => Coeff::Num(-c),
+            sym => sym,
+        },
+        // The denominator is part of the signature, not the coefficient.
+        Expr::Div(a, _) => coeff_key(a),
+        Expr::Mul(fs) => {
+            let mut c = 1.0;
+            for f in fs {
+                match f {
+                    Expr::Num(n) => c *= n.to_f64(),
+                    _ if is_monomial_atom(f) => {}
+                    // A factor `deg_key` did not count and that is not a
+                    // number: the term's coefficient is symbolic.
+                    _ => return Coeff::Symbolic,
+                }
+            }
+            Coeff::Num(c)
+        }
+        _ if is_monomial_atom(t) => Coeff::Num(1.0),
+        _ => Coeff::Symbolic,
+    }
+}
+
+/// An atom that [`collect_deg`] accounts for, so it is part of the term's
+/// signature rather than of its coefficient.
+fn is_monomial_atom(e: &Expr) -> bool {
+    match e {
+        Expr::Sym(_) | Expr::Const(_) => true,
+        Expr::Pow(b, x) => matches!(**x, Expr::Num(_)) && is_monomial_atom(b),
+        _ => false,
+    }
 }
 
 /// A term's monomial signature: total degree plus per-atom exponents, sorted by

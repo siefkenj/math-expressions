@@ -62,9 +62,16 @@ fn evaluate_numbers_budget(e: &Expr, budget: MaxDigits) -> Expr {
     // `fold_infnan_tree` folds division-by-zero poles and infinity arithmetic
     // (`1/0 → ∞`, `6/-0 → −∞`, `∞·2 → ∞`) — the same rule `simplify` applies,
     // which plain canonicalization leaves for later.
+    // `fold_i_powers_tree` reduces `i^n` (`i·i` → `−1`). That is arithmetic on a
+    // number, not a symbolic identity — the imaginary unit's integer powers are
+    // exact and have no branch cut to choose — so it belongs to a pass that
+    // claims to evaluate the numbers. It is re-canonicalized because the fold
+    // produces a plain `−1` that a surrounding product must absorb: `2i·3i` is
+    // `6·i²`, and only after the fold and a re-canonicalization is it `−6`.
     crate::normalize::without_like_term_collection(|| {
         let canon = canonicalize(&prepped);
         let folded = canonicalize(&fold_infnan_tree(&canon));
+        let folded = canonicalize(&fold_i_powers_tree(&folded));
         let united = crate::normalize::fold_units(&folded);
         // Spend the budget on the *folded* rationals, on the canonical form: a
         // coefficient like the `1/3` in `x/3` is a single `Rat` here, so the
@@ -85,6 +92,22 @@ fn evaluate_numbers_budget(e: &Expr, budget: MaxDigits) -> Expr {
 fn fold_infnan_tree(e: &Expr) -> Expr {
     let e = map_children(e, fold_infnan_tree);
     crate::normalize::rule_infnan(&e).unwrap_or(e)
+}
+
+/// Apply `i^n → {1, i, −1, −i}`
+/// ([`fold_imaginary_power`](crate::normalize::fold_imaginary_power)) bottom-up,
+/// so `evaluate_numbers` reduces powers of the imaginary unit the way the JS
+/// library does (`i·i` → `−1`, `i³` → `−i`).
+///
+/// Children fold first, so a power revealed underneath — the `i²` inside
+/// `(2i)(3i)` once canonicalization has gathered the two `i` factors — is seen
+/// by the enclosing product.
+fn fold_i_powers_tree(e: &Expr) -> Expr {
+    let e = map_children(e, fold_i_powers_tree);
+    match &e {
+        Expr::Pow(b, x) => crate::normalize::fold_imaginary_power(b, x).unwrap_or(e),
+        _ => e,
+    }
 }
 
 /// Whether any number in `e` is inexact — a `Float`, or an exact rational the

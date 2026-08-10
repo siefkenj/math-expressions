@@ -172,7 +172,7 @@ fn variable_free_complex_arithmetic_is_exact() {
     assert_eq!(js(&simplify(&t("(1+i)^8"))), "16");
     assert_eq!(
         js(&simplify(&t("(1+2i)+(3-5i)"))),
-        r#"["+",["-",["*",3,"i"]],4]"#
+        r#"["+",["*",-3,"i"],4]"#
     );
     // Exact stays exact: no floats appear.
     assert_eq!(js(&simplify(&t("(1/2+i)(1/2-i)"))), r#"["/",5,4]"#);
