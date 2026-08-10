@@ -180,6 +180,26 @@ fn replace_numbers(
         Expr::sym(&name)
     };
     match e {
+        // A `-1` factor in a product is a *sign*, not a magnitude the author
+        // typed. Canonicalization spells `a - b` as `a + (-1)·b`, so every
+        // subtraction would otherwise contribute a parameter, and the tolerance
+        // would include a `∂f/∂(-1)` term — "what if the minus sign were 0.01%
+        // more negative", which is not a thing a response can get wrong.
+        //
+        // It is not a small effect. For `10 exp(7x²/(3-sqrt(y)))` the spurious
+        // parameter *dominated*: the tolerance came out 4.3× the JS value, and
+        // answers perturbed by twice the allowed error graded as correct. The JS
+        // never had this to deal with — its `-` is a unary node with no number
+        // in it — so this restores parity rather than diverging from it.
+        // (`-2x` still parameterizes its `-2`: only exactly `-1` is structural.)
+        Expr::Mul(fs) => Expr::Mul(
+            fs.iter()
+                .map(|f| match f {
+                    Expr::Num(n) if n.to_f64() == -1.0 => f.clone(),
+                    other => replace_numbers(other, vars, include_exponents, params),
+                })
+                .collect(),
+        ),
         Expr::Num(n) => {
             let v = n.to_f64();
             if v == 0.0 || !v.is_finite() {

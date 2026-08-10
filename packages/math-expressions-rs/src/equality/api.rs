@@ -55,8 +55,35 @@ pub fn equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     // leaves within tolerance instead of exactly (port of the JS
     // `equalsViaSyntax` + `trees/basic.js equal` fuzzy path). Exponents stay
     // exact unless `include_error_in_number_exponents`.
-    if opts.allowed_error_in_numbers > 0.0 && fuzzy_tree_eq(&ca, &cb, opts) {
-        return true;
+    if opts.allowed_error_in_numbers > 0.0 {
+        if fuzzy_tree_eq(&ca, &cb, opts) {
+            return true;
+        }
+        // Retry once on the *syntactically* normalized forms. A tolerance can
+        // only forgive a difference in a number leaf; it cannot forgive the two
+        // sides having chosen different spellings for the same operation. That
+        // matters here because the spelling is chosen BY the numbers the
+        // tolerance is meant to blur: `sqrt(q)` and `q^(1/2)` are distinct
+        // canonical trees (deliberately — `ops::transforms`), and they meet at
+        // stage 3 only because sampling agrees. Perturb the exponent and it is
+        // no longer exactly ½, so the response is pinned to `Pow` while the
+        // key stays `Apply` and the walk dies on a variant tag with every
+        // number inside tolerance.
+        //
+        // `normalize_syntactic`'s first pass rewrites roots to explicit powers,
+        // which is exactly the reconciliation needed, and is what the JS
+        // `equals` chain does before *its* `equalsViaSyntax` stage. Re-
+        // canonicalized because that pass emits `Div(1, n)` exponents for
+        // `cbrt`/`nthroot` that must fold to a `Num` before a number-leaf
+        // comparison can see them.
+        //
+        // Gated on a tolerance being set: without one, stage 3 already decides
+        // these pairs correctly, and this would be pure cost.
+        let na = canonicalize(&normalize_syntactic(&ca));
+        let nb = canonicalize(&normalize_syntactic(&cb));
+        if (na != ca || nb != cb) && fuzzy_tree_eq(&na, &nb, opts) {
+            return true;
+        }
     }
 
     // When both sides fold to a bare number, stage 1 is *definitive*. Structure

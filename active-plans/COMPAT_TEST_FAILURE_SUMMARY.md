@@ -4,16 +4,19 @@ Snapshot of `packages/math-expressions-js-compat` (`npx vitest run`) on branch
 `doenet`, after rebuilding `vendor/wasm` (`bash build-wasm.sh`) so results reflect
 current Rust source.
 
-**Current totals (2026-08-10, at `0155902`): 83 failed / 6241 passed / 6327 total**
-(1 test skipped, 2 todo). Previous snapshots: 380, 162, 97.
+**Current totals (2026-08-10, at `f84577c` + the two equality fixes below):
+61 failed / 6263 passed / 6327 total** (1 test skipped, 2 todo). Previous
+snapshots: 380, 162, 97, 83, 82.
 
-This snapshot is reproducible from a clean tree at `0155902`: run
-`bash build-wasm.sh` then `npx vitest run` from inside
-`packages/math-expressions-js-compat`. The previous (97) snapshot was **not** —
-it was taken with uncommitted matrix-pipeline and `evaluate_to_constant` work in
-the tree, which is why its per-file counts drifted from anything checked out.
-Rebuild the wasm first or the run measures the previous engine; that alone
-accounted for a 4-test discrepancy while this snapshot was being taken.
+`slow_check-equality-numerical-errors` is now at **zero** (was 21).
+
+This snapshot is reproducible from a clean tree: run `bash build-wasm.sh` then
+`npx vitest run`, both from inside `packages/math-expressions-js-compat`. The
+old (97) snapshot was **not** — it was taken with uncommitted work in the tree,
+which is why its per-file counts drifted from anything checked out. Rebuild the
+wasm first or the run measures the previous engine; that alone accounted for a
+4-test discrepancy while an earlier snapshot was being taken, and `build-wasm.sh`
+lives in the package, not at the repo root.
 
 Judge changes by name-level diff against a baseline worktree, never by aggregate
 counts (see memory `js-compat-suite-baseline-diff`). When diffing, note that
@@ -27,22 +30,20 @@ and the honest check is that no name present in *both* runs went passing→faili
 
 | count | spec file                                       | root cause / category                                                                    |
 | ----: | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
-|    21 | `slow_check-equality-numerical-errors`          | canonical form keys on a number the tolerance is supposed to blur — see below            |
-|    18 | `slow_check-symbolic-equality-numerical-errors` | as above (ordering variant)                                                              |
+|    18 | `slow_check-symbolic-equality-numerical-errors` | a perturbed exponent reorders a sum; the fuzzy compare is pairwise — see below           |
 |    17 | `quick_trees`                                   | tree matching with predicate/regex conditions can't cross the wasm boundary              |
 |    12 | `slow_simplify`                                 | **sign placement**, **folding without assumptions**, **ordering**, algebra — see below   |
 |     5 | `slow_assumptions`                              | see below                                                                                |
 |     4 | `slow_math-expressions`                         | equality of containers/unions, an integer assumption, one derivative identity            |
 |     3 | `quick_solve`                                   | `solve_linear()` unimplemented                                                           |
 |     2 | `slow_rational`                                 | `e` is a polynomial *coefficient*, so `e+f` is not seen as a factor — see below          |
-|     1 | `quick_doenet_printer_and_rounding`             | `sqrt(-2)` is not folded to `i·sqrt(2)` — see below                                      |
 
-### The 39 `*-numerical-errors` failures
+### The `*-numerical-errors` failures — 39 investigated, 21 fixed, 18 left
 
-Investigated 2026-08-10, against the legacy library run as a live oracle
+Investigated 2026-08-10 against the legacy library run as a live oracle
 (`legacy-js-oracle-runnable`). **Every** failing block sets
 `include_exponents: true` — the option that lets the number allowance reach into
-an exponent. 38 of the 39 share one root cause, and it is not the tolerance
+an exponent. 38 of the 39 shared one root cause, and it was not the tolerance
 arithmetic:
 
 > The canonical form of a tree is decided by the *values* of the numbers in it,
@@ -51,26 +52,48 @@ arithmetic:
 > change the tree's shape, and `fuzzy_tree_eq` — which is structural and
 > order-sensitive — never gets the chance to forgive it.
 
-Two spellings of that, one per file.
+Two spellings of that, one per file. The first is fixed; the second is not.
 
-**`slow_check-equality-numerical-errors` (20 of 21): the root spelling.**
-`normalize::canonicalize` writes an exact ½ power as `sqrt(x)` (`simplify.rs:1273`)
-but leaves `q^0.50002` a `Pow`, so the pair is structurally unequal for a
-difference of 2e-5 against an allowance of 1e-4. Measured: `sqrt(q)` vs
-`q^0.50002` is `false` under `equals` and `true` under `equalsViaSyntax`;
-respelling the original as `q^0.5` makes the whole failing block pass. Once the
-structural stage misses, sampling cannot recover it either — `replace_numbers`
-sees no number inside `sqrt(q)`, so the tolerance it builds has no
+#### FIXED — the root spelling (was 20 tests)
+
+The engine keeps **two canonical forms for the same value** —
+`canonicalize`/`simplify_canonical` leave `sqrt(q)` an `Apply` *and* leave
+`q^(1/2)` and `q^0.5` as `Pow` (all three verified unchanged through `simplify`).
+`sqrt(q).equals(q^0.5)` was `true` only because sampling rescued it. Add a
+tolerance and the rescue disappears: the response's exponent is no longer exactly
+½, so it is pinned to `Pow` while the key stays `Apply`.
+
+The comparison then died on a variant tag, not on a number. Walking
+`exp(0.01xy+1000sqrt(q))` against
+`exp((0.01+.00002)xy+(1000+.00002)q^(0.5+.00002))`, `fuzzy_tree_eq` accepted
+`0.01`/`0.01002` and `1000`/`1000.00002` (both 2e-5 against a 1e-4 allowance)
+and then failed at `fuzzy.rs:40` on `discriminant(Apply) != discriminant(Pow)`.
+Every number was inside tolerance; the shape was not, and shape is compared
+exactly. Sampling could not recover either — `replace_numbers` matches
+`Expr::Num`, and `sqrt(q)` contains none, so its tolerance had no
 ∂f/∂(exponent) term at all.
 
-Legacy has no such gap: its `normalize_function_names` folds `sqrt(q)` → `q^0.5`
-(**verified by running it** — the reverse of what `ARCHITECTURE`-level notes here
-implied), and `equals` calls `equalsViaSyntax` on that normalized pair. Our
-`equals` uses `canonicalize`/`simplify_canonical` instead, which prefer the
-`sqrt` spelling. `equals_syntactic` already normalizes the way legacy does, which
-is exactly why it answers correctly on the same inputs.
+**The invariant it violated:** `equalsViaSyntax` — a deliberately *weaker* form
+check — returned `true` on the exact pair where `equals` returned `false`. Form
+equality should imply value equality. The two entry points normalize
+differently: `equals_syntactic` runs `normalize_syntactic`, whose pass 1 rewrites
+`sqrt(x) → x^(1/2)` (`syntactic.rs:44`); `equals` did not. Legacy has no such
+gap — its `equals` calls `equalsViaSyntax` on a `normalize_function_names`-folded
+pair, so it has one spelling for a root and reaches it before comparing.
 
-**`slow_check-symbolic-equality-numerical-errors` (all 18): term order.**
+**Fix** (`equality/api.rs`): under a number allowance only, if the fuzzy
+structural compare fails, retry once on `canonicalize(normalize_syntactic(·))` of
+both sides. That is the same reconciliation the JS chain performs, and the
+re-canonicalize is needed because the pass emits `Div(1, n)` exponents for
+`cbrt`/`nthroot` that must fold to a `Num` before a number-leaf comparison can
+see them. Gated on the tolerance because without one, stage 3 already decides
+these pairs correctly.
+
+**Rejected alternative:** making `canonicalize` fold roots to powers. See the
+"Highest-leverage" section — the oracle keeps the two spellings distinct too, and
+`ops/transforms.rs:122` records that as a deliberate decision.
+
+#### STILL OPEN — term order (all 18)
 Every failure perturbs an exponent *downward* — `2*(1-.00009)` or `(2-.00009)`;
 not one upward case fails. Terms are graded-lex by total degree, so `1000q^1.99991`
 has degree 1.99991 and falls behind `0.01xy` at degree 2, while `1000q^2.00009`
@@ -81,24 +104,39 @@ with a degree-1 companion, where the flip cannot happen. Legacy's sort key does
 not read the exponent's value — it keeps `1000q^…` first at 1.99991, 2, and
 2.00009 alike.
 
-**The 21st failure is unrelated and points the other way.** "at least one of …
-is incorrect" for `10 exp(7x^2/(3-sqrt(y)))` is a *false accept*: we return
-`true` for all eight answers perturbed by 2e-4 against a 1e-4 allowance, where
-legacy returns `false` for all eight. The syntax stage rejects them correctly, so
-this is the sampling stage being too lenient — plausibly the two documented
-`equals_numerical` divergences (a fixed `NEIGHBORHOOD_RADIUS` of 0.01 instead of
-`scale/100`, and never advancing the binding scale). Not yet isolated.
+### FIXED — the `-1` parameter bug (grading was too lenient)
 
-### The `quick_doenet_printer_and_rounding` failure
+The 39th failure in that group pointed the *other* way and had a different
+cause. "at least one of … is incorrect" for `10 exp(7x^2/(3-sqrt(y)))` was a
+**false accept**: all eight answers perturbed by 2e-4 against a 1e-4 allowance
+graded as correct, where legacy rejects all eight.
 
-`sqrt(-1)` folds to `i` and `sqrt(-4)` to `2i`, but `sqrt(-2)` stays written —
-the spec wants `i·sqrt(2)`. So the negative-radicand path only fires when the
-radicand is a perfect square; pulling `-1` out of a non-square is missing.
+Not the region search, as first guessed — the tolerance *value*. Instrumented at
+the accepting sample point, ours was `2.38e123` where legacy's was `5.59e122`,
+**4.26× larger**, with the true difference `1.13e123` falling between them.
+The parameter lists explain it exactly:
 
-This file was at zero in the 97-snapshot, and the spec itself has not changed
-since `264be80`, so this is either newly surfaced or was masked there by the
-uncommitted work that snapshot carried. **Not bisected** — do that before
-treating it as a regression.
+```
+legacy:  par1=10, par2=7, par3=3
+ours:    par1=10, par2=7, par3=3, par4=-1     <-- spurious
+         par1 exp(par2 x^2 (par3 + par4 sqrt(y))^(-1))
+```
+
+`canonicalize` spells `3 - sqrt(y)` as `3 + (-1)·sqrt(y)`, and `replace_numbers`
+took that structural `-1` for a number the author had typed — so the tolerance
+carried a `∂f/∂(-1)` term, "what if the minus sign were 0.01% more negative".
+Here that term *dominated*. Legacy never had the problem: its `-` is a unary
+node containing no number.
+
+Fix in `equality/fuzzy.rs::replace_numbers`: a factor of exactly `-1` inside a
+`Mul` is a sign, not a magnitude, and is not parameterized. (`-2x` still
+parameterizes its `-2`.) This is JS parity, not a divergence.
+
+**Generality — worth noting.** The bug inflated the grading tolerance for *any*
+expression containing a subtraction, always in the accept-too-much direction.
+Only one compat test happened to catch it. Verified: 0 regressions across the
+6327-test suite, 77 cargo suites green, clippy clean, and the
+`tolerance-known-failures.json` snapshot shrank by exactly this one entry.
 
 ### The 2 `slow_rational` failures — a constant-policy divergence
 
@@ -175,12 +213,11 @@ a declaration problem. Fix that and the test can be un-skipped.
 
 ## Remaining buckets by theme
 
-These add to 83.
+These add to 61.
 
-**Numerical-tolerance equality (39)** — the two `check-*-numerical-errors` specs,
-broken down above. Not a tolerance-arithmetic bucket: 38 of them are canonical
-form keying on the numbers the tolerance is meant to blur. The largest single
-area by a wide margin.
+**Numerical-tolerance equality (18)** — all now in
+`slow_check-symbolic-equality-numerical-errors`, one cause, broken down above.
+Was 39; the root-spelling and `-1` fixes closed 21.
 
 **Unimplemented / unbound APIs (20)** — `quick_trees` (17, predicate/regex
 callback matching cannot cross the wasm boundary) and `quick_solve` (3,
@@ -195,35 +232,46 @@ a scatter of individual normalization decisions rather than one bucket.
 `src/print/text.rs` tests `starts_with('(') && ends_with(')')`, which cannot
 distinguish `(a or b)` from `(a) or (b)`. It needs a paren-balance scan.
 
-**Radical folding (1)** — `sqrt(-2)`, described above.
 
 ## Highest-leverage remaining item
 
-The two `check-*-numerical-errors` specs (39) are **47% of all remaining
-failures**, and the investigation above reduces them to one idea in two places:
-under a number allowance, the comparison must not be made against a canonical
-form that those same numbers selected. Concretely, two independent changes,
-either of which can land alone:
+`quick_trees` (17) is now the largest bucket, and it is a single binding
+problem, not seventeen: the matcher takes JS predicate and `RegExp` conditions,
+which cannot cross the wasm boundary. It needs either a callback bridge or a
+Rust-side condition vocabulary.
 
-1. **20 tests** — give `equals` the normalization legacy gives it, so both
-   spellings of a root meet. `equals_syntactic` already does this and already
-   answers correctly; the cheapest version is to route the fuzzy structural stage
-   through the same `normalize_syntactic` rather than to change what
-   `canonicalize` considers canonical. (Changing the canonical spelling of roots
-   would fix it too, and is the wrong lever — wide blast radius, and the `sqrt`
-   spelling is load-bearing elsewhere.)
-2. **18 tests** — make the fuzzy comparison of a commutative `Add`/`Mul`
+Next after that is the remaining numerical-errors bucket:
+
+1. **18 tests** — make the fuzzy comparison of a commutative `Add`/`Mul`
    order-insensitive (match children as a multiset under the same fuzzy
-   predicate) instead of pairwise. Re-sorting under tolerance is not well-defined
-   — `1.99991 < 2` is a true fact about the key — so the comparison, not the
-   order, is the thing to fix.
+   predicate) instead of pairwise, gated on `allowed_error_in_numbers > 0` so
+   `equals_syntactic`'s documented order-sensitivity survives at the default.
+   Re-sorting under tolerance is not well-defined — `1.99991 < 2` is a true fact
+   about the key — so the comparison, not the order, is the thing to fix.
+   Bipartite matching, not greedy: fuzzy equality is not transitive.
 
-The remaining 1 is a genuine over-acceptance in the sampling stage and is
-independent of both.
+### Rejected: folding roots to powers in `canonicalize`
 
-After that, `quick_trees` (17) is a single binding problem, not seventeen: the
-matcher takes JS predicate and `RegExp` conditions, which cannot cross the wasm
-boundary. It needs either a callback bridge or a Rust-side condition vocabulary.
+Recorded so it is not relitigated. The 20 root-spelling failures were fixed in
+`equals` instead. Changing the canonical spelling was scoped and rejected:
+
+`ops/transforms.rs:122` records keeping `sqrt(x)` and `x^(1/2)` as distinct
+canonical trees as a deliberate decision, and the oracle backs it — legacy also
+keeps them distinct in `.tree` and in printed output, folding to a power only
+inside the explicit `normalize_function_names` pass:
+
+```
+legacy  fromText("sqrt(q)").tree  ->  ["apply","sqrt","q"]    prints sqrt(q)
+legacy  fromText("q^(1/2)").tree  ->  ["^","q",["/",1,2]]     prints q^(1/2)
+```
+
+Making `canonicalize` fold roots would break `q^(1/2)` round-tripping (the two
+become one tree and must therefore print alike), move roots from the `Apply` to
+the `Pow` rank in both comparators, cost `sqrt(8) → 2√2` unless
+`rule_radical`'s numeric-base-only `Pow` arm is generalized, drop `sqrt` off its
+dedicated `z.sqrt()` / `FixId::Sqrt` kernels onto generic `powc` (branch-cut
+risk), and require regenerating ~130 fixture entries. The gap was in `equals`, so
+it was fixed in `equals`.
 
 A note for whoever picks these up: several past fixes turned out to be *bindings*
 for engine code that already existed and was already exercised elsewhere. Before
