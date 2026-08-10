@@ -71,6 +71,24 @@ fn leaf_name(e: &Expr) -> String {
     }
 }
 
+/// Tiebreak between the two spellings of one name, `Const` first.
+///
+/// [`leaf_name`] deliberately reports the same name for `Const(Pi)` and
+/// `Sym("pi")` so they sort together — but they are only the *same value* while
+/// the name is declared, and `canonicalize` collapses them then. Undeclared,
+/// both can stand in one tree, and a comparator that called them `Equal` would
+/// leave their relative position to the (stable) sort's input order — the sum
+/// `Const(Pi) + Sym("pi")` and the sum `Sym("pi") + Const(Pi)` would
+/// canonicalize to different trees, and `==` would call two identical
+/// expressions unequal. The comparator has to be a total order over *values*,
+/// so distinct spellings get distinct keys.
+fn spelling_rank(e: &Expr) -> u8 {
+    match e {
+        Expr::Const(_) => 0,
+        _ => 1,
+    }
+}
+
 /// Total order on numbers: by numeric value, with an exact tiebreak (so two
 /// distinct rationals with the same f64 still order deterministically).
 pub(crate) fn number_cmp(a: &Number, b: &Number) -> Ordering {
@@ -107,10 +125,12 @@ pub(crate) fn cmp(a: &Expr, b: &Expr) -> Ordering {
         // `Const(Pi)` land together, and neither jumps ahead of the variables —
         // sorting is alphabetical whatever `constant_policy` declares, because
         // this comparator is what makes `==` on canonical trees mean equality
-        // (and canonical trees are persisted in DoenetML document state).
-        (Expr::Const(_) | Expr::Sym(_), Expr::Const(_) | Expr::Sym(_)) => {
-            leaf_name(a).cmp(&leaf_name(b))
-        }
+        // (and canonical trees are persisted in DoenetML document state). Which
+        // is also why the two spellings still break their tie rather than
+        // comparing `Equal` — see `spelling_rank`.
+        (Expr::Const(_) | Expr::Sym(_), Expr::Const(_) | Expr::Sym(_)) => leaf_name(a)
+            .cmp(&leaf_name(b))
+            .then_with(|| spelling_rank(a).cmp(&spelling_rank(b))),
         (Expr::Bool(x), Expr::Bool(y)) => x.cmp(y),
         (Expr::Blank, Expr::Blank) | (Expr::Ldots, Expr::Ldots) => Ordering::Equal,
         (

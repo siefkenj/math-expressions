@@ -509,15 +509,20 @@ class Expression {
     // spend turning an exact value into a decimal. `Infinity` — spend as many
     // as it takes — folds `π` and `1/3` too, which is what makes
     // `2π + π + 6` comparable against a response typed as `15.42478`; it is
-    // what DoenetML's grading path passes. A *finite* cap is not implemented:
-    // it would have to decide per value whether the decimal fits the budget,
-    // and silently ignoring it would round a student's value without saying so.
+    // what DoenetML's grading path passes. A *finite* cap converts only the
+    // rationals whose decimal fits that many significant figures: `1/2 → 0.5`
+    // at any budget ≥ 1, but `1/3` stays exact (its decimal never terminates)
+    // and `π` stays symbolic (an irrational is never captured by a finite
+    // count). Both go through the same digit-budget core; only `undefined`
+    // (omit) keeps every exact value.
     const maxDigits = opts?.max_digits;
-    if (maxDigits !== undefined && maxDigits !== Infinity) {
+    if (
+      maxDigits !== undefined &&
+      maxDigits !== Infinity &&
+      !(Number.isInteger(maxDigits) && maxDigits >= 0)
+    ) {
       throw new Error(
-        `evaluate_numbers: 'max_digits' is only supported as Infinity (got ${maxDigits}). ` +
-          "A finite digit budget is not implemented — pass Infinity to fold exact " +
-          "values to floats, or omit it to keep them exact.",
+        `evaluate_numbers: 'max_digits' must be a non-negative integer or Infinity (got ${maxDigits}).`,
       );
     }
     const skipOrdering = Boolean(opts?.skip_ordering);
@@ -525,9 +530,13 @@ class Expression {
     // argument (`sin(0)+2` → `2`), which is what `simplify="full"` needs.
     const evaluateFunctions = Boolean(opts?.evaluate_functions);
     let result;
-    if (maxDigits === Infinity) {
+    if (maxDigits !== undefined) {
       result = wrap(
-        this._w.evaluate_numbers_to_floats(skipOrdering, evaluateFunctions),
+        this._w.evaluate_numbers_to_floats(
+          skipOrdering,
+          evaluateFunctions,
+          maxDigits,
+        ),
         this.context,
       );
     } else if (skipOrdering) {

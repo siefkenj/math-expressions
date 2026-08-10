@@ -113,6 +113,32 @@ fn an_even_root_of_a_real_power_keeps_its_abs_beside_the_residual() {
 }
 
 #[test]
+fn abs_distributes_over_a_power_only_when_the_exponent_is_real_too() {
+    // `|bʷ| = |b|ʷ` holds because `|bʷ| = |b|ʷ·e^(−arg(b)·Im w)`, so it needs a
+    // real exponent as much as a real base. This is what turns the `4·|x³|` an
+    // even-root extraction yields into the conventional `4·|x|³`.
+    assert_eq!(
+        under(&["x elementof R"], "sqrt(16 x^6)"),
+        r#"["*",4,["^",["apply","abs","x"],3]]"#
+    );
+    assert_eq!(
+        under(&["x elementof R"], "abs(x^3)"),
+        r#"["^",["apply","abs","x"],3]"#
+    );
+    // An imaginary exponent must not distribute: for real `b > 0`, `|b^i|` is 1
+    // while `|b|^i` is not even real.
+    assert_eq!(
+        under(&["x elementof R"], "abs(x^i)"),
+        r#"["apply","abs",["^","x","i"]]"#
+    );
+    // An exponent of unknown realness declines for the same reason.
+    assert_eq!(
+        under(&["x elementof R"], "abs(x^w)"),
+        r#"["apply","abs",["^","x","w"]]"#
+    );
+}
+
+#[test]
 fn without_assumptions_a_variable_radicand_never_folds() {
     // The settled root spec: only the numeric coefficient moves.
     assert_eq!(bare("sqrt(x^2)"), r#"["apply","sqrt",["^","x",2]]"#);

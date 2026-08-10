@@ -306,10 +306,13 @@ impl Expression {
         self.derive(evaluate_numbers_evaluate_functions(&self.0))
     }
 
-    /// The three `evaluate_numbers` forms above with `max_digits: Infinity` —
-    /// exact leaves, `π` and `e` included, become floats before the fold, so a
-    /// variable-free subtree collapses to one number (`2π + π + 6` →
-    /// `15.42477796076938`).
+    /// The three `evaluate_numbers` forms above under a `max_digits` budget.
+    /// `max_digits` is a JS number: `Infinity` spends without limit (`π`, `e`
+    /// and every folded rational become floats, so a variable-free subtree
+    /// collapses to one number — `2π + π + 6 → 15.42477796076938`), while a
+    /// finite value converts only the rationals whose decimal fits that many
+    /// significant figures (`1/2 → 0.5`, but `1/3` stays exact). A negative or
+    /// non-integer finite value is clamped to `0` ("integers only").
     ///
     /// One entry point rather than three more, because the JS option object
     /// crosses two independent flags and the product of them is not worth six
@@ -319,8 +322,15 @@ impl Expression {
         &self,
         skip_ordering: bool,
         evaluate_functions: bool,
+        max_digits: f64,
     ) -> Expression {
-        let d = MaxDigits::Unlimited;
+        let d = if max_digits.is_infinite() && max_digits > 0.0 {
+            MaxDigits::Unlimited
+        } else if max_digits.is_finite() && max_digits >= 0.0 {
+            MaxDigits::Finite(max_digits as u32)
+        } else {
+            MaxDigits::Finite(0)
+        };
         self.derive(if skip_ordering {
             evaluate_numbers_preserve_order_with_digits(&self.0, d)
         } else if evaluate_functions {

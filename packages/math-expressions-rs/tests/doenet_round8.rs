@@ -40,8 +40,8 @@ fn unlimited_digits_folds_a_variable_free_subtree_to_one_number() {
     assert_eq!(folded("2pi+pi+6"), "15.42477796076938");
     assert_eq!(folded("pi"), "3.141592653589793");
     assert_eq!(folded("pi/2"), "1.5707963267948966");
-    // An exact value that is already non-integral is spent; one that is not
-    // stays put — see `to_floats` for why the budget stops there.
+    // A non-integral value is spent, whether it was written non-integral or
+    // only became so once the fold combined two integers — see `spend_rationals`.
     assert_eq!(folded("0.5+1/4"), "0.75");
     // The whole point is that this lands beside a typed decimal: the two agree
     // to well inside the `0.001` a student is usually allowed.
@@ -51,15 +51,35 @@ fn unlimited_digits_folds_a_variable_free_subtree_to_one_number() {
     );
 }
 
-/// The budget stops at values that are exactly integral, which is narrower than
-/// legacy: `x/3` stayed `x/3` here where legacy gave `0.3333333333333333 x`.
-/// The difference is deliberate and measured — floating integers costs 6 to 25
-/// tests depending on how far it is taken, and buys none.
+/// The budget converts non-integral rationals — including a `1/3` that only
+/// appears once the fold has combined `x` with `3` — matching legacy
+/// (`x/3 → 0.3333333333333333 x`). What it never touches is an *integer*: a
+/// base, an exponent, or a whole coefficient stays exact, because a dozen rules
+/// key on integers staying integers (`log_2(2^x)`, `e^3`, `sin^(-1)`). See
+/// `spend_rationals`, which spends after the fold and skips exponents — the two
+/// choices that keep this from costing the 6–25 tests an eager pre-fold float of
+/// every value once did.
 #[test]
-fn integral_values_stay_exact_even_under_the_budget() {
-    assert_eq!(folded("x/3"), r#"["/","x",3]"#);
+fn non_integral_values_spend_but_integers_stay_exact() {
+    assert_eq!(folded("x/3"), r#"["*",0.3333333333333333,"x"]"#);
+    assert_eq!(folded("1/3"), "0.3333333333333333");
     assert_eq!(folded("2^x"), r#"["^",2,"x"]"#);
     assert_eq!(folded("x^2"), r#"["^","x",2]"#);
+}
+
+/// A *finite* budget spends only the rationals whose decimal fits that many
+/// significant figures. `1/2` is `0.5` at any budget ≥ 1; `1/3` never
+/// terminates, so no finite budget captures it and the fraction survives.
+#[test]
+fn a_finite_budget_spends_only_what_fits() {
+    let finite = |s: &str, d: u32| js(&evaluate_numbers_with_digits(&t(s), MaxDigits::Finite(d)));
+    assert_eq!(finite("1/2", 1), "0.5");
+    assert_eq!(finite("x/2", 3), r#"["*",0.5,"x"]"#);
+    assert_eq!(finite("x/3", 5), r#"["/","x",3]"#);
+    // `(1/2)i + 3/4` at 2 sig figs: both coefficients fit, `i` survives.
+    assert_eq!(finite("(1/2)i+3/4", 2), r#"["+",["*",0.5,"i"],0.75]"#);
+    // `Finite(0)` is legacy's "integers only": nothing non-integral converts.
+    assert_eq!(finite("1/2", 0), r#"["/",1,2]"#);
 }
 
 /// Without the budget nothing changes, which is what keeps `simplify="numbers"`

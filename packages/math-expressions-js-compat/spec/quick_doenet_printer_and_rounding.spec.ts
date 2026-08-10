@@ -46,12 +46,20 @@ describe("item 9 — integer powers of i fold", () => {
 
 describe("item 9 — numeric roots: prefer real, else principal complex", () => {
   it("folds a square root of a negative number to its principal value", () => {
+    // `i` surfaces only when the whole radicand is a perfect square. Otherwise
+    // the perfect-square factor comes out and the sign stays under the root,
+    // matching the JS oracle (`sqrt(-810)` → `9·sqrt(-10)`).
     expect(me.fromText("sqrt(-1)").simplify().tree).toBe("i");
     expect(me.fromText("sqrt(-4)").simplify().tree).toEqual(["*", 2, "i"]);
     expect(me.fromText("sqrt(-2)").simplify().tree).toEqual([
+      "apply",
+      "sqrt",
+      -2,
+    ]);
+    expect(me.fromText("sqrt(-8)").simplify().tree).toEqual([
       "*",
-      "i",
-      ["apply", "sqrt", 2],
+      2,
+      ["apply", "sqrt", -2],
     ]);
   });
 

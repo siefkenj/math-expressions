@@ -224,6 +224,41 @@ fn the_explicit_constant_spelling_survives_an_undeclared_name() {
     });
 }
 
+/// Undeclared, the two spellings can stand in one tree — and then the
+/// comparator has to separate them. It reports the same *name* for both so they
+/// sort together, but a tie there would leave their order to the (stable) sort's
+/// input order, and two sums of the same terms would canonicalize to trees that
+/// `==` calls unequal.
+#[test]
+fn the_two_spellings_order_deterministically_when_both_appear() {
+    use math_expressions::MathConst;
+    let konst = Expr::Const(MathConst::Pi);
+    let name = Expr::sym("pi");
+
+    constant_policy::with(ConstantPolicy::ALL_VARIABLES, || {
+        let one = simplify(&Expr::Add(vec![konst.clone(), name.clone()]));
+        let other = simplify(&Expr::Add(vec![name.clone(), konst.clone()]));
+        assert_eq!(
+            one, other,
+            "canonical form of `Const(Pi) + Sym(\"pi\")` depends on which was written first"
+        );
+    });
+}
+
+/// The infinity fold in the `add` constructor absorbs a *constant* term, and
+/// a declared `π` is one — `canonicalize` and `simplify` must not disagree about
+/// which sums reduce. Undeclared, the same `pi` is a free variable of unknown
+/// magnitude and blocks the fold, exactly as `x` does.
+#[test]
+fn an_infinity_absorbs_a_declared_constant_but_not_a_variable() {
+    assert_eq!(simp("pi + infinity"), "∞");
+    assert_eq!(simp("x + infinity"), "x + ∞");
+    assert_eq!(
+        simp_under(ConstantPolicy::ALL_VARIABLES, "pi + infinity"),
+        "π + ∞"
+    );
+}
+
 /// A policy scope restores the previous one, including when the body panics —
 /// ambient state that leaked would silently mis-declare every later call on the
 /// thread.

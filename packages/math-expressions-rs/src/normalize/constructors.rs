@@ -75,7 +75,7 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
                 Some(1) => pos = true,
                 Some(-1) => neg = true,
                 Some(0) => nan = true,
-                _ => symbolic |= !matches!(t, Expr::Num(_)),
+                _ => symbolic |= !is_finite_term(t),
             }
         }
         if nan || (pos && neg) {
@@ -448,6 +448,26 @@ fn peel_nonzero_scaling(e: &Expr) -> &Expr {
                 }
             }
             _ => return cur,
+        }
+    }
+}
+
+/// A term of known-finite magnitude, which an `∞` in the same sum absorbs.
+/// Numbers, and the named constants in either spelling *while declared* — an
+/// undeclared `pi` is a free variable and blocks the fold like any other.
+///
+/// This must stay the same notion `simplify`'s `rule_infnan` uses
+/// (`is_infnan_constant`), or `canonicalize` and `simplify` disagree about
+/// `π + ∞`: the one that never folded would leave a sum the other reduced,
+/// and the two results would not compare equal.
+fn is_finite_term(e: &Expr) -> bool {
+    match e {
+        Expr::Num(_) => true,
+        Expr::Neg(b) => is_finite_term(b),
+        _ => {
+            crate::constant_policy::is_pi(e)
+                || crate::constant_policy::is_e(e)
+                || crate::constant_policy::is_i(e)
         }
     }
 }

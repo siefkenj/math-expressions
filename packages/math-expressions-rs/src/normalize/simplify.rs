@@ -275,9 +275,15 @@ fn rule_assumptions(e: &Expr, a: &Assumptions) -> Option<Expr> {
         // Distribute over real operands: `|uⁿ| = |u|ⁿ`, `|∏ uᵢ| = ∏ |uᵢ|`. This
         // is what turns the `sqrt(16x⁶) → 4·|x³|` an even-root extraction yields
         // into the conventional `4·|x|³`.
+        //
+        // The *exponent* has to be real too, not just the base: `|b^w| = |b|^w`
+        // holds because `|b^w| = |b|^w · e^(−arg(b)·Im w)`, and that correction
+        // vanishes only for real `w`. With `w = i` and `b` real positive the
+        // left side is 1 while `|b|^i` is not even real — an `abs` that returned
+        // a complex value.
         let abs = |x: &Expr| Expr::Apply(Box::new(Expr::sym("abs")), vec![x.clone()]);
         match arg {
-            Expr::Pow(b, x) if is_real(b, a) == Some(true) => {
+            Expr::Pow(b, x) if is_real(b, a) == Some(true) && is_real(x, a) == Some(true) => {
                 return Some(super::pow(abs(b), (**x).clone()));
             }
             Expr::Mul(fs) if fs.iter().all(|f| is_real(f, a) == Some(true)) => {
@@ -1383,11 +1389,6 @@ fn simplify_root(
     }
 }
 
-/// The principal square root of a negative rational whose magnitude is
-/// `num/den`: `sqrt(-c) = sqrt(c)·i`, with the perfect-square part pulled out
-/// so the result is fully reduced — `sqrt(-1) → i`, `sqrt(-4) → 2i`,
-/// `sqrt(-2) → i·sqrt(2)`, `sqrt(-8) → 2·i·sqrt(2)`, `sqrt(-1/4) → i/2`. The
-/// factor order is normalized by the surrounding canonicalization.
 /// Even root of a negative `−(num/den)·rest` (`num/den > 0`): pull the positive
 /// perfect-`q`-th-power factor `m` out (`sqrt(−16x) → 4·sqrt(−x)`,
 /// `nthroot(−16x³,4) → 2·nthroot(−x³,4)`), keeping the sign and any variable

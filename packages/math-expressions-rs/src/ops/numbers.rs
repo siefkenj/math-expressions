@@ -24,6 +24,17 @@ use std::collections::BTreeSet;
 /// [`without_like_term_collection`](crate::normalize::without_like_term_collection)
 /// for exactly what that does and does not suppress.
 pub fn evaluate_numbers(e: &Expr) -> Expr {
+    evaluate_numbers_budget(e, MaxDigits::None)
+}
+
+/// [`evaluate_numbers`] under a digit budget. The default budget
+/// ([`MaxDigits::None`]) is exactly [`evaluate_numbers`]; a non-`None` budget
+/// additionally spends exact rationals into decimals *after* the fold — see
+/// [`spend_rationals`] — which is why `1/3` reaches `0.333` under `Unlimited`
+/// where floating the input `["/", 1, 3]` before the fold never could (its two
+/// operands are integers and integers do not float; the `Rat(1, 3)` only exists
+/// once the fold has combined them).
+fn evaluate_numbers_budget(e: &Expr, budget: MaxDigits) -> Expr {
     if crate::equality::contains_blank(e) {
         return e.clone();
     }
@@ -36,7 +47,12 @@ pub fn evaluate_numbers(e: &Expr) -> Expr {
     // (`Rat·Float → Float`). Exact rationals are left exact, so `0.1 + 0.2`
     // still folds to an exact `0.3` rather than the `0.30000…4` a blanket float
     // conversion would give.
-    let prepped = if contains_inexact(e) {
+    //
+    // An `Unlimited` budget floats the constants unconditionally, so `2π + π`
+    // folds to one number even with no decimal in the input. A *finite* budget
+    // does not: `π` is irrational, so no finite count of digits captures it, and
+    // legacy left it symbolic (a written decimal still floats it, by contagion).
+    let prepped = if matches!(budget, MaxDigits::Unlimited) || contains_inexact(e) {
         constants_to_floats(e)
     } else {
         e.clone()
@@ -49,7 +65,16 @@ pub fn evaluate_numbers(e: &Expr) -> Expr {
     crate::normalize::without_like_term_collection(|| {
         let canon = canonicalize(&prepped);
         let folded = canonicalize(&fold_infnan_tree(&canon));
-        present(&crate::normalize::fold_units(&folded))
+        let united = crate::normalize::fold_units(&folded);
+        // Spend the budget on the *folded* rationals, on the canonical form: a
+        // coefficient like the `1/3` in `x/3` is a single `Rat` here, so the
+        // leaf rule below reaches it, and `present` restores the display order
+        // (`["*", 0.333, "x"]`, number first).
+        let spent = match budget {
+            MaxDigits::None => united,
+            _ => spend_rationals(&united, budget),
+        };
+        present(&spent)
     })
 }
 
@@ -120,92 +145,188 @@ pub enum MaxDigits {
     /// side, and what DoenetML's grading path passes so that a response typed
     /// as `6.28318` can be compared against a target that still holds `2π`.
     Unlimited,
+    /// Spend up to `n` **significant digits**: an exact value becomes a decimal
+    /// only when its shortest exact decimal fits within `n` significant figures.
+    /// `1/2` folds at any `n ≥ 1` (it is `0.5`), but `1/3` never does — its
+    /// decimal does not terminate, so no finite budget can hold it — and `π`
+    /// stays symbolic (an irrational is never captured by a finite count).
+    /// Legacy's positive-integer `max_digits`. `Finite(0)` is legacy's
+    /// "integers only": nothing non-integral fits.
+    Finite(u32),
 }
 
 /// [`evaluate_numbers`] under a digit budget.
 ///
 /// With [`MaxDigits::None`] this is exactly [`evaluate_numbers`]. With
-/// [`MaxDigits::Unlimited`] every exact leaf — integers, rationals, and the
-/// constants `π` and `e` — becomes a float first, so a variable-free subtree
-/// folds to a single number: `2π + π + 6` is `15.42477796076938` rather than
-/// `6 + π + 2π`, and `x/3` is `0.3333333333333333 x`.
+/// [`MaxDigits::Unlimited`] the constants `π`, `e` and every folded rational
+/// become floats, so a variable-free subtree collapses to one number: `2π + π +
+/// 6` is `15.42477796076938`, `1/3` is `0.3333333333333333`, and `x/3` is
+/// `0.3333333333333333 x`. A [`MaxDigits::Finite`] budget converts only the
+/// rationals whose decimal fits (`1/2 → 0.5`, but `1/3` stays exact).
 ///
-/// The conversion happens *before* the fold rather than after, because folding
-/// first would leave `2π + π` as two terms that no later pass can join: exact
-/// `π` terms only collect as like terms, which this pass deliberately does not
-/// do (see [`evaluate_numbers`]).
-///
-/// `i` is left alone. It is a constant symbol like `π`, but it has no real
-/// value to become, and the imaginary unit surviving the pass is what keeps
+/// `i` is left alone throughout. It is a constant symbol like `π`, but it has no
+/// real value to become, and the imaginary unit surviving the pass is what keeps
 /// `0.5i + 0.75` a complex number rather than nonsense.
 pub fn evaluate_numbers_with_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
-    if crate::equality::contains_blank(e) {
-        return e.clone();
-    }
-    evaluate_numbers(&spend_digits(e, max_digits))
+    evaluate_numbers_budget(e, max_digits)
 }
 
 /// [`evaluate_numbers_evaluate_functions`] under a digit budget.
 ///
-/// The budget is spent twice here, once on each side of the fold, because this
-/// is the form that *creates* constants: `sin⁻¹(1)` evaluates to `π/2`, and a
-/// `π` the fold introduced was never in the tree the pre-pass walked. Spending
-/// only before left `asin(1)` at `π/2` while the target it was being compared
-/// against — a `π/2` the author wrote — came out as `1.5707963267948966`, and
-/// syntactic equality reads two spellings of the same number as unequal.
+/// The budget is spent on both sides of the fold, because this is the form that
+/// *creates* constants: `sin⁻¹(1)` evaluates to `π/2`, and a `π` the fold
+/// introduced was never in the tree a pre-pass walked. Spending only before left
+/// `asin(1)` at `π/2` while the target it was compared against — a `π/2` the
+/// author wrote — came out as `1.5707963267948966`, and syntactic equality
+/// reads two spellings of the same number as unequal. The trailing
+/// [`evaluate_numbers_budget`] pass is what folds and then spends the rationals.
 pub fn evaluate_numbers_evaluate_functions_with_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
     if crate::equality::contains_blank(e) {
         return e.clone();
     }
-    let folded = evaluate_numbers_evaluate_functions(&spend_digits(e, max_digits));
+    // `constants_to_floats` up front so a function of a constant (`cos(pi)`)
+    // sees the number; only for `Unlimited`, matching `evaluate_numbers_budget`.
+    let prepped = match max_digits {
+        MaxDigits::Unlimited => constants_to_floats(e),
+        _ => e.clone(),
+    };
+    let folded = evaluate_numbers_evaluate_functions(&prepped);
     match max_digits {
         MaxDigits::None => folded,
-        MaxDigits::Unlimited => evaluate_numbers(&spend_digits(&folded, max_digits)),
+        _ => evaluate_numbers_budget(&folded, max_digits),
     }
 }
 
 /// [`evaluate_numbers_preserve_order`](crate::ops::evaluate_numbers_preserve_order)
-/// under a digit budget.
+/// under a digit budget. Order-preserving folding produces the faithful display
+/// form (`Div`/`Neg` kept), so the budget is spent on that form afterwards —
+/// [`spend_rationals`] handles a division bar directly and never reorders.
 pub fn evaluate_numbers_preserve_order_with_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
     if crate::equality::contains_blank(e) {
         return e.clone();
     }
-    crate::ops::evaluate_numbers_preserve_order(&spend_digits(e, max_digits))
-}
-
-/// Turn exact leaves into floats as far as `max_digits` allows.
-fn spend_digits(e: &Expr, max_digits: MaxDigits) -> Expr {
+    let prepped = match max_digits {
+        MaxDigits::Unlimited => constants_to_floats(e),
+        _ => e.clone(),
+    };
+    let folded = crate::ops::evaluate_numbers_preserve_order(&prepped);
     match max_digits {
-        MaxDigits::None => e.clone(),
-        MaxDigits::Unlimited => to_floats(&constants_to_floats(e)),
+        MaxDigits::None => folded,
+        _ => spend_rationals(&folded, max_digits),
     }
 }
 
-/// Every number in `e` as a float — with `Number::from_f64`'s reading of
-/// "float", which keeps an integral value as an `Int`.
+/// Spend a digit budget by turning exact rationals into decimals where the
+/// budget allows — the post-fold half of the `max_digits` option.
 ///
-/// That last part is a deliberate limit rather than an accident of the
-/// constructor. Legacy spent the budget on *every* exact value, so `x/3` came
-/// back as `0.3333333333333333 x`; ours declines, because an integer that stays
-/// an integer is what a dozen rules key on — `log_2(2^x)` collapses, `e^3` is
-/// exact, `sin^(-1)` reads as an inverse function, `int(x·x)` integrates. The
-/// widened version was measured against the suite twice: floating every value
-/// cost 25 tests, and floating everything outside exponents still cost 6. None
-/// of the tests it fixed needed more than the constants.
+/// Only *non-integral* values convert. An integer that stays an integer is what
+/// a dozen rules key on — `log_2(2^x)` collapses, `e^3` is exact, `sin^(-1)`
+/// reads as an inverse function, `int(x·x)` integrates — and floating them was
+/// measured against the suite as a net loss (25 tests when every value floated,
+/// 6 even with exponents exempt). Exponents are exempt for the same reason:
+/// `x^(1/2)` must stay a root, not become `x^0.5`, so a `Pow` spends its base
+/// only.
 ///
-/// So what the budget actually buys is `π` and `e` (converted by the caller,
-/// via [`constants_to_floats`]) and any exact value that is already
-/// non-integral. That is the whole of what DoenetML's grading path asks for: a
-/// target holding `2π + π + 6` becomes one number, and a response typed as
-/// `15.42478` lands within the tolerance of it.
-///
-/// `NegZero` is left alone as the one exact value whose *identity* carries
-/// information a float cannot (`1/(−0)` is `−∞`).
-fn to_floats(e: &Expr) -> Expr {
-    map_numbers(e, &|n| match n {
-        Number::Float(_) | Number::NegZero => n.clone(),
-        _ => Number::from_f64(n.to_f64()),
-    })
+/// A written decimal (`Spelling::Decimal`) always converts — the author already
+/// accepted float precision — while a written fraction converts only when its
+/// decimal fits the budget ([`fits`]). `Unlimited` converts every non-integral
+/// value; `NegZero` is left alone as the one exact value whose *identity*
+/// carries information a float cannot (`1/(−0)` is `−∞`).
+fn spend_rationals(e: &Expr, budget: MaxDigits) -> Expr {
+    if matches!(budget, MaxDigits::None) {
+        return e.clone();
+    }
+    match e {
+        Expr::Num(n) => match spend_number(n, budget) {
+            Some(f) => Expr::Num(f),
+            None => e.clone(),
+        },
+        // Exponents never float (`x^(1/2)` stays a root); spend the base only.
+        Expr::Pow(base, exp) => Expr::Pow(Box::new(spend_rationals(base, budget)), exp.clone()),
+        // Faithful-layer division (the display / order-preserving form): fold a
+        // bare `number / integer` into a decimal, or pull a `1/integer`
+        // coefficient in front of a symbolic numerator (`x/3 → 0.333·x`).
+        Expr::Div(a, b) => {
+            let a = spend_rationals(a, budget);
+            let b = spend_rationals(b, budget);
+            spend_division(&a, &b, budget).unwrap_or(Expr::Div(Box::new(a), Box::new(b)))
+        }
+        _ => map_children(e, |c| spend_rationals(c, budget)),
+    }
+}
+
+/// A single non-integral number spent to a float when the budget allows;
+/// `None` to leave it exact. See [`spend_rationals`].
+fn spend_number(n: &Number, budget: MaxDigits) -> Option<Number> {
+    if is_integer_valued(n) || matches!(n, Number::Float(_) | Number::NegZero) {
+        return None;
+    }
+    let v = n.to_f64();
+    let convert = match budget {
+        MaxDigits::None => false,
+        MaxDigits::Unlimited => true,
+        MaxDigits::Finite(d) => n.spelling() == Spelling::Decimal || fits(v, d),
+    };
+    convert.then(|| Number::from_f64(v))
+}
+
+/// Spend `a / b` where `b` is an integer, for the faithful `Div` form.
+/// `number / integer` becomes one decimal; `symbolic / integer` becomes the
+/// reciprocal times the numerator. Returns `None` (leave the bar in place) when
+/// the resulting decimal does not fit the budget.
+fn spend_division(a: &Expr, b: &Expr, budget: MaxDigits) -> Option<Expr> {
+    let denom = match b {
+        Expr::Num(n) if is_integer_valued(n) && !n.is_zero() => n.to_f64(),
+        _ => return None,
+    };
+    match a {
+        Expr::Num(n) if is_integer_valued(n) => {
+            let q = n.to_f64() / denom;
+            budget_fits(q, budget).then(|| Expr::Num(Number::from_f64(q)))
+        }
+        _ => {
+            let recip = 1.0 / denom;
+            budget_fits(recip, budget)
+                .then(|| Expr::Mul(vec![Expr::Num(Number::from_f64(recip)), a.clone()]))
+        }
+    }
+}
+
+/// Whether `v` may be spent under `budget` — always under `Unlimited`, and under
+/// a finite budget when its decimal fits ([`fits`]). Only called on values that
+/// are already known non-integral.
+fn budget_fits(v: f64, budget: MaxDigits) -> bool {
+    match budget {
+        MaxDigits::None => false,
+        MaxDigits::Unlimited => true,
+        MaxDigits::Finite(d) => fits(v, d),
+    }
+}
+
+/// Whether `v` is exactly representable in `digits` significant figures — the
+/// finite-`max_digits` test, ported from legacy's `evalf(c, d) === evalf(c, 14)`
+/// (14 standing in for "as exact as a float gets"). `digits == 0` is legacy's
+/// "integers only", so a non-integral value never fits it.
+fn fits(v: f64, digits: u32) -> bool {
+    if digits == 0 {
+        return false;
+    }
+    round_sig(v, digits) == round_sig(v, 14)
+}
+
+/// Round `v` to `digits` significant figures (ties away from zero, as `f64::round`).
+fn round_sig(v: f64, digits: u32) -> f64 {
+    if v == 0.0 || !v.is_finite() {
+        return v;
+    }
+    let places = digits as i32 - 1 - v.abs().log10().floor() as i32;
+    let factor = 10f64.powi(places);
+    (v * factor).round() / factor
+}
+
+/// Whether `n` holds a whole-number value (`Int`, or a `Big` integer).
+fn is_integer_valued(n: &Number) -> bool {
+    matches!(n, Number::Int(_)) || matches!(n, Number::Big(b) if matches!(&**b, BigNumber::Int(_)))
 }
 
 /// Cancel common polynomial factors in fractions — the port of
