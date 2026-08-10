@@ -58,32 +58,30 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
         }
     }
 
-    // Infinity arithmetic on an *all-constant* sum: `∞ + finite = ∞`,
-    // `∞ + ∞ = ∞`, but `∞ + (−∞) = NaN`, and any `NaN` poisons. Fires only when
-    // every term is a number or an infinity — a free variable has unknown sign,
-    // so `x + ∞ − ∞` must keep `x` rather than collapse (see the conservative
-    // regression tests). This is purely additive (no zero factor), so the
-    // documented `0/0 → 0` / `0·∞ → 0` annihilation divergences are untouched.
-    if !flat.is_empty()
-        && flat
-            .iter()
-            .all(|t| matches!(t, Expr::Num(_)) || classify_infinity(t).is_some())
+    // Infinity arithmetic on a sum. `∞ − ∞` is NaN, and `NaN` poisons anything
+    // added to it — including a free variable — so `x + ∞ − ∞` is `NaN`, not a
+    // sum that keeps `x` (the infinities do not cancel). A *single* infinity is
+    // handled more conservatively: it absorbs constant terms (`∞ + 3 = ∞`) but a
+    // free variable of unknown magnitude blocks the fold (`x + ∞` stays written,
+    // like `x·∞`). This is purely additive (no zero factor), so the documented
+    // `0/0` / `0·∞` annihilation divergences in `mul` are untouched.
     {
         let mut pos = false;
         let mut neg = false;
         let mut nan = false;
+        let mut symbolic = false;
         for t in &flat {
             match classify_infinity(t) {
                 Some(1) => pos = true,
                 Some(-1) => neg = true,
                 Some(0) => nan = true,
-                _ => {}
+                _ => symbolic |= !matches!(t, Expr::Num(_)),
             }
         }
-        if pos || neg || nan {
-            if nan || (pos && neg) {
-                return Expr::Const(MathConst::NaN);
-            }
+        if nan || (pos && neg) {
+            return Expr::Const(MathConst::NaN);
+        }
+        if (pos || neg) && !symbolic {
             return Expr::Const(if pos {
                 MathConst::Inf
             } else {

@@ -3,7 +3,8 @@
 //! canonical stage (stage 1) or by numerical sampling (stage 3).
 
 use math_expressions::{
-    equals, equals_syntactic, simplify, EqOptions, Expr, Number, TextToAst, TextToAstOptions,
+    equals, equals_syntactic, simplify, EqOptions, Expr, MathConst, Number, TextToAst,
+    TextToAstOptions,
 };
 
 fn parse(s: &str) -> Expr {
@@ -261,10 +262,17 @@ fn infnan_folds_are_conservative() {
     assert!(!eq("x/0", "y/0"));
     // A tuple is not a scalar: ∞·(a,b) must not collapse to ∞.
     assert!(!eq("Infinity*(a,b)", "Infinity"));
-    // ∞ − ∞ absorbs only constant terms — never a free variable.
-    assert!(!eq("x + Infinity - Infinity", "y + Infinity - Infinity"));
+    // ∞ − ∞ is NaN, and NaN poisons the whole sum — a free variable does not
+    // rescue it, so `x + ∞ − ∞` folds to NaN (the infinities do not cancel).
+    // `equals` treats NaN as never-equal (IEEE), so verify the fold structurally.
+    assert!(matches!(
+        simplify(&parse("x + Infinity - Infinity")),
+        Expr::Const(MathConst::NaN)
+    ));
     // All-constant folds still work (matching JS .simplify()).
     assert!(eq("Infinity + 3", "Infinity"));
+    // `.simplify()` matches mathjs here (`∞·i → ∞`); `evaluate_to_constant`
+    // reports the complex NaN separately (a different oracle).
     assert!(eq("Infinity*i", "Infinity"));
     assert!(eq("1/0", "Infinity"));
     assert!(eq("1/Infinity", "0"));

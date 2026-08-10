@@ -168,6 +168,48 @@ function varName(v: string | Expression): string {
  * deciding `evaluate_to_constant`'s null (unknown variable) vs NaN (no value). */
 const UNIT_NAMES = new Set(["%", "$", "deg", "circ"]);
 
+/** Whether a tree involves the imaginary unit `i` as a leaf — used to tell a
+ * complex NaN (`Infinity*i` → `{re:NaN, im:NaN}`) apart from a real NaN
+ * (`0/0` → scalar `NaN`), since both fold to a single `NaN`. */
+function treeHasImaginary(tree: Tree): boolean {
+  if (tree === "i") return true;
+  return Array.isArray(tree) && tree.some((t) => treeHasImaginary(t));
+}
+
+/** Any blank (`＿`) leaf anywhere in the tree. */
+function treeHasBlank(tree: Tree): boolean {
+  if (tree === "＿") return true;
+  return Array.isArray(tree) && tree.some((t) => treeHasBlank(t));
+}
+
+/** A blank (`＿`) used as a direct operand of an operator *other than* `_`
+ * (subscript) — i.e. a hole sitting in an actual computation (`1 + 2 + ＿`),
+ * as opposed to an undefined placeholder like `0·_` or `_/_`. The former is
+ * not-a-number (NaN); the latter stays undefined (null). */
+function treeHasBareBlank(tree: Tree): boolean {
+  if (!Array.isArray(tree)) return false;
+  const head = tree[0];
+  for (let i = 1; i < tree.length; i++) {
+    const child = tree[i];
+    if (child === "＿" && head !== "_") return true;
+    if (treeHasBareBlank(child)) return true;
+  }
+  return false;
+}
+
+/** Whether a tree contains a `det`/`trace` application — the matrix reductions
+ * that only fold under `simplify`, so `evaluate_to_constant` retries them there
+ * (but nowhere else, to avoid simplifying an undefined leaf into a number). */
+function treeHasMatrixReduction(tree: Tree): boolean {
+  if (Array.isArray(tree)) {
+    if (tree[0] === "apply" && (tree[1] === "det" || tree[1] === "trace")) {
+      return true;
+    }
+    return tree.some((t) => treeHasMatrixReduction(t));
+  }
+  return false;
+}
+
 /** The tree heads `get_component` will index — the JS library's set. */
 const COMPONENT_CONTAINERS = new Set([
   "list",
@@ -746,22 +788,40 @@ class Expression {
       e = e.remove_units(opts?.scale_based_on_unit ?? true);
     }
     const v = e._w.evaluate_to_constant();
-    if (v !== undefined) return v;
+    if (v !== undefined) {
+      // A non-finite value of a *complex* expression has no defined direction —
+      // `Infinity*i` and `Infinity*i + Infinity` are complex NaN
+      // (`{re:NaN, im:NaN}`), matching mathjs. A real non-finite value stays as
+      // it is (`Infinity`, or scalar `NaN` for `0/0` / `Infinity - Infinity`).
+      if (!Number.isFinite(v) && treeHasImaginary(e.tree)) {
+        return math.complex(NaN, NaN);
+      }
+      return v;
+    }
     const c = e._w.evaluate_to_complex();
     if (c !== undefined) return math.complex(c[0], c[1]);
-    // Some constructs only reduce to a number under simplification — `det`/`trace`
-    // of a literal matrix (`\det[[1,2],[3,4]]` → −2). Retry once via the
-    // simplified form before giving up.
-    const s = e.simplify();
-    const sv = s._w.evaluate_to_constant();
-    if (sv !== undefined) return sv;
-    const sc = s._w.evaluate_to_complex();
-    if (sc !== undefined) return math.complex(sc[0], sc[1]);
+    // `det`/`trace` of a literal matrix only reduce to a number under
+    // simplification (`\det[[1,2],[3,4]]` → −2), so retry once via the simplified
+    // form — but *only* for those, since simplification would also absorb an
+    // undefined leaf (`0·＿` → `0`) and wrongly turn a `null` into a number.
+    if (treeHasMatrixReduction(e.tree)) {
+      const s = e.simplify();
+      const sv = s._w.evaluate_to_constant();
+      if (sv !== undefined) return sv;
+      const sc = s._w.evaluate_to_complex();
+      if (sc !== undefined) return math.complex(sc[0], sc[1]);
+    }
     // Not a constant. A free (non-unit) variable means "unknown" → null (as
-    // legacy `x+1` did); anything else that cannot be a number — a blank, a
-    // matrix, a leftover unit — is NaN.
+    // legacy `x+1` did). A bare blank sitting in a computation is not-a-number
+    // (`1+2+＿` → NaN), but a hole that only stands in as an undefined
+    // placeholder (`0·_`, `_/_`) stays undefined → null (it must not collapse to
+    // `0`/`1` — DoenetML's undefined-slope contract). Anything else that cannot
+    // be a number — a matrix, a leftover unit — is NaN.
     const freeVars = e.variables().filter((n) => !UNIT_NAMES.has(String(n)));
-    return freeVars.length > 0 ? null : NaN;
+    if (freeVars.length > 0) return null;
+    if (treeHasBareBlank(e.tree)) return NaN;
+    if (treeHasBlank(e.tree)) return null;
+    return NaN;
   }
   evaluate_to_complex() {
     const v = this._w.evaluate_to_complex();
