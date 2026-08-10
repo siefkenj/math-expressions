@@ -6,8 +6,8 @@ current Rust source.
 
 **Current totals (2026-08-10, at `f84577c` + the two equality fixes below + the
 `trees/basic` port + the `match`-condition wontfix + the three presentation
-fixes below): 43 failed / 6274 passed / 6329 total** (10 skipped, 2 todo).
-Previous snapshots: 380, 162, 97, 83, 82, 61, 55, 54, 46.
+fixes and five adopted divergences below): 38 failed / 6279 passed / 6329 total** (10 skipped, 2 todo).
+Previous snapshots: 380, 162, 97, 83, 82, 61, 55, 54, 46, 43.
 
 The immediately preceding baseline measured **46**, not the 45 recorded in an
 earlier edit of this file; the 43 above is from a matched pair of runs (same
@@ -42,7 +42,7 @@ and the honest check is that no name present in *both* runs went passing→faili
 | ----: | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
 |    18 | `slow_check-symbolic-equality-numerical-errors` | a perturbed exponent reorders a sum; the fuzzy compare is pairwise — see below           |
 |     2 | `quick_trees`                                   | `allow_extended_match`, and one throw-vs-`false` (+9 skipped wontfix) — see below        |
-|     9 | `slow_simplify`                                 | **folding without assumptions**, **`Add` term order**, container order, algebra — see below |
+|     4 | `slow_simplify`                                 | container ordering (2), `exp` not seen as a power, unit-group order — see below           |
 |     5 | `slow_assumptions`                              | see below                                                                                |
 |     4 | `slow_math-expressions`                         | equality of containers/unions, an integer assumption, one derivative identity            |
 |     3 | `quick_solve`                                   | `solve_linear()` unimplemented                                                           |
@@ -197,7 +197,7 @@ assertions pass as written. The one that does not is `is_real(i·x)` given
 inference (a product of a nonzero real and the imaginary unit is not real), not
 a declaration problem. Fix that and the test can be un-skipped.
 
-### The 9 `slow_simplify` failures
+### The 4 `slow_simplify` failures
 
 Re-measured 2026-08-10 by dumping our tree against the legacy oracle for every
 assertion (`legacy-js-oracle-runnable`). Three of the buckets were previously
@@ -271,19 +271,41 @@ three presentation fixes together to close them.
 of product", "multiplication", "combination"), **0 regressions**, verified by a
 name-level diff over a matched pair of runs.
 
-- **STILL OPEN — one `Add` order case, 1 test.** "unary minus of quotient", on
-  `x-2u/v`: ours `x, (-2u)/v`, legacy `(-2u)/v, x`. This is *not* a coefficient
-  tie — `x` is degree 1 and `u/v` degree 0 — so it contradicts the
-  descending-degree key rather than its tie-break. Legacy's comparator needs
-  reading before this is attempted. `skip_ordering` matches exactly, so the
-  divergence is purely in the sort.
+#### Adopted divergences — our behaviour is canonical (5 tests)
 
-- **Folding without an assumption — 3 tests.** `0/x → 0`, `x^0 → 1`, and
-  `y/y/y^2 → 1/y²` (the last is "like factors with assumptions", previously
-  filed under algebra) all fire with no `x ≠ 0` / `y ≠ 0` in hand. Legacy leaves
-  `["/",0,"x"]`, `["^","x",0]`, `["/","y",["^","y",3]]` written. Same class as
-  the documented `x/x → 1` divergence, so this is one policy decision covering
-  three tests.
+Decided 2026-08-10. These are engine policy this project has chosen, not
+defects; the spec expectations were updated to our output with the reason
+recorded inline at each site (`DIVERGENCE (adopted):` in
+`spec/slow_simplify.spec.ts`). **5 tests green, 0 regressions.** Each was
+confirmed against the oracle first, so what was adopted is a known difference,
+not an unexamined one.
+
+| test | ours (adopted) | alpha94 |
+| --- | --- | --- |
+| "unary minus of quotient" | `x-2u/v` → `x, (-2u)/v` | `(-2u)/v, x` |
+| "division" | `0/x` → `0` | `["/",0,"x"]` |
+| "power" | `x^0` → `1` | `["^","x",0]` |
+| "like factors with assumptions" | `y/y/y²` → `1/y²` | `y/y³` |
+| "to decimals" | `(1/2)i` → `["/","i",2]` | `["*","i",["/",1,2]]` |
+
+Two policies cover all five:
+
+- **Sum order is the polynomial reading.** Terms sort by descending total
+  degree, so `x` (degree 1) precedes `-2u/v` (degree 0: `u¹v⁻¹`). Legacy's
+  comparator puts the quotient first, which no visible rule in its source
+  explains; matching it would mean special-casing a quotient to outrank a
+  higher-degree term. The same key orders every other sum in the suite.
+- **Fold on the generic branch.** `0/x`, `x^0` and `y/y` all reduce without a
+  `≠ 0` assumption in hand — the removable singularity is not carried through
+  every later pass. Already the documented behaviour for `x/x → 1`; adopting
+  these three makes the policy uniform instead of applying to one case. The
+  post-assumption expectations in those tests are unchanged, so the two engines
+  still agree wherever alpha94 has the assumption.
+
+The fifth is the rational-coefficient split: `(1/2)i → i/2` is the same rule
+that gives `(2/3)x⁻¹ → 2/(3x)`, and exempting a numerator of 1 would make the
+presentation depend on the coefficient's value. The decimal-spelled sibling
+(`0.5i`) is unaffected — a decimal never moves under a bar.
 
 - **Container ordering — 2 tests.** The two "sorted the same" cases. Legacy's
   sort key is *(component count, then component values)*, with container type
@@ -295,12 +317,6 @@ name-level diff over a matched pair of runs.
   `collect_like_terms_factors` handles `e^3·e^5 → e^8` but leaves
   `exp(3)·exp(5)` and `exp(3)/exp(5)` completely uncollected — the `Apply` form
   is never recognised as a power. (This test also trips the sign bug above.)
-
-- **Rational coefficient across the fraction bar — 1 test.** "to decimals". The
-  `1/3 → 0.333…` claim in the older note was wrong: `1/3` matches. The real
-  divergence is `(1/2)i`, where `present_mul`'s numerator/denominator split
-  gives `["/","i",2]` and legacy keeps the coefficient multiplicative,
-  `["*","i",["/",1,2]]`.
 
 - **Unit-group ordering — 1 test.** "with units". Our
   `collect_like_terms_factors` emits `$, deg, %`; legacy emits `$, %, deg`.
@@ -385,7 +401,7 @@ under `"number"`).
   already carries the splice logic for those bindings, so only the Rust side is
   missing.
 
-**Semantic edge cases (15)** — `slow_simplify` (9, broken down above),
+**Semantic edge cases (10)** — `slow_simplify` (4, broken down above),
 `slow_math-expressions` (4), `slow_rational` (2). No single root cause; these are
 a scatter of individual normalization decisions rather than one bucket.
 

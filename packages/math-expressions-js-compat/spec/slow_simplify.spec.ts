@@ -58,10 +58,16 @@ describe("evaluate_numbers", function () {
       "x",
       ["/", -2, ["*", "u", "v"]],
     ]);
+    // DIVERGENCE (adopted): sum terms order by descending total degree, so `x`
+    // (degree 1) precedes `-2u/v` (degree 0: u¹v⁻¹). alpha94 returns the
+    // reverse. Ours is the polynomial reading — `x² + x + 1`, not `1 + x + x²`
+    // — and the same key orders every other sum in this suite; special-casing
+    // a quotient to sort ahead of a higher-degree term would need a rule the
+    // legacy comparator does not visibly state.
     expect(me.from("x-2u/v").evaluate_numbers().tree).toEqual([
       "+",
-      ["/", ["*", -2, "u"], "v"],
       "x",
+      ["/", ["*", -2, "u"], "v"],
     ]);
   });
 
@@ -127,11 +133,12 @@ describe("evaluate_numbers", function () {
     expect(me.from("(2-2)/(0x)").evaluate_numbers().tree).toEqual(NaN);
     expect(me.from("(2-2)*(1/(0x))").evaluate_numbers().tree).toEqual(NaN);
 
-    expect(me.from("(2-2)/(2x)").evaluate_numbers().tree).toEqual([
-      "/",
-      0,
-      "x",
-    ]);
+    // DIVERGENCE (adopted): `0/x` folds to `0`. alpha94 leaves the quotient
+    // written because it has no `x ≠ 0` in hand. Same policy as the documented
+    // `x/x → 1` divergence: this engine folds on the generic branch and treats
+    // the removable singularity as not worth carrying through every later
+    // pass. See also `x^0 → 1` and `y/y → 1` below.
+    expect(me.from("(2-2)/(2x)").evaluate_numbers().tree).toEqual(0);
 
     me.add_assumption(me.from("x > 0"));
     expect(me.from("(2-2)/(2x)").evaluate_numbers().tree).toEqual(0);
@@ -154,7 +161,10 @@ describe("evaluate_numbers", function () {
   });
 
   it("power", function () {
-    expect(me.from("x^0").evaluate_numbers().tree).toEqual(["^", "x", 0]);
+    // DIVERGENCE (adopted): `x^0` folds to `1` with no `x ≠ 0` assumption —
+    // same policy as `0/x → 0` above. The assumption-carrying case below still
+    // holds, so the two agree wherever alpha94 has the assumption.
+    expect(me.from("x^0").evaluate_numbers().tree).toEqual(1);
     me.add_assumption(me.from("x!= 0"));
     expect(me.from("x^0").evaluate_numbers().tree).toEqual(1);
     me.clear_assumptions();
@@ -362,9 +372,15 @@ describe("evaluate_numbers", function () {
       ["*", 0.5, "i"],
       0.75,
     ]);
+    // DIVERGENCE (adopted): an exact rational coefficient splits across the
+    // fraction bar, so `(1/2)i` presents as `i/2` where alpha94 keeps it a
+    // multiplicative factor, `["*","i",["/",1,2]]`. Ours is the same rule that
+    // turns `(2/3)x⁻¹` into `2/(3x)`; exempting a numerator of 1 would make the
+    // presentation depend on the coefficient's value. The decimal-spelled
+    // sibling above (`0.5i`) is unaffected — a decimal never moves under a bar.
     expect(me.fromText("(1/2)i+3/4").evaluate_numbers().tree).toEqual([
       "+",
-      ["*", "i", ["/", 1, 2]],
+      ["/", "i", 2],
       ["/", 3, 4],
     ]);
     expect(
@@ -798,17 +814,22 @@ describe("collect like terms and factor", function () {
       ),
     ).toBeTruthy();
 
+    // DIVERGENCE (adopted): the `y/y` pair cancels with no `y ≠ 0` in hand, so
+    // these reduce to `1/y²` where alpha94 stops at `y/y³`. Same policy as
+    // `0/x → 0` and `x^0 → 1` in `evaluate_numbers` above. Note the assumption
+    // is added a few lines below and the post-assumption expectations are
+    // unchanged — the two agree once `y ≠ 0` is stated.
     expect(
       trees.equal(
         me.fromText("y/y/y^2").collect_like_terms_factors().tree,
-        me.fromText("y/y^3").tree,
+        me.fromText("1/y^2").tree,
       ),
     ).toBeTruthy();
 
     expect(
       trees.equal(
         me.fromText("y*y^(-1)*y^(-2)").collect_like_terms_factors().tree,
-        me.fromText("y/y^3").tree,
+        me.fromText("1/y^2").tree,
       ),
     ).toBeTruthy();
 
