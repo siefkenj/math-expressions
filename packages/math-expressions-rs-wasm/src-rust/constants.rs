@@ -61,7 +61,7 @@ macro_rules! policy_fields {
     };
 }
 
-policy_fields!(define_pi, define_e, define_i, sort_constants_first);
+policy_fields!(define_pi, define_e, define_i, sort_constants_first, pow_strict);
 
 #[cfg(test)]
 mod tests {

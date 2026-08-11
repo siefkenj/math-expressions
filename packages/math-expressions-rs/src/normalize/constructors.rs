@@ -648,7 +648,10 @@ pub(crate) fn pow(base: Expr, exp: Expr) -> Expr {
             // `NaN^0` are indeterminate forms — folding them to 1 asserts a
             // limit that does not exist. This is also the path
             // `∞/∞` arrives on: it collects to `∞^(1−1)` = `∞^0`.
-            if is_indeterminate_power_base(&base) {
+            //
+            // Under non-strict `pow` (`pow_strict` off, legacy's `me.math`
+            // knob) that judgement is waived and *any* `base^0` folds to `1`.
+            if crate::constant_policy::current().pow_strict && is_indeterminate_power_base(&base) {
                 return Expr::Const(MathConst::NaN);
             }
             return Expr::Num(Number::one());

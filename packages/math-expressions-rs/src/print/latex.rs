@@ -274,7 +274,7 @@ impl Writer<'_> {
     /// fully parenthesized (port of the JS ast-to-latex `and`/`or`/`not` rule).
     fn paren_if_spaced(&self, e: &Expr) -> String {
         let s = self.emit(e, 0);
-        if s.contains(' ') && !(s.starts_with("\\left(") && s.ends_with("\\right)")) {
+        if s.contains(' ') && !is_single_delimited_group(&s) {
             format!("\\left({}\\right)", s)
         } else {
             s
@@ -676,6 +676,41 @@ fn string_convert(name: &str) -> String {
     } else {
         name.to_string()
     }
+}
+
+/// Is `s` a *single* `\left(…\right)` group — the opening `\left(` whose
+/// matching `\right)` is the end of the string — rather than several adjacent
+/// groups such as `\left(a\right) or \left(b\right)`?
+///
+/// The old test was `starts_with("\\left(") && ends_with("\\right)")`, which
+/// reads `true` for both and so wrongly suppressed the wrap around a spaced
+/// compound, letting the re-parse bind it differently (see the text-printer
+/// twin `is_single_paren_group`). This counts `\left`/`\right` tokens — bare
+/// parens inside would be wrong, since `\left[`/`\left\{` also nest.
+fn is_single_delimited_group(s: &str) -> bool {
+    if !s.starts_with("\\left(") {
+        return false;
+    }
+    let mut depth: i32 = 0;
+    let mut i = 0;
+    while i < s.len() {
+        let rest = &s[i..];
+        if rest.starts_with("\\left") {
+            depth += 1;
+            i += "\\left".len();
+        } else if rest.starts_with("\\right") {
+            depth -= 1;
+            i += "\\right".len();
+            if depth == 0 {
+                // The outermost close matches the initial `\left(`, so it is a
+                // `\right)`; the whole string is one group only if it ends here.
+                return &s[i..] == ")";
+            }
+        } else {
+            i += 1;
+        }
+    }
+    false
 }
 
 fn rel_symbol(op: RelOp) -> &'static str {

@@ -4,9 +4,11 @@ Snapshot of `packages/math-expressions-js-compat` (`npx vitest run`) on branch
 `doenet`, after rebuilding `vendor/wasm` (`bash build-wasm.sh`) so results reflect
 current Rust source.
 
-**Current totals (2026-08-11, at `62c5f20` + uncommitted working-tree work):
-11 failed / 6306 passed / 6329 total** (10 skipped, 2 todo).
-Previous snapshots: 380, 162, 97, 83, 82, 61, 55, 54, 46, 43, 38, 20, 16, 12.
+**Current totals (2026-08-11, at `7082f8a` + uncommitted working-tree work):
+1 failed / 6316 passed / 6329 total** (12 skipped, 2 todo). The one remaining
+failure is `slow_assumptions` → `logical combinations`, a **deliberate soundness
+divergence** (see below) — every other spec passes.
+Previous snapshots: 380, 162, 97, 83, 82, 61, 55, 54, 46, 43, 38, 20, 16, 12, 11, 7.
 
 Both `*-numerical-errors` files are at **zero**, and so are `slow_simplify` and
 `slow_rational`.
@@ -45,9 +47,13 @@ test to the first assertion that fails hides everything behind it.
 
 | count | spec file                                       | root cause / category                                                                    |
 | ----: | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
-|     2 | `quick_trees`                                   | `allow_extended_match`, and one throw-vs-`false` (+9 skipped wontfix) — see below        |
-|     5 | `slow_assumptions`                              | see below                                                                                |
-|     4 | `slow_math-expressions`                         | equality of containers/unions, an integer assumption, one derivative identity            |
+|     1 | `slow_assumptions`                              | one test, `logical combinations` — a deliberate soundness divergence, see below          |
+
+The six other failures were feature gaps, now closed (see "Feature gaps
+closed" below): `quick_trees` (`allow_extended_match`, graceful invalid match
+conditions) and `slow_math-expressions` (container/union coercion flags, an
+integer-assumption equality, the `nthroot` derivative). Nine `quick_trees`
+predicate/`RegExp` match tests stay **wontfix**-skipped.
 
 `quick_solve` is at zero, and its last failure was fixed at the root rather than
 adopted as a divergence — see below.
@@ -116,16 +122,73 @@ anywhere neither sign rule could see it. And the cost table at
 while the unconditional rule preempted it and distributed. Both are now correct
 and covered.
 
-### The 5 remaining `slow_assumptions` failures
+### `slow_assumptions` — 4 of 5 fixed, 1 a deliberate soundness divergence
 
-- `is integer / via assumptions` — **not an engine bug**. `add_assumption` round-trips
-  through `.toString()` and the text printer loses negation scope: `paren_if_spaced`
-  (`src/print/text.rs:223`, same in `latex.rs:271`) tests `starts_with('(') && ends_with(')')`,
-  which cannot distinguish `(a or b)` from `(a) or (b)`. Needs a paren-balance scan.
-  Fed a correctly-parenthesized tree the engine answers correctly.
-- `strict pow` — needs a `me.math.pow_strict` toggle with no wasm equivalent.
-- `logical combinations`, `combined assumptions`, `combined assumptions, negated` —
-  or-disjunction and interval-membership _reasoning_ (as opposed to retrieval).
+The five test *names* here were hiding **52** failing assertions (each `it`
+aborts at its first failure; re-run with `expect` → `expect.soft` to see them
+all). Four of the five tests are now green; the plan and the fix are written up
+in `SLOW_ASSUMPTIONS_PLAN.md`. In brief:
+
+- `is integer / via assumptions` (**fixed**) — the text printer lost negation
+  scope on the assumption round trip: `paren_if_spaced` tested
+  `starts_with('(') && ends_with(')')`, which cannot tell `(a or b)` from
+  `(a) or (b)`, so `not(p or q)` re-parsed wrong. Replaced with a paren-balance
+  scan (`src/print/text.rs`, `latex.rs`).
+- `strict pow` (**fixed**) — `pow_strict` is now a `ConstantPolicy` field
+  (default strict), reached from JS as `me.math.pow_strict` via a
+  `defineProperty` that routes to `set_constant_policy`. Off, `x^0 → 1`
+  unconditionally.
+- `combined assumptions`, `combined assumptions, negated` (**fixed**) — the
+  predicate engine now reads the *derived* store (equality following, bound
+  chaining, disjunctions) instead of the flat one, and walks its boolean
+  structure with sound semantics (`and` = meet, `or` = join). See
+  `src/assumptions/infer/vars.rs` and `assumptions_sound_reasoning.rs`.
+- `logical combinations` (**still failing — deliberate**). 18 of its 24 failing
+  assertions were fixed by the change above. The other 6 need reasoning where
+  **legacy is partly unsound**, and we decline to reproduce it:
+  - `x ∈ R and x ∉ R ⟹ is_real(x)` — legacy returns `true` (first conjunct
+    wins). No `x` satisfies both; we answer `undefined`.
+  - `x ∈ C, x ∉ R, y ∈ R ⟹ is_real/nonpositive/nonnegative(xy)` — legacy returns
+    `false` for all, but `y` may be `0`, making `xy = 0`, which *is*
+    real/nonpositive/nonnegative. Genuinely unsound; we answer `undefined`.
+  - `is_positive/negative(xy)` in the same block — here `false` *is* sound (a
+    non-real-or-zero value is never positive/negative), but our engine returns
+    `undefined` because it does not reason by cases. This is incompleteness, not
+    a divergence; closing it needs a sound `Mul` rule and would still leave the
+    three genuine divergences above, so the test stays red either way. Left
+    unfudged rather than assert an incomplete value as intended.
+
+### Feature gaps closed
+
+Six failures that were genuine feature gaps (not divergences) are now fixed —
+each with a permanent test (`tests/missing_features.rs` for the core ones, the
+spec files for the wasm/JS ones):
+
+- **`nthroot` derivative** (`slow_math-expressions`). `nthroot(x,k)` denotes
+  `x^(1/k)` but had no derivative-table entry, so on the faithful layer it left
+  a formal `nthroot'`. `calculus/diff.rs` now rewrites it to the power form and
+  differentiates that (as `sqrt`/`cbrt` already did).
+- **Integer-assumption equality** (`slow_math-expressions`). The numeric
+  equality sampler was assumption-blind, so `(-1)^n·(-1)^n = 1` failed under
+  `n ∈ Z`. `EqOptions` gained an `assumptions` field; the `Assumptions` wasm
+  handle now passes its store to `equals`, and the sampler draws an
+  integer-proved variable over the integers (JS `integer_variables`).
+- **Container coercion flags** (`slow_math-expressions`, two tests). The flags
+  existed but were mis-wired: `coerce_seqs` gated tuple↔vector on the wrong flag
+  (fixed to a two-step map matching legacy's non-transitive graph), and union
+  equality did no member matching (added an accept-only pairwise-matching stage
+  on raw members, so each pair coerces in isolation — a tuple can pair with a
+  vector and a closed-interval-spelled array in the same union).
+- **Graceful invalid match conditions** (`quick_trees`). `trees.match` threw on
+  an unusable `variables` condition (`false`, an unknown kind string, a
+  `RegExp`); it now maps them to `VarKind::Nothing` (admits nothing), so the
+  match fails gracefully to no-match.
+- **`allow_extended_match`** (`quick_trees`, `trig transformation`). A sum/
+  product pattern can now match a subset of a larger sum/product. Implemented in
+  the JS `match` bridge (`lib/trees/flatten.ts`): the tree operands are put in
+  canonical order, operand subsets are matched by the existing Rust matcher, and
+  the untouched operands are returned as `_skipped` for the (already-present)
+  splice in `applyAllTransformations`.
 
 There is also one **skipped** test here, `define constants`, which the legacy
 suite skipped with the note "although this passes, skip test as setting
@@ -137,7 +200,7 @@ assertions pass as written. The one that does not is `is_real(i·x)` given
 inference (a product of a nonzero real and the imaginary unit is not real), not
 a declaration problem. Fix that and the test can be un-skipped.
 
-### `quick_trees` — 2 left, 9 wontfix
+### `quick_trees` — 0 left, 9 wontfix
 
 #### WONTFIX — arbitrary per-parameter `match` conditions (9 tests, now skipped)
 
@@ -173,40 +236,23 @@ the same scenarios with declared kinds, including a negative control confirming
 the kind is what fails the match (`e^(0.3s^2+3s+q)` matches under `true`, not
 under `"number"`).
 
-#### Still open — 2 tests
+#### Both formerly-open tests now fixed
 
-- **Throwing where legacy returned `false` — 1 test**, named "invalid matching
-  conditions fail gracefully". Not part of the wontfix: the condition here is
-  `{a: false, b: "h"}`, neither a predicate nor a regex. Legacy's
-  `else { return false }` makes any unrecognized condition simply never match;
-  [`interop.rs:172`](../packages/math-expressions-rs-wasm/src-rust/interop.rs#L172)
-  reasons that `false` "is never what a caller means" and raises instead. The
-  spec name states the contract. Cheapest item here.
-- **`allow_extended_match` — 1 test**, "trig transformation". A gap, not a
-  decision: unported in `js_match.rs`, and the matcher never emits the
-  `_skipped`/`_skipped_before` bindings that go with it. (Two more tests need it,
-  but they need predicates too and are skipped above.) `applyAllTransformations`
-  already carries the splice logic for those bindings, so only the Rust side is
-  missing.
-
-## Remaining buckets by theme
-
-**Semantic edge cases (4)** — all `slow_math-expressions`. No single root cause;
-these are a scatter of individual normalization decisions rather than one bucket.
-
-**Unimplemented / unbound APIs (2)** — `quick_trees`, both above.
-
-**Assumption reasoning (5)** — all `slow_assumptions`, listed above. Includes the
-`paren_if_spaced` printer defect surfacing through an assumptions spec:
-`src/print/text.rs` tests `starts_with('(') && ends_with(')')`, which cannot
-distinguish `(a or b)` from `(a) or (b)`. It needs a paren-balance scan.
+- **Graceful invalid match conditions** — "invalid matching conditions fail
+  gracefully". `interop.rs` now maps an unusable condition (`false`, an unknown
+  kind string, a `RegExp`) to `VarKind::Nothing` (admits nothing), so the match
+  fails to no-match rather than throwing. See "Feature gaps closed" above.
+- **`allow_extended_match`** — "trig transformation". Implemented in the JS
+  `match` bridge (`lib/trees/flatten.ts`), reusing the Rust matcher over operand
+  subsets and feeding the existing `applyAllTransformations` splice via
+  `_skipped`. See "Feature gaps closed" above.
 
 ## Highest-leverage remaining item
 
-**`slow_assumptions` (5)**, now the largest single bucket. Nothing left is a
-single-cause bucket the way `*-numerical-errors` and `quick_trees` were. The
-remaining 11 span three files and at least seven distinct causes, so from here
-the work is per-item rather than per-bucket.
+**`slow_assumptions` → `logical combinations`** is the only failure left, and it
+is a **deliberate soundness divergence**, not a bucket of work — reproducing
+legacy's answers there means encoding unsound reasoning (see that section).
+Every other spec passes.
 
 Two things worth doing that no failing test covers:
 

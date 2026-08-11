@@ -163,6 +163,58 @@ impl Facts {
         }
     }
 
+    /// Both facts hold at once — the meet for an `and` of assumptions. Keep
+    /// every definite value; where the two branches give *conflicting* definite
+    /// answers the premises are contradictory, and the sound three-valued
+    /// answer under an inconsistent premise is to decline (unknown) rather than
+    /// pick a side. That is the one place this diverges from the legacy engine,
+    /// which returns the first branch's answer (`left || right`) and so reports
+    /// `is_real(x)` true for `x ∈ R and x ∉ R`; we report unknown.
+    pub(super) fn and_meet(&self, other: &Facts) -> Facts {
+        fn meet(a: MaybeBool, b: MaybeBool) -> MaybeBool {
+            match (a, b) {
+                (Some(x), Some(y)) => (x == y).then_some(x),
+                (Some(x), None) | (None, Some(x)) => Some(x),
+                (None, None) => None,
+            }
+        }
+        Facts {
+            integer: meet(self.integer, other.integer),
+            real: meet(self.real, other.real),
+            complex: meet(self.complex, other.complex),
+            nonzero: meet(self.nonzero, other.nonzero),
+            nonneg: meet(self.nonneg, other.nonneg),
+            positive: meet(self.positive, other.positive),
+            negative: meet(self.negative, other.negative),
+            nonpos: meet(self.nonpos, other.nonpos),
+        }
+    }
+
+    /// Either fact holds — the join for an `or` of assumptions. A value is
+    /// definite only when both branches agree on it: `is_p` is known for
+    /// `A ∨ B` exactly when every model of A and every model of B share it
+    /// (`x < 0 or x > 0` ⇒ nonzero, because both disjuncts are). Branches are
+    /// expected already [`normalize`](Self::normalize)d, so the join compares
+    /// the answers a caller would see, as the legacy engine does.
+    pub(super) fn or_join(&self, other: &Facts) -> Facts {
+        fn join(a: MaybeBool, b: MaybeBool) -> MaybeBool {
+            match (a, b) {
+                (Some(x), Some(y)) if x == y => Some(x),
+                _ => None,
+            }
+        }
+        Facts {
+            integer: join(self.integer, other.integer),
+            real: join(self.real, other.real),
+            complex: join(self.complex, other.complex),
+            nonzero: join(self.nonzero, other.nonzero),
+            nonneg: join(self.nonneg, other.nonneg),
+            positive: join(self.positive, other.positive),
+            negative: join(self.negative, other.negative),
+            nonpos: join(self.nonpos, other.nonpos),
+        }
+    }
+
     /// Restore the invariants JS gets for free from the way it *defines* the
     /// sign predicates: `is_negative` is `is_real && !is_nonnegative` and
     /// `is_nonpositive` is `is_real && !is_positive`, and all four short-

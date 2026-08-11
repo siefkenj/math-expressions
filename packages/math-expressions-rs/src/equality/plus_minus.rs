@@ -133,7 +133,8 @@ fn pm_multiset_equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     for i in 0..max_iter {
         let scale = BINDING_SCALES[(i / 20) % BINDING_SCALES.len()];
         // JS `randomBindings` uses real bindings for the pm path.
-        let env = sample_point(&vars, scale, None, &mut rng, true);
+        // No assumption context here, so no variable is sampled as an integer.
+        let env = sample_point(&vars, scale, None, &mut rng, true, &[]);
 
         let (Some(av), Some(bv)) = (
             a_variants

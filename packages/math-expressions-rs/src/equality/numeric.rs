@@ -111,9 +111,17 @@ pub(super) fn equals_numerical(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     // allowed amount agrees over most of the sampled range, so a wrong answer
     // that radius 10 correctly rejects gets accepted a scale later. The budget
     // ran out first, so nothing depended on it, but it was a live hazard.
+    // Variables the assumptions prove integer are sampled over the integers,
+    // not the complex disk (JS `integer_variables`): `(-1)^n·(-1)^n` equals `1`
+    // only because `n ∈ Z`. Empty unless a caller supplied an assumption store.
+    let integer_vars: Vec<bool> = vars
+        .iter()
+        .map(|v| crate::is_integer(&Expr::sym(v), &opts.assumptions) == Some(true))
+        .collect();
+
     let scale = BINDING_SCALES[0];
     for _ in 0..(10 * NUMBER_TRIES) {
-        match find_region(a, b, &vars, scale, &mut rng, opts, fuzzy.as_ref()) {
+        match find_region(a, b, &vars, scale, &mut rng, opts, fuzzy.as_ref(), &integer_vars) {
             Region::Equal => return true,
             Region::Unequal => {
                 num_unequal += 1;
@@ -138,6 +146,8 @@ enum Region {
 /// `MINIMUM_MATCHES` neighborhood points are usable and agree; `Unequal` if the
 /// base or any neighborhood point disagrees; `Skip` if too few points are
 /// usable.
+#[allow(clippy::too_many_arguments)] // a private sampler helper; the args are
+// the point parameters, not distinct concerns worth a struct.
 fn find_region(
     a: &Expr,
     b: &Expr,
@@ -146,6 +156,7 @@ fn find_region(
     rng: &mut SeedRandom,
     opts: &EqOptions,
     fuzzy: Option<&FuzzyTol>,
+    integer: &[bool],
 ) -> Region {
     // Extra tolerance from the allowed number error at a given point; a
     // non-evaluable tolerance makes the point disagree (JS parity).
@@ -156,7 +167,7 @@ fn find_region(
         }
     };
 
-    let base = sample_point(vars, scale, None, rng, opts.real_only);
+    let base = sample_point(vars, scale, None, rng, opts.real_only, integer);
     let (Some(va), Some(vb)) = (eval_complex(a, &base), eval_complex(b, &base)) else {
         return Region::Skip;
     };
@@ -172,7 +183,7 @@ fn find_region(
 
     let mut finite_tries = 0;
     for _ in 0..100 {
-        let near = sample_point(vars, NEIGHBORHOOD_RADIUS, Some(&base), rng, opts.real_only);
+        let near = sample_point(vars, NEIGHBORHOOD_RADIUS, Some(&base), rng, opts.real_only, integer);
         let (Some(va2), Some(vb2)) = (eval_complex(a, &near), eval_complex(b, &near)) else {
             continue;
         };
@@ -222,22 +233,36 @@ pub(super) fn sample_point(
     center: Option<&Env>,
     rng: &mut SeedRandom,
     real_only: bool,
+    integer: &[bool],
 ) -> Env {
     // `rng() * 2 * radius - radius`, one draw per real coordinate, taken in
     // variable order — the JS `randomRealBindings` / `randomComplexBindings`.
     // The arithmetic is spelled their way rather than as a range sample so the
     // same stream yields the same points.
-    let mut draw = |c: f64| c + rng.next_f64() * 2.0 * scale - scale;
-    vars.iter()
-        .map(|v| {
-            let c = center
-                .and_then(|c| c.get(v).copied())
-                .unwrap_or(Complex64::new(0.0, 0.0));
-            let re = draw(c.re);
-            let im = if real_only { 0.0 } else { draw(c.im) };
-            (v.clone(), Complex64::new(re, im))
-        })
-        .collect()
+    let mut binding: Vec<(String, Complex64)> = {
+        let mut draw = |c: f64| c + rng.next_f64() * 2.0 * scale - scale;
+        vars.iter()
+            .map(|v| {
+                let c = center
+                    .and_then(|c| c.get(v).copied())
+                    .unwrap_or(Complex64::new(0.0, 0.0));
+                let re = draw(c.re);
+                let im = if real_only { 0.0 } else { draw(c.im) };
+                (v.clone(), Complex64::new(re, im))
+            })
+            .collect()
+    };
+    // Then overwrite each integer-assumed variable with a fresh random integer
+    // in [−10, 10], ignoring the center — JS `generate_random_integer`, applied
+    // after all complex coordinates are drawn (so the untouched draws keep the
+    // stream aligned) and in both the base and neighborhood passes.
+    for (i, slot) in binding.iter_mut().enumerate() {
+        if integer.get(i).copied().unwrap_or(false) {
+            let k = (rng.next_f64() * 21.0).floor() - 10.0;
+            slot.1 = Complex64::new(k, 0.0);
+        }
+    }
+    binding.into_iter().collect()
 }
 
 /// Tolerance test matching JS `find_equality_region`, plus the

@@ -162,28 +162,23 @@ pub fn match_template_with_options(
                     "number" => crate::js_match::VarKind::Number,
                     "variable" => crate::js_match::VarKind::Variable,
                     "any" => crate::js_match::VarKind::Any,
-                    other => {
-                        return Err(JsError::new(&format!(
-                            "match: unknown parameter kind {other:?} for {name:?} \
-                             (expected \"number\", \"variable\", \"any\", or true)"
-                        )))
-                    }
+                    // An unrecognized kind string is an unusable condition; a
+                    // parameter carrying it can bind nothing, so the match fails
+                    // gracefully rather than throwing (legacy did not crash on a
+                    // condition it could not honor). See `VarKind::Nothing`.
+                    _ => crate::js_match::VarKind::Nothing,
                 },
-                // `true` is the legacy "any subtree"; `false` declares the name
-                // and then admits nothing, which is never what a caller means.
+                // `true` is the legacy "any subtree". `false` declares the name
+                // and admits nothing — a valid, if useless, condition: the match
+                // simply cannot succeed.
                 serde_json::Value::Bool(true) => crate::js_match::VarKind::Any,
-                // A `RegExp` arrives here as `{}` — `JSON.stringify` has no
-                // spelling for one. Legacy matched a parameter against a caller's
-                // regex; that is deprecated and wontfix, along with predicate
-                // functions, for the reasons in `js_match`'s module docs.
-                other => {
-                    return Err(JsError::new(&format!(
-                        "match: invalid parameter kind {other} for {name:?}. \
-                         Per-parameter regular expressions and predicate \
-                         functions are deprecated and unsupported — declare a \
-                         kind instead: \"number\", \"variable\", \"any\", or true"
-                    )))
-                }
+                serde_json::Value::Bool(false) => crate::js_match::VarKind::Nothing,
+                // A `RegExp` arrives here as `{}` (JSON has no spelling for one)
+                // and a predicate function likewise cannot cross the boundary.
+                // Both are deprecated and wontfix (see `js_match`'s docs); treat
+                // them as an unusable condition so the match fails gracefully
+                // instead of throwing.
+                _ => crate::js_match::VarKind::Nothing,
             };
             declared.insert(name.clone(), kind);
         }

@@ -145,6 +145,12 @@ pub enum VarKind {
     /// Must be a bare variable, i.e. a string leaf — DoenetML's
     /// `requireVariableMatches`. `x` qualifies; `x+x` does not.
     Variable,
+    /// Admits nothing: a parameter declared with an unusable condition (JS
+    /// `false`, an unknown kind string, or a deprecated `RegExp`/predicate). A
+    /// pattern that must bind it therefore cannot match, so `match` fails
+    /// gracefully (returns no match) rather than throwing — the legacy contract
+    /// tested by `invalid matching conditions fail gracefully`.
+    Nothing,
 }
 
 /// Options for [`match_template_with_options`].
@@ -331,6 +337,7 @@ pub fn match_template_with_options(
 fn kind_admits(kind: VarKind, tree: &Value) -> bool {
     match kind {
         VarKind::Any => true,
+        VarKind::Nothing => false,
         VarKind::Variable => tree.is_string(),
         // Mirrors DoenetML's `isNumericConstant(fromAst(m).evaluate_to_constant())`,
         // which is a *finiteness* test. `evaluate_to_constant` deliberately

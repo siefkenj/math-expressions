@@ -70,6 +70,14 @@ pub struct ConstantPolicy {
     /// (`slow_simplify` expects `3a+3b+3c+2d+2e+2f+…`, with `e` in alphabetical
     /// position). Turning it on is a deliberate divergence for readability.
     pub sort_constants_first: bool,
+    /// Whether `0^0`, `(±∞)^0` and `NaN^0` are indeterminate (fold to `NaN`) or
+    /// — with this **off** — fold to `1` like any other `x^0`, matching the JS
+    /// library's non-strict `pow`. Not a constant declaration; it shares this
+    /// module's thread-local and FFI plumbing because it is the same kind of
+    /// document-level interpretation knob (`me.math.pow_strict`). Default `true`
+    /// (strict): a bare `0^0` has no limit, so asserting one is the safer
+    /// default.
+    pub pow_strict: bool,
 }
 
 impl Default for ConstantPolicy {
@@ -79,6 +87,7 @@ impl Default for ConstantPolicy {
             define_e: true,
             define_i: true,
             sort_constants_first: false,
+            pow_strict: true,
         }
     }
 }
@@ -90,6 +99,7 @@ impl ConstantPolicy {
         define_e: false,
         define_i: false,
         sort_constants_first: false,
+        pow_strict: true,
     };
 
     /// Is `name` declared to be a mathematical constant here?
@@ -116,6 +126,7 @@ thread_local! {
             define_e: true,
             define_i: true,
             sort_constants_first: false,
+            pow_strict: true,
         })
     };
 }

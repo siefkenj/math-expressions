@@ -23,6 +23,23 @@ import { compileRustExpr } from "math-expressions-rs-wasm";
 import type { WasmExpression } from "math-expressions-rs-wasm";
 import type { MathJsInstance } from "mathjs";
 
+// `me.math.pow_strict` — the legacy library carried this on its bundled mathjs
+// instance to switch `0^0` (and the other indeterminate `x^0` forms) between
+// `NaN` (strict) and `1`. The Rust core keeps it as ambient policy rather than
+// baking it into an instance, so intercept the property on the shared `math`
+// object and route it there. Assignment is the shape the spec uses
+// (`me.math.pow_strict = false`), so a getter/setter is required — a method
+// would not answer it.
+Object.defineProperty(math, "pow_strict", {
+  configurable: true,
+  get(): boolean {
+    return JSON.parse(wasm.get_constant_policy()).pow_strict;
+  },
+  set(value: boolean) {
+    wasm.set_constant_policy(JSON.stringify({ pow_strict: Boolean(value) }));
+  },
+});
+
 /** The JS AST tree encoding (`["+", 1, "x", 3]`). */
 export type Tree = number | string | boolean | Tree[];
 

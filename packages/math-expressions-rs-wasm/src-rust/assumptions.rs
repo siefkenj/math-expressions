@@ -257,10 +257,15 @@ impl WasmAssumptions {
         b: &Expression,
         options_json: Option<String>,
     ) -> Result<bool, JsError> {
-        let opts = match &options_json {
+        let mut opts = match &options_json {
             Some(json) => super::grading::eq_options_from_json(json)?,
             None => EqOptions::default(),
         };
+        // Hand the live assumption store to the numeric stage so it can sample a
+        // variable known to be an integer over the integers (`(-1)^n·(-1)^n = 1`
+        // under `n ∈ Z`). The discrete-infinite-set stage already receives it
+        // separately.
+        opts.assumptions = self.0.clone();
         Ok(
             match math_expressions::equals_discrete_infinite_sets(&a.0, &b.0, &opts, &self.0) {
                 Some(answer) => answer,

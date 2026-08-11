@@ -117,7 +117,7 @@ fn unordered_eq(a: &[&Expr], b: &[&Expr], opts: &EqOptions) -> bool {
 
 /// Find an augmenting path for left node `i`, repairing earlier pairings if
 /// that is what it takes to fit everyone.
-fn augment(
+pub(super) fn augment(
     i: usize,
     edges: &[Vec<usize>],
     seen: &mut [bool],

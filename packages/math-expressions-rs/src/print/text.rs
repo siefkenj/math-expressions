@@ -222,7 +222,7 @@ impl Writer<'_> {
     /// JS ast-to-text `and`/`or`/`not` rule.
     fn paren_if_spaced(&self, e: &Expr) -> String {
         let s = self.emit(e, 0);
-        if s.contains(' ') && !(s.starts_with('(') && s.ends_with(')')) {
+        if s.contains(' ') && !is_single_paren_group(&s) {
             format!("({})", s)
         } else {
             s
@@ -865,6 +865,35 @@ impl Writer<'_> {
             .join(sep);
         format!("{}/{}", num, den)
     }
+}
+
+/// Is `s` a *single* parenthesized group — an opening `(` whose matching `)`
+/// is the final character — rather than several adjacent groups such as
+/// `(a) or (b)`?
+///
+/// The old test was `starts_with('(') && ends_with(')')`, which reads `true`
+/// for both and so wrongly suppressed the wrap around a spaced compound like
+/// `(a) or (b)`. Once un-wrapped it re-parses with the wrong binding — e.g. a
+/// nested `or` under `not` escapes its scope. A balance scan tells one group
+/// from many: the first return to depth 0 must be the last char.
+fn is_single_paren_group(s: &str) -> bool {
+    if !s.starts_with('(') {
+        return false;
+    }
+    let mut depth: i32 = 0;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + c.len_utf8() == s.len();
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// A single-argument `angle` renders as the greedy shorthand `∠A`.

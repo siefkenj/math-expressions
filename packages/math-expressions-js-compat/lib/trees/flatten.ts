@@ -2,6 +2,7 @@
 // the wasm ports which take/return the JSON tree encoding.
 import wasm from "../_wasm";
 import { astToJson, jsonToAst } from "../converters/ast-json";
+import { default_order } from "./default_order";
 
 // `astToJson`/`jsonToAst` rather than bare `JSON.stringify`/`JSON.parse`: these
 // take trees straight from `.tree`, which hands out real `Infinity`/`NaN`, and
@@ -105,6 +106,19 @@ export function normalizeMatchOptions(options) {
 export function match(tree, pattern, params?) {
   const hasParams =
     params !== null && typeof params === "object" && !Array.isArray(params);
+  // `allow_extended_match` lets a sum/product pattern match a *subset* of a
+  // larger sum/product, leaving the rest. It is handled here rather than in the
+  // Rust matcher: enumerate operand subsets, match the (unextended) pattern
+  // against each with the core matcher, and report the untouched operands as
+  // `_skipped` for `applyAllTransformations` to splice back. See that function.
+  if (
+    hasParams &&
+    params.allow_extended_match &&
+    Array.isArray(pattern) &&
+    (pattern[0] === "+" || pattern[0] === "*")
+  ) {
+    return extendedMatch(tree, pattern, params);
+  }
   const res = hasParams
     ? wasm.match_template_with_options(
         astToJson(tree),
@@ -113,4 +127,60 @@ export function match(tree, pattern, params?) {
       )
     : wasm.match_template(astToJson(tree), astToJson(pattern));
   return res === undefined ? false : jsonToAst(res);
+}
+
+/** All size-`k` index subsets of `[0, n)`, in lexicographic order. */
+function combinations(n: number, k: number): number[][] {
+  const out: number[][] = [];
+  const pick = (start: number, chosen: number[]) => {
+    if (chosen.length === k) {
+      out.push(chosen.slice());
+      return;
+    }
+    for (let i = start; i <= n - (k - chosen.length); i++) {
+      chosen.push(i);
+      pick(i + 1, chosen);
+      chosen.pop();
+    }
+  };
+  pick(0, []);
+  return out;
+}
+
+/**
+ * Match a `+`/`*` pattern against a subset of a larger `+`/`*` tree.
+ *
+ * The tree's operands are put in canonical order first (`default_order`) so the
+ * skipped remainder comes out in the order the callers' expected results assume
+ * — legacy sorts before matching, and the splice appends `_skipped` verbatim.
+ * The pattern's own operands are matched against each candidate subset by the
+ * core matcher (honoring `allow_permutations`), so a coefficient like the `x`
+ * in `x·cos(b)² + x·sin(b)²` still binds.
+ */
+function extendedMatch(tree, pattern, params) {
+  const op = pattern[0];
+  if (!Array.isArray(tree) || tree[0] !== op) return false;
+  const patOperands = pattern.slice(1);
+  const k = patOperands.length;
+
+  const treeOperands = default_order(tree).slice(1);
+  const n = treeOperands.length;
+  // Guard the combinatorial search; a graded response never has this many terms.
+  if (n < k || n > 16) return false;
+
+  // The subset is matched unextended; drop the flag so this does not recurse.
+  const subParams = { ...params };
+  delete subParams.allow_extended_match;
+
+  for (const idx of combinations(n, k)) {
+    const chosen = new Set(idx);
+    const candidate = [op, ...idx.map((i) => treeOperands[i])];
+    const m = match(candidate, pattern, subParams);
+    if (m) {
+      const skipped = treeOperands.filter((_, i) => !chosen.has(i));
+      if (skipped.length > 0) (m as { _skipped?: unknown[] })._skipped = skipped;
+      return m;
+    }
+  }
+  return false;
 }

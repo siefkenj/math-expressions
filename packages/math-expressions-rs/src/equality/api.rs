@@ -23,6 +23,19 @@ pub fn equals(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
     let a = desugar_units(a);
     let b = desugar_units(b);
 
+    // Union equality is a set match on the *raw* members: each candidate pair is
+    // coerced in isolation by the recursive `equals`, which is what reproduces
+    // the legacy coercion graph's non-transitivity. A single per-side interval
+    // rewrite would force a tuple to an interval whenever *any* member on the
+    // other side is one — wrongly, when that tuple should have paired with a
+    // vector. Accept-only: a missing matching falls through to the canonical
+    // path below (which already handles the deduped/sorted cases).
+    if let (Expr::Union(xa), Expr::Union(xb)) = (&a, &b) {
+        if xa.len() == xb.len() && union_set_equal(xa, xb, opts) {
+            return true;
+        }
+    }
+
     let (a, b) = coerce_intervals(a, b, opts);
 
     // Sequence-kind coercion runs BEFORE simplification so the tuple/vector
@@ -292,6 +305,26 @@ fn has_interval(e: &Expr) -> bool {
     e.any_subexpr(&|c| matches!(c, Expr::Interval { .. }))
 }
 
+/// Two unions are equal iff their members admit a perfect pairing under
+/// `equals` — a set match, since a union denotes a set (canonicalization already
+/// sorts and dedups them). Matching, not greedy: pairwise equality here is not
+/// transitive (a tuple equals a vector and a closed-interval-spelled array in
+/// *different* pairs), so a first-fit could miss a pairing that exists. Reuses
+/// the augmenting-path matcher from `fuzzy`.
+fn union_set_equal(xa: &[Expr], xb: &[Expr], opts: &EqOptions) -> bool {
+    const MAX_MEMBERS: usize = 32;
+    let n = xa.len();
+    if n == 0 || n > MAX_MEMBERS {
+        return false;
+    }
+    let edges: Vec<Vec<usize>> = xa
+        .iter()
+        .map(|x| (0..n).filter(|&j| equals(x, &xb[j], opts)).collect())
+        .collect();
+    let mut paired: Vec<Option<usize>> = vec![None; n];
+    (0..n).all(|i| super::fuzzy::augment(i, &edges, &mut vec![false; n], &mut paired))
+}
+
 /// Read a 2-element tuple or array as an interval — `(1,2)` open, `[3,4]`
 /// closed — on both sides, when either side has an interval in it. It is the
 /// same notation: `(1,2) union (3,4)` and the same text parsed with intervals
@@ -325,10 +358,20 @@ fn coerce_seqs(e: Expr, opts: &EqOptions) -> Expr {
         // One variant-specific rewrite (the Seq kind); child recursion is the
         // blessed traversal, so new `Expr` variants need no edit here.
         if let Expr::Seq(k, xs) = e {
-            let mapped = match k {
-                SeqKind::Array if opts.coerce_tuples_arrays => SeqKind::Tuple,
-                SeqKind::Vector | SeqKind::AltVector if opts.coerce_vectors => SeqKind::Tuple,
+            // The legacy coercion graph is non-transitive: `coerce_vectors`
+            // governs *only* vector↔altvector, while `coerce_tuples_arrays`
+            // governs tuple↔array and tuple↔vector. Applied as two gated steps so
+            // that turning one flag off does not drag the other's edges with it —
+            // `{coerce_tuples_arrays:false}` must keep a vector distinct from a
+            // tuple even while `coerce_vectors` still unifies vector and
+            // altvector.
+            let k1 = match k {
+                SeqKind::AltVector if opts.coerce_vectors => SeqKind::Vector,
                 other => *other,
+            };
+            let mapped = match k1 {
+                SeqKind::Array | SeqKind::Vector if opts.coerce_tuples_arrays => SeqKind::Tuple,
+                other => other,
             };
             return Expr::Seq(mapped, xs.iter().map(|x| recur(x, opts)).collect());
         }

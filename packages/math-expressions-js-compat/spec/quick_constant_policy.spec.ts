@@ -9,6 +9,9 @@ const DEFAULTS = {
   define_e: true,
   define_i: true,
   sort_constants_first: false,
+  // Not a constant declaration, but it rides the same policy object and FFI:
+  // strict `0^0` → NaN by default, non-strict → 1 (`me.math.pow_strict`).
+  pow_strict: true,
 };
 
 afterEach(() => {
