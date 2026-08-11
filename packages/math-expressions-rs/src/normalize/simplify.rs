@@ -235,7 +235,13 @@ fn rewrite(e: &Expr, fired: &mut bool, assumptions: &Assumptions) -> Expr {
         *fired = true;
         return r;
     }
-    if let Some(r) = rule_distribute_neg_over_sum(&e) {
+    // Flatten before factoring: a negated sum spliced into its parent changes
+    // the parent's term counts, so the threshold must see the settled sum.
+    if let Some(r) = rule_flatten_negated_sum_term(&e) {
+        *fired = true;
+        return r;
+    }
+    if let Some(r) = rule_factor_sign_out_of_sum(&e) {
         *fired = true;
         return r;
     }
@@ -1087,8 +1093,10 @@ pub(crate) fn combine_seqs_in_add(terms: &[Expr]) -> Option<Expr> {
 // **When it is worth doing.** Count minus signs. For a candidate sum of `k`
 // terms of which `n` are negated, the product costs `1 + n` signs as written
 // and `k − n` with the sign pushed in, so it is worth doing iff
-// `1 + n > k − n`, i.e. `2n ≥ k`. Writing `saving = 2n − k`, the rule fires iff
-// the best candidate has `saving ≥ 0`:
+// `1 + n ≥ k − n`, i.e. `2n ≥ k − 1`. Writing `saving = 2n − k`, the rule fires
+// iff the best candidate has `saving ≥ −1` — the `−1` being the exact tie,
+// which goes to the pushed-in form so that a tied sum has one fixpoint and not
+// two (see [`rule_factor_sign_out_of_sum`]):
 //
 // | input | n / k | result |
 // | --- | --- | --- |
@@ -1101,7 +1109,7 @@ pub(crate) fn combine_seqs_in_add(terms: &[Expr]) -> Option<Expr> {
 // | `−(1 − x)³` | 1 / 2 | `(x − 1)³` — odd exponent |
 // | `−(1 − x)²` | — | unchanged — even exponent cannot take a sign |
 // | `−(x + y)` | 0 / 2 | unchanged — distributing would *add* a sign |
-// | `−(x + y − z)` | 1 / 3 | unchanged |
+// | `−(x + y − z)` | 1 / 3 | `−x − y + z` — a tie, and ties push in |
 //
 // Counting signs rather than reading the leading term keeps the rule
 // independent of how the sum happens to be ordered, so it fires the same way on
@@ -1151,34 +1159,101 @@ fn absorb_sign(f: &Expr) -> Expr {
     }
 }
 
-/// `-(a + b + c) → -a - b - c`, and *only* for a coefficient of exactly −1
-/// over a lone sum.
+/// `−a − b → −(a + b)`: factor a sign out of a sum that is mostly negated.
 ///
-/// This is the one distribution the JS `.simplify()` performs, and it is not
-/// arbitrary: negating a sum adds no terms and no factors, so the result is
-/// never larger than the input. `-2(x+1)` is left as written, because
-/// distributing there would turn one term into two; `-((x+1)(x+2))` is left
-/// because the lone factor is a product, not a sum.
+/// The converse of [`rule_distribute_sign`], and the reason `simplify` has a
+/// *single* fixpoint per value rather than one per spelling. That rule alone
+/// only ever pushes a sign **into** a sum, so a sum that arrived already
+/// distributed was a fixpoint by default and `−(a+b)/3` and `(−a−b)/3` — the
+/// same value — both stood still. A preference expressed by only one of the two
+/// rewrites is not a normal form.
 ///
-/// Without it, a difference of two sums never cancels. `(q + 12 - (q+2))/2`
+/// **The threshold.** For a sum of `k` terms of which `n` are negated, the
+/// spelling costs `n` signs as written and `1 + (k − n)` factored, so factoring
+/// is worth it iff `1 + (k − n) < n`, i.e. `2n ≥ k + 2`. Strict: a tie stays
+/// distributed, which is what keeps `−(1 − x) → x − 1` and `a − b − c` as
+/// written.
+///
+/// | sum | n / k | result |
+/// | --- | --- | --- |
+/// | `−a − b` | 2 / 2 | `−(a + b)` — strictly fewer signs |
+/// | `−a − b − c` | 3 / 3 | `−(a + b + c)` |
+/// | `a − b − c` | 2 / 3 | unchanged — a tie, and ties stay distributed |
+/// | `−a − b + c` | 2 / 3 | unchanged |
+/// | `x − 1` | 1 / 2 | unchanged |
+///
+/// **Exactly one of the two spellings is stable, always.** This is the property
+/// that makes `simplify` single-fixpoint on sign placement, and it needs both
+/// thresholds to line up. Take a value whose distributed spelling has `k` terms
+/// with `n` negated; the factored spelling `−(S)` then has `m = k − n` negated.
+///
+/// - Distributed is stable iff this rule declines: `2n ≤ k + 1`.
+/// - Factored is stable iff [`rule_distribute_sign`] declines: `2m ≤ k − 2`,
+///   i.e. `2n ≥ k + 2`.
+///
+/// The two conditions are exact complements, so precisely one holds: never
+/// both (which would be two fixpoints for one value — the bug this rule was
+/// added to fix) and never neither (which would ping-pong). That is also why
+/// the tie in `rule_distribute_sign` must go *in* while the tie here stays out;
+/// moving either threshold by one re-opens one of the two failure modes.
+fn rule_factor_sign_out_of_sum(e: &Expr) -> Option<Expr> {
+    let Expr::Add(terms) = e else { return None };
+    let negated = terms.iter().filter(|t| is_negated_term(t)).count();
+    if 2 * negated < terms.len() + 2 {
+        return None;
+    }
+    Some(mul(vec![Expr::int(-1), absorb_sign(e)]))
+}
+
+/// `q + 12 − (q + 2) → q + 12 − q − 2`: flatten a negated sum that is a *term*
+/// of a larger sum.
+///
+/// This is what is left of the old unconditional `−1 · (sum) → −a − b − c`, and
+/// the narrowing is the point. Distributing a lone `−(x + y)` only spends a
+/// sign; the reason to distribute at all is to let terms meet and cancel, and
+/// that can only happen inside a parent sum. So the rewrite is restricted to
+/// exactly the position where it can pay.
+///
+/// Without it a difference of two sums never cancels: `(q + 12 - (q+2))/2`
 /// stayed unreduced where the JS library gives `5` — the shape `<lineSegment>`
 /// produces for a symbolic midpoint, so a user-visible coordinate was showing
 /// its own derivation instead of its value.
-fn rule_distribute_neg_over_sum(e: &Expr) -> Option<Expr> {
-    let Expr::Mul(factors) = e else { return None };
-    // Exactly `−1 · (sum)`: canonical form keeps the coefficient first, so
-    // anything else — a different coefficient, or a second factor — means
-    // distributing would not be free.
-    let [Expr::Num(coeff), Expr::Add(terms)] = factors.as_slice() else {
+///
+/// Only a coefficient of exactly `−1` qualifies. `x − 2(a + b)` is left alone
+/// because distributing a *magnitude* turns one term into two, which is
+/// `expand`'s job — the same line [`rule_distribute_sign`] draws.
+fn rule_flatten_negated_sum_term(e: &Expr) -> Option<Expr> {
+    let Expr::Add(terms) = e else { return None };
+    if !terms.iter().any(|t| negated_sum_terms(t).is_some()) {
+        return None;
+    }
+    let mut out = Vec::new();
+    for t in terms {
+        match negated_sum_terms(t) {
+            Some(inner) => out.extend(inner),
+            None => out.push(t.clone()),
+        }
+    }
+    Some(add(out))
+}
+
+/// The terms of `t` with their signs flipped, when `t` is exactly `−1 · (sum)`.
+/// Canonical form keeps the coefficient first, so a second factor or any other
+/// coefficient means this is not a bare negated sum.
+fn negated_sum_terms(t: &Expr) -> Option<Vec<Expr>> {
+    let Expr::Mul(factors) = t else { return None };
+    let [Expr::Num(coeff), Expr::Add(inner)] = factors.as_slice() else {
         return None;
     };
     if coeff.to_f64() != -1.0 {
         return None;
     }
-    Some(add(terms
-        .iter()
-        .map(|t| mul(vec![Expr::int(-1), t.clone()]))
-        .collect()))
+    Some(
+        inner
+            .iter()
+            .map(|x| mul(vec![Expr::int(-1), x.clone()]))
+            .collect(),
+    )
 }
 
 fn rule_distribute_sign(e: &Expr) -> Option<Expr> {
@@ -1201,8 +1276,13 @@ fn rule_distribute_sign(e: &Expr) -> Option<Expr> {
         .skip(1)
         .filter_map(|(i, f)| sign_absorption(f).map(|s| (i, s)))
         .max_by_key(|&(i, s)| (s, std::cmp::Reverse(i)))?;
-    // Dropping the outer sign saves one; taking it costs `-saving` inside.
-    if saving < 0 {
+    // Dropping the outer sign saves one; taking it costs `-saving` inside, so
+    // `saving == -1` is an exact tie in sign count. Ties push **in**, and that
+    // is load-bearing rather than cosmetic: [`rule_factor_sign_out_of_sum`]
+    // pulls out only on a strict win, so declining ties here would leave both
+    // spellings of a tied sum stable and `simplify` would have two fixpoints
+    // for one value again. See that rule's docs for the disjointness argument.
+    if saving < -1 {
         return None;
     }
     let mut out = factors.clone();

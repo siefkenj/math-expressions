@@ -6,8 +6,14 @@
 //! distributing the **coefficient** (`2(1 − x)` → `2 − 2x`), which is `expand`'s
 //! job. The criterion is "do not add minus signs": with `n` negated terms out
 //! of `k`, the product costs `1 + n` signs as written and `k − n` with the sign
-//! pushed in, so it fires exactly when `2n ≥ k`. Each assert below is one row
-//! of that table, including the rows that must *not* move.
+//! pushed in, so it fires exactly when `2n ≥ k − 1`. Each assert below is one
+//! row of that table, including the rows that must *not* move.
+//!
+//! The same count read backwards is `rule_factor_sign_out_of_sum`, which pulls
+//! a sign back *out* of a mostly-negated sum (`−a − b` → `−(a + b)`). The pair
+//! is what makes `simplify` reach one fixpoint per value instead of one per
+//! spelling; see that rule's docs for why exactly one of the two spellings is
+//! stable. Tests for the pull-out direction live in `simplify_sign_fixpoint.rs`.
 
 use math_expressions::{equals, expr, simplify, EqOptions, Expr, TextToAst};
 
@@ -32,18 +38,25 @@ fn a_sign_that_cancels_one_inside_moves_in() {
 
 #[test]
 fn a_sign_that_would_multiply_stays_put() {
-    // A bare `−1` over a sum is not this rule at all — `rule_distribute_neg_over_sum`
-    // takes it first and distributes unconditionally, because negating a sum
-    // adds no terms and no factors. So the "would multiply the signs" reasoning
-    // below applies only once some *other* factor is present; with nothing but
-    // the sign, the sum is simply negated termwise.
+    // DIVERGENCE (adopted): alpha94 — the version DoenetML pins — distributes
+    // here, giving `["+",["-","x"],["-","y"]]`, and so did this crate until the
+    // sign rules were made confluent. It is the one row that had to give.
     //
-    // These two rows used to assert the opposite. They were the only place this
-    // crate disagreed with `math-expressions@2.0.0-alpha94`, the version
-    // DoenetML pins, which gives `["+",["-","x"],["-","y"]]` here — and the
-    // disagreement had a cost: a difference of two sums could never cancel, so
-    // `(q + 12 - (q+2))/2` stayed unreduced where the JS library gives `5`.
-    assert_eq!(simplified("-(x+y)"), r#"["+",["-","x"],["-","y"]]"#);
+    // `−(x + y)` costs one sign and `−x − y` costs two, so every sign-counting
+    // rule in the pair prefers the factored form; alpha94 prefers the other one
+    // only because it distributes a bare `−1` unconditionally, without
+    // consulting a count at all. Keeping alpha94's answer here means the
+    // distributed spelling must also be a fixpoint — and then `−(a+b)/3` and
+    // `(−a−b)/3`, one value, simplify to two different trees. That was the bug.
+    //
+    // What alpha94's unconditional rule actually bought was cancellation:
+    // without it a difference of two sums never reduces, and `(q + 12 - (q+2))/2`
+    // stayed unreduced where the JS library gives `5`. That motive is served
+    // exactly and only where it applies, by `rule_flatten_negated_sum_term` —
+    // see `a_negated_sum_inside_a_sum_still_cancels` below.
+    assert_eq!(simplified("-(x+y)"), r#"["-",["+","x","y"]]"#);
+    // Not a divergence: a tie at 1 sign either way, and ties push in, so this
+    // still matches alpha94.
     assert_eq!(simplified("-(x+y-z)"), r#"["+",["-","x"],["-","y"],"z"]"#);
     // A *positive* coefficient has no sign to move in the first place.
     assert_eq!(simplified("2(1-x)"), r#"["*",2,["+",["-","x"],1]]"#);
@@ -98,6 +111,23 @@ fn a_power_takes_a_sign_only_at_an_odd_integer_exponent() {
     assert_eq!(
         simplified("-(1-x)^(1/2)"),
         r#"["-",["^",["+",["-","x"],1],["/",1,2]]]"#
+    );
+}
+
+#[test]
+fn a_negated_sum_inside_a_sum_still_cancels() {
+    // The reason alpha94 distributes a bare `−1` at all. `−(q+2)` is left
+    // factored on its own (see `a_sign_that_would_multiply_stays_put`), but as a
+    // *term* of a larger sum it is spliced in, because that is the only position
+    // where the terms can meet and cancel.
+    assert_eq!(simplified("(q + 12 - (q+2))/2"), "5");
+    assert_eq!(simplified("a - (a+b)"), r#"["-","b"]"#);
+    assert_eq!(simplified("(x+y) - (x+y)"), "0");
+    // Only a coefficient of exactly −1 splices. A magnitude would turn one term
+    // into two, which is `expand`'s job.
+    assert_eq!(
+        simplified("x-2(a+b)"),
+        r#"["+","x",["*",-2,["+","a","b"]]]"#
     );
 }
 
