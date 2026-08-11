@@ -52,6 +52,17 @@ pub fn solve_linear(e: &Expr, var: &str, assumptions: &Assumptions) -> Option<Ex
     }
 
     // var <op'> −b/a, flipping strict/loose inequalities for negative a.
+    //
+    // Handed to `simplify_with` as one quotient, deliberately. Folding the
+    // numerator first instead — `Div(simplify(Neg(b)), a)` — is tempting because
+    // it puts `-3y - v <= 2xz + r` into the oracle's `-((2xz+r+v)/3)` rather
+    // than our `(-2xz-r-v)/3`; but it then spells `2uv-v = 3u+q` as
+    // `(-q-v)/(3-2v)` instead of `(q+v)/(2v-3)`, trading one sign placement for
+    // another. The two spellings are one value (`equals` agrees on both pairs)
+    // and both are `simplify` fixpoints: the real gap is that the `Div` sign
+    // rule fires before a `Neg` of a sum of negations folds, so which fixpoint
+    // you land on depends on the spelling handed in. That belongs in `simplify`,
+    // not in a thumb on the scale here.
     let solution = simplify_with(
         &Expr::Div(Box::new(Expr::Neg(Box::new(b))), Box::new(a.clone())),
         assumptions,

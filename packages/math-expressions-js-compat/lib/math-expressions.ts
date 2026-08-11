@@ -645,6 +645,32 @@ class Expression {
     return wrap(this._w.constants_to_floats(), this.context);
   }
 
+  // ---- solving ----
+  /**
+   * Restate a relation with `variable` alone on the left: `3x+4 = 2` in `x`
+   * becomes `x = -2/3`, and an inequality flips when the coefficient is
+   * negative (`2x-4 < 6+4x` → `x > -5`).
+   *
+   * Routed through the context's assumption store rather than the free
+   * `solve_linear_ast`, which is deliberately assumption-blind. The facts on
+   * file are what decide two of the three outcomes here: `2uv-v = 3u+q` has no
+   * answer in `u` until something makes `2v-3` nonzero, and an inequality's
+   * direction is unknowable until the coefficient's sign is.
+   *
+   * When there is no answer this returns the {@link ABSENT_EXPRESSION}
+   * stand-in, not `undefined` — legacy handed back an `Expression` whose `.tree`
+   * was `undefined`, and callers read `.tree` off the result unconditionally.
+   */
+  solve_linear(variable) {
+    const solved = this.context._assumptionsHandle.solve_linear(
+      this._w,
+      varName(variable),
+    );
+    return solved === undefined
+      ? ABSENT_EXPRESSION
+      : wrap(solved, this.context);
+  }
+
   // ---- structural conversions ----
   tuples_to_vectors() {
     return wrap(this._w.tuples_to_vectors(), this.context);
@@ -1085,6 +1111,53 @@ if (typeof Symbol.dispose === "symbol") {
   };
 }
 
+/**
+ * The "no answer" result from a method that can fail to produce an expression
+ * at all — currently only {@link Expression.solve_linear}.
+ *
+ * Legacy funnelled every tree-returning helper through `context.fromAst(...)`
+ * (`extend_prototype` in the old `math-expressions.js`), so a helper that
+ * returned `undefined` still handed back a real `Expression` — one whose `.tree`
+ * was `undefined`. Callers, the specs included, read `.tree` off the result
+ * without checking, so returning a bare `undefined` here would turn "unsolvable"
+ * into a `TypeError`.
+ *
+ * A js-compat `Expression` is always backed by a wasm handle and no handle
+ * spells "absent", so this is a separate object rather than an `Expression`.
+ * Its shape is what the live legacy oracle actually hands out for an unsolvable
+ * relation, checked case by case: `.tree` is `undefined`, `toString()` and
+ * `toLatex()` are `""`, `equals(…)` is `false`, `variables()` is `[]`. Every
+ * other `Expression` method returns the stand-in itself, so chaining off an
+ * unsolvable relation stays absent instead of throwing — legacy's own chained
+ * results were an artifact of wrapping `undefined` and not worth reproducing.
+ */
+const ABSENT_EXPRESSION = (() => {
+  const absent: Record<string, unknown> = {
+    tree: undefined,
+    // A getter because `Context` is initialized further down this module and
+    // this runs during its evaluation.
+    get context() {
+      return Context;
+    },
+    toString: () => "",
+    toLatex: () => "",
+    variables: () => [],
+    equals: () => false,
+    // Deliberately not self-returning: a `toJSON` handing back the stand-in
+    // makes `JSON.stringify` recurse until the stack goes, and there is no
+    // handle to free.
+    toJSON: () => undefined,
+    free: () => {},
+  };
+  for (const name of Object.getOwnPropertyNames(Expression.prototype)) {
+    const d = Object.getOwnPropertyDescriptor(Expression.prototype, name);
+    if (name === "constructor" || name in absent) continue;
+    if (typeof d?.value !== "function") continue; // a getter has no `value`
+    absent[name] = () => absent;
+  }
+  return Object.freeze(absent);
+})();
+
 // Legacy methods with no Rust backing — defined so calls fail loudly, not as
 // "undefined is not a function" surprises. Tests using them fail; suite runs.
 for (const name of [
@@ -1094,7 +1167,6 @@ for (const name of [
   "toXML",
   "toGLSL",
   "toMathjs",
-  "solve_linear",
   "finite_field_evaluate",
 ]) {
   (Expression.prototype as Record<string, unknown>)[name] =

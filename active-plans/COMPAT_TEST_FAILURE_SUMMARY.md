@@ -4,15 +4,55 @@ Snapshot of `packages/math-expressions-js-compat` (`npx vitest run`) on branch
 `doenet`, after rebuilding `vendor/wasm` (`bash build-wasm.sh`) so results reflect
 current Rust source.
 
-**Current totals (2026-08-10, at `f84577c` + the two equality fixes below + the
-`trees/basic` port + the `match`-condition wontfix + the three presentation
-fixes and five adopted divergences below + the unordered-`Add` fuzzy compare):
-20 failed / 6297 passed / 6329 total** (10 skipped, 2 todo).
-Previous snapshots: 380, 162, 97, 83, 82, 61, 55, 54, 46, 43, 38.
+**Current totals (2026-08-11, at `62c5f20` + uncommitted working-tree work +
+the `solve_linear` binding and the `=`/`≠` operand-order fix below):
+12 failed / 6305 passed / 6329 total** (10 skipped, 2 todo).
+Previous snapshots: 380, 162, 97, 83, 82, 61, 55, 54, 46, 43, 38, 20, 16, 13.
 
-Both `*-numerical-errors` files are now at **zero**. The 38 → 20 step was
-measured as a matched pair — same tree, same wasm build, diffed by name — and
-shows 18 fixed and **no** test going passing→failing.
+Both `*-numerical-errors` files are now at **zero**, and so are `slow_simplify`
+and `slow_rational`.
+
+**Two independent efforts landed in this tree at once** — the `solve_linear`
+binding and the polynomial work (`polynomials/kernel.rs`, `ratform.rs`,
+`multivariate.rs`, `ops/numbers.rs`). Treat 16 → 12 as their sum, never as
+either one's. They fix **disjoint** tests and the arithmetic is additive: 16 with
+neither, 14 with either alone, 12 with both.
+
+Each is attributable only because it was measured as a matched pair — same tree,
+same wasm build, one change set at a time, diffed by (file, name, occurrence) —
+and none showed a test go passing→failing:
+
+| change set | pair | attributable |
+| --- | --- | --- |
+| `solve_linear` binding | (of the 14 → 12 below) | `quick_solve` "nonlinear doesn't work" |
+| `=`/`≠` operand order | (of the 14 → 12 below) | `quick_solve` "linear equation" |
+| both of the above, together | 14 → 12 | those 2 `quick_solve` tests |
+| polynomial / kernel work | 14 → 12 | both `slow_rational` |
+
+The two `solve_linear` rows were split on a tree that was still moving, so read
+the split as the weaker claim; the **14 → 12 for the pair of them** was measured
+on a quiet tree by reverting exactly the six files that change set touches
+(`lib/math-expressions.ts`, `src-js/wasm.ts`, `src-rust/assumptions.rs`,
+`grade/linear.rs`, `normalize/canonicalize.rs`, `normalize/default_order.rs`),
+rebuilding, and running both halves back to back: 2 fixed, 0 regressions, 0
+renames. The 38 → 20 and 20 → 16 steps were measured the same way.
+
+**A matched pair means the two runs differ by the change set and nothing else.**
+The polynomial row was first measured against a baseline captured before the
+`solve_linear` binding landed, and consequently over-claimed: it appeared to fix
+two `quick_solve` tests that were in fact the binding's. A later A/B on
+`MAX_INDETERMINATES` was confounded the same way, in the opposite direction —
+edits arrived between the two wasm builds and made a resource guard look like a
+correctness fix. Re-running with only the polynomial files set aside gave the 14
+→ 12 above. On a tree someone else is editing, a baseline goes stale in minutes;
+capture both halves back to back or the diff is measuring the other person.
+
+That both change sets measure 14 → 12 is not a contradiction and not
+double-counting — it is two different pairs sharing an endpoint. Each was run
+against a baseline holding the *other* change set, so 14 is "everything but
+mine" in one case and "everything but theirs" in the other, and the 12 is the
+same tree both times. The check that they are genuinely disjoint is that neither
+diff names a test the other's does.
 
 The immediately preceding baseline measured **46**, not the 45 recorded in an
 earlier edit of this file; the 43 above is from a matched pair of runs (same
@@ -46,11 +86,9 @@ and the honest check is that no name present in *both* runs went passing→faili
 | count | spec file                                       | root cause / category                                                                    |
 | ----: | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
 |     2 | `quick_trees`                                   | `allow_extended_match`, and one throw-vs-`false` (+9 skipped wontfix) — see below        |
-|     4 | `slow_simplify`                                 | container ordering (2), `exp` not seen as a power, unit-group order — see below           |
 |     5 | `slow_assumptions`                              | see below                                                                                |
 |     4 | `slow_math-expressions`                         | equality of containers/unions, an integer assumption, one derivative identity            |
-|     3 | `quick_solve`                                   | `solve_linear()` unimplemented                                                           |
-|     2 | `slow_rational`                                 | `e` is a polynomial *coefficient*, so `e+f` is not seen as a factor — see below          |
+|     1 | `quick_solve`                                   | `simplify` picks its `Neg`/`Div` sign placement from the input spelling — see below      |
 
 ### The `*-numerical-errors` failures — 39 investigated, 39 fixed
 
@@ -197,10 +235,15 @@ Only one compat test happened to catch it. Verified: 0 regressions across the
 6327-test suite, 77 cargo suites green, clippy clean, and the
 `tolerance-known-failures.json` snapshot shrank by exactly this one entry.
 
-### The 2 `slow_rational` failures — a constant-policy divergence
+### FIXED — `reduce_rational` refused its own inputs (was 2 tests)
 
-Both build `(f1·f2).expand() / (f3·f2).expand()` and expect it to reduce to
-`f1/f3`. Isolated by toggling the policy:
+**Both pass.** Measured as a matched pair against the same tree and wasm build,
+with only `polynomials/kernel.rs`, `polynomials/{mod,multivariate,ratform}.rs`,
+`ops/numbers.rs` and `tests/reduce_rational.rs` set aside for the baseline:
+14 → 12, exactly these two names, and **no** test going passing→failing.
+
+Both build `(f1·f2).expand() / (f3·f2).expand()` and expect `f1/f3`. Isolated by
+toggling the constant policy:
 
 | `f3`         | `define_e: true` (default) | `define_e: false` |
 | ------------ | -------------------------- | ----------------- |
@@ -208,22 +251,84 @@ Both build `(f1·f2).expand() / (f3·f2).expand()` and expect it to reduce to
 | `e+atan(z)`  | fail                       | fail              |
 | `g+h` (control) | pass                    | pass              |
 
-So the first failure is caused *entirely* by `e` being declared a constant.
-`polynomials/compat/convert.rs` maps a declared constant to `Poly::Coeff`, so
-`e+f` reads as a linear polynomial in `f` rather than a product-able factor in
-two indeterminates, and the GCD never finds it. Rename `e` to `g` and it passes.
+Two causes, not one: `e` being a declared constant, and `atan(z)`/`sin(y)` not
+being admitted as indeterminates either. Both were the same refusal.
+`me.reduce_rational` runs on `polynomials::multivariate`, a recursive-dense ring
+over ℚ in *named variables*; `expr_to_poly` rejects a constant symbol
+(`multivariate.rs`, `Expr::Sym` arm) and returns `None` on `Expr::Apply`, and
+`reduce_node` then bails and hands the input straight back. Nothing was
+mis-cancelled — the pass simply declined to run.
 
-**This diverges from alpha94 on purpose but possibly wrongly.** Legacy's
-`variables()` filter is `(math.define_e || v !== "e")`, which *keeps* `e` in the
-variable list when `define_e` is on — so legacy's polynomial code treats `e` as
-an indeterminate and factors `e+f` fine. Whether the Rust reader should follow it
-is a real decision (a coefficient `e` is more correct algebraically; an
-indeterminate `e` is what the specs were written against), not a bug to patch
-blindly. See `SPECIAL_CONSTANTS_FLAG.md`.
+#### The framing to avoid
 
-The second failure is independent of the policy: with `e` undeclared the
-transcendental case still fails, so `sin(y)`/`atan(z)` are not being admitted as
-indeterminates either. Two causes, not one.
+An earlier reading of this had it as a *design* question — whether `e` should be
+a coefficient (algebraically more correct) or an indeterminate (what the specs
+were written against) — and pointed at `SPECIAL_CONSTANTS_FLAG.md`. That framing
+is wrong twice over, and it is wrong in a way worth keeping on the record because
+it is the natural way to see it:
+
+- **`e` does not need to be a coefficient. It needs to be a variable.**
+  Cancellation is a polynomial *identity* — the engine produces `g` with
+  `num = g·qn` and `den = g·qd` — and identities survive specialization. So it
+  makes no difference whether an indeterminate later stands for a number, a
+  function, or anything else. `e` as a seventh variable is answered by the
+  existing ℚ-coefficient GCD with nothing about the coefficient ring changed.
+- **The real distinction is completeness, not soundness, and it is transcendence.**
+  `π` and `e` are transcendental over ℚ, so `ℚ[e] ≅ ℚ[t]` and treating them as
+  variables misses nothing at all. `i` is algebraic (`i²+1 = 0`), so as a free
+  variable it misses `(x²+1)/(x+i) → x−i`. Missing a cancellation is the failure
+  mode; inventing one is not reachable this way.
+
+The same argument covers `cos(x)`: opaque generators are sound for identical
+reasons, and the cost is only `sin²+cos² = 1` going unseen. Legacy lands in the
+same place from the other end — `polynomial.js` falls through to *"return entire
+tree as a polynomial variable"* for any operator it does not recognize.
+
+#### What shipped
+
+Not a second engine. `ratform.rs` **already** did exactly this, with the
+soundness argument already written down, and `reduce_rational` just never called
+it. Kernelization moved to `polynomials/kernel.rs` (also taking `ratform.rs` from
+253 to 180 lines) and `reduce_node` now kernelizes before converting: each
+distinct opaque subtree becomes a fresh indeterminate, the ℚ-GCD runs unchanged,
+the kernels are substituted back. One `Kernels` spans numerator and denominator —
+two would give the same `cos x` two names and the common factor would go unseen.
+
+`polynomials/compat` — the sparse engine with expression-valued coefficients,
+which is a faithful port of legacy's and gets both cases right on its own — is
+*not* what fixed this. It was tempting: it holds `e` in the coefficient slot
+exactly as legacy does. But its expression-valued coefficients are a contract
+owed to the compat API's wire format (`["polynomial","f",[[0,"e"],[1,1]]]`, which
+callers compare structurally), and `reduce_rational` does not care which slot `e`
+lands in. Reaching for it would have been answering the shape question instead of
+the algebra one.
+
+#### Two things fell out
+
+**A pre-existing sign defect, now fixed.** A gcd is defined only up to a unit and
+`make_lc_positive` picks one by the *main* variable's sign, so when both sides
+lead negatively there the leftover `−1` landed in the denominator:
+`(y²−x²)/(y−x)` returned `−(−x − y)`. Right value, unacceptable spelling, and
+entirely independent of kernels — rename `y`→`x` and it goes away, which is what
+pinned it. `multivariate::normalize_fraction_sign` now moves that sign onto the
+numerator. Kernels made it near-universal rather than occasional, since `$k…`
+sorts ahead of every ordinary variable. It accounts for **no** compat test either
+way; it is covered by `the_leftover_unit_does_not_land_in_the_denominator`.
+
+**An unbounded path, now capped.** The dense model is exponential in indeterminate
+count: `y/∏ᵏ(xᵢ+1)` costs 0.5 s at k=10, 4.8 s at 12, 15.7 s at 13, tripling per
+variable, with the per-variable `MAX_DEGREE` cap not touching it. That hole is as
+old as the pass and identical for plain variables — kernels do not make it worse
+in kind, they remove the accidental shield that made it hard to reach (anything
+with a `sin` in it was refused before it got this far). `reduce_node` now caps at
+`MAX_INDETERMINATES = 10`, measured rather than principled: an order of magnitude
+above the six a real rational function needs. `ratform` caps at 6 because
+`together` multiplies denominators and starts from a worse place.
+
+The cap is a resource guard and **nothing else**. An earlier note here credited it
+with fixing `quick_solve > linear equation`; that A/B was confounded by concurrent
+edits landing between the two wasm builds, and a native A/B on a fixed tree shows
+the cap makes no difference to that result. See the measurement warning below.
 
 ### The 5 remaining `slow_assumptions` failures
 
@@ -246,7 +351,7 @@ assertions pass as written. The one that does not is `is_real(i·x)` given
 inference (a product of a nonzero real and the imaginary unit is not real), not
 a declaration problem. Fix that and the test can be un-skipped.
 
-### The 4 `slow_simplify` failures
+### `slow_simplify` — now at 0 (74/74)
 
 Re-measured 2026-08-10 by dumping our tree against the legacy oracle for every
 assertion (`legacy-js-oracle-runnable`). Three of the buckets were previously
@@ -356,22 +461,52 @@ that gives `(2/3)x⁻¹ → 2/(3x)`, and exempting a numerator of 1 would make t
 presentation depend on the coefficient's value. The decimal-spelled sibling
 (`0.5i`) is unaffected — a decimal never moves under a bar.
 
-- **Container ordering — 2 tests.** The two "sorted the same" cases. Legacy's
-  sort key is *(component count, then component values)*, with container type
-  not in the key at all, so containers interleave:
+- **ADOPTED — container ordering, 2 tests.** The two "sorted the same" cases.
+  Legacy's sort key is *(component count, then component values)*, with
+  container type not in the key at all, so containers interleave:
   `[1,6] [1,9) [9,5) [9,8] [0,4,4]`. We sort by container type first, then by
   value within each type: `[0,4,4] [1,6] [9,8] [1,9) [9,5)`.
 
-- **`exp` not treated as a power of `e` — 1 test.** "treat exp like power".
-  `collect_like_terms_factors` handles `e^3·e^5 → e^8` but leaves
-  `exp(3)·exp(5)` and `exp(3)/exp(5)` completely uncollected — the `Apply` form
-  is never recognised as a power. (This test also trips the sign bug above.)
+  Kept as ours and the expectations updated. Matching legacy would mean
+  reworking `normalize/order.rs`'s `rank`/`seq_index` — the comparator that
+  makes `==` on canonical trees mean equality, over trees that get persisted in
+  DoenetML document state — and it could not be confined to `present`: the
+  `union` case is ordered by `canonicalize` and never reaches `present_add`.
+  Both tests' `skip_ordering` halves already matched exactly, so only the
+  comparator was ever in question.
 
-- **Unit-group ordering — 1 test.** "with units". Our
-  `collect_like_terms_factors` emits `$, deg, %`; legacy emits `$, %, deg`.
-  Note our *own* `default_order()` produces the legacy order on the same
-  expression, so this is an internal inconsistency between the two paths, not a
-  missing comparator.
+- **FIXED — `exp` not treated as a power of `e`, 1 test.** "treat exp like
+  power". All four `e^`-spelled assertions passed; all four `exp(...)`-spelled
+  ones were left completely uncollected, because the `Apply` form was never
+  recognised as a power.
+
+  `exp(u)` now combines exactly as the `e^u` it spells, in the two places the
+  `e^u` rules live: an accumulator in `mul` sums the arguments of `exp` factors
+  (`exp(3)·exp(5) → exp(8)`), and `pow` flattens `exp(u)^k → exp(u·k)` for
+  integer `k` — needed because `exp(3)/exp(5)` canonicalizes its divisor to
+  `exp(5)^(−1)`. `present` gained the `exp` twin of `b^(−x) → 1/b^x`, so
+  `−5exp(−t)` reads `−5/exp(t)`.
+
+  The argument sum is kept in its own accumulator rather than folded into
+  `parts` under base `e`, so the author's spelling survives: `evaluate_numbers`
+  hands `exp(8)` back as `exp(8)`, and a product mixing spellings (`e^3·exp(5)`)
+  leaves both alone — which is what alpha94 does too. Our version is *stronger*
+  than legacy on the symbolic cases (`exp(x)exp(y) → exp(x+y)`, which legacy
+  declines), matching how we already treat `e^x·e^y`. Legacy is erratic here in
+  ways not worth copying: it returns `exp(5)^2` for `exp(3)exp(5)exp(2)`.
+
+- **FIXED — unit-group ordering, 1 test.** "with units". Our
+  `collect_like_terms_factors` emitted `$, deg, %`; legacy emits `$, %, deg` —
+  and so did our *own* `default_order()`, so this was an inconsistency between
+  two of our paths, not a missing comparator.
+
+  A `unit` node has no degree and no coefficient, so all three groups tied both
+  `present_add` keys, and the stable sort left them in **canonical** order —
+  which compares the enclosed sums with the `Neg` term sorted last (`e, z, −c`
+  before `f, y, −a`) while the display prints the `Neg` first. The order was
+  decided by a form the reader of the output cannot see. `present_add` now ends
+  with a tie-break on the *presented* subtrees, putting it in step with
+  `default_order`.
 
 ## Remaining buckets by theme
 
@@ -379,8 +514,88 @@ presentation depend on the coefficient's value. The decimal-spelled sibling
 (root spelling, the `-1` parameter, term order), all broken down above. Both
 `*-numerical-errors` files are at zero.
 
-**Unimplemented / unbound APIs (5)** — `quick_trees` (2, below) and
-`quick_solve` (3, `solve_linear`).
+**Unimplemented / unbound APIs (2)** — `quick_trees` (2, below). `quick_solve`
+left this bucket entirely; see below.
+
+### The `quick_solve` failures — 3 investigated, 2 fixed, 1 left
+
+"`solve_linear()` unimplemented" was wrong. The port has been in
+`grade/linear.rs` all along and is *correct*: called directly, it returns exactly
+what the legacy oracle returns on all eleven inputs the spec uses, the two
+assumption-dependent ones included. All three tests failed on their first line
+because `solve_linear` sat in the `notImplemented` list in
+`lib/math-expressions.ts` — so 3 tests, not 3 defects, and 12 assertions that
+never ran.
+
+Three separate things had to be true to bind it:
+
+- **A JS method.** Dropped from `notImplemented`, added as
+  `Expression.solve_linear`. On no answer it returns `ABSENT_EXPRESSION`, not
+  `undefined`: legacy funnelled tree-returning helpers through
+  `context.fromAst(...)`, so "unsolvable" arrived as an `Expression` with
+  `.tree === undefined`, and the specs read `.tree` off the result without
+  checking. The stand-in's shape is what the live oracle actually hands out,
+  checked case by case.
+- **An assumption-aware entry point.** The existing free `solve_linear_ast` is
+  deliberately assumption-*blind* — the store calls it while deciding what to
+  file, so a conclusion drawn from facts already on file would depend on
+  insertion order. Two of the twelve assertions need the store (`v < 0` to make
+  `2v-3` nonzero; `u < 0` to flip an inequality), so the binding is a new
+  `Assumptions::solve_linear` method next to `equals_expressions`, for the same
+  reason that one lives there: the assumptions are the argument that matters.
+  `solve_linear_ast` is untouched.
+- **The `=`/`≠` operand order** — two of the assertions, and *not* a
+  `solve_linear` problem at all. Detailed in the next section.
+
+### `=`/`≠` operand order — an exact rational is a *tree* in JS
+
+`x = -2/3` came out of `evaluate_numbers`/`simplify` as `-2/3 = x`, where the
+oracle leaves the variable on the left. Both `default_order()` on its own and
+`solve_linear`'s hand-built relation had it right, so the engine was holding two
+spellings of one equation and the spec compared one against the other.
+
+The cause is representational. Legacy has no exact-rational leaf: `-2/3` is the
+tree `["/", -2, 3]`, and `sort_key` reaches it through the two-operand branch as
+`[4, "quotient", …]` — *behind* every symbol, which keys `[1, "symbol", …]`. Our
+`Number::Rat` is a leaf, so it keyed `[0, "number", …]` and sorted ahead of a
+symbol. `default_order()` looked correct only by accident: it runs on the parsed
+tree, where the fraction is still a `Div` and never became a `Num`.
+
+Two changes, both needed — verified by reverting each with the other in place:
+
+- `default_order.rs sort_key` keys a `Num` that crosses to JS as a *tree* as
+  that tree. The test is the JS spelling, not the `Number` variant, which is what
+  makes it exact: a decimal-spelled rational (`19.9` is `Rat(199, 10)`) crosses
+  as a plain number and keeps the number key — the same split `number_to_js`
+  makes.
+- `canonicalize.rs canon_relation` sorts `=`/`≠` operands by
+  `cmp_default_order` with the canonical `cmp` as tie-break, instead of `cmp`
+  alone. Which order canonical form picks is free — equality only needs both
+  sides sorted alike — but the order is displayed. `cmp` stays as the tie-break
+  because the JS key is not a total order, and a stable sort would otherwise
+  leave canonical form dependent on the order operands were authored in, which
+  is exactly what would break `equals`.
+
+Measured as a matched pair against the same tree and wasm build, diffed by
+(file, name, occurrence): **1 fixed, 0 regressions**, and the Rust suite stays
+clean.
+
+#### LEFT — `simplify` picks its sign placement from the input spelling (1 test)
+
+`-3y - v <= 2xz + r` solves to `(-2xz-r-v)/3` where the oracle gives
+`-((2xz+r+v)/3)`. One value — `equals` says so — but two *fixpoints* of
+`simplify`, and which one you land on depends on the spelling handed in:
+`(2xz+r+v)/(-3)` simplifies to the pulled-out sign, while `(-(-2xz-r-v))/(-3)`
+distributes it into the numerator. The `Div` sign rule fires before a `Neg` of a
+sum of negations folds.
+
+Not fixable in `solve_linear`, and it was tried: folding the numerator first
+(`Div(simplify(Neg(b)), a)`) does produce the oracle's form here, but then spells
+`2uv-v = 3u+q` as `(-q-v)/(3-2v)` instead of `(q+v)/(2v-3)` — one sign placement
+traded for another, net zero. The fix belongs in `simplify`'s `Div`/`Neg`
+handling, and being a normal-form change to displayed output it needs its own
+baseline diff. `grade/linear.rs` carries a note so the shortcut is not
+re-attempted.
 
 ### The `quick_trees` failures — 17 investigated, 6 fixed, 9 wontfix, 2 left
 
@@ -450,9 +665,11 @@ under `"number"`).
   already carries the splice logic for those bindings, so only the Rust side is
   missing.
 
-**Semantic edge cases (10)** — `slow_simplify` (4, broken down above),
-`slow_math-expressions` (4), `slow_rational` (2). No single root cause; these are
-a scatter of individual normalization decisions rather than one bucket.
+**Semantic edge cases (5)** — `slow_math-expressions` (4), plus the `quick_solve`
+sign-placement fixpoint (1). `slow_rational`'s 2 now pass.
+No single root cause; these are a scatter of individual normalization decisions
+rather than one bucket. (`slow_simplify` was the rest of this bucket and is now
+at zero.)
 
 **Assumption reasoning (5)** — all `slow_assumptions`, listed above. Includes the
 `paren_if_spaced` printer defect surfacing through an assumptions spec:
@@ -467,14 +684,21 @@ holders are closed: `*-numerical-errors` is at zero, and `quick_trees` is down t
 2 small items — "fail gracefully" (one arm in `interop.rs`) and
 `allow_extended_match`.
 
-Nothing left is a single-cause bucket the way those two were. The remaining 20
-span six files and at least eight distinct causes, so from here the work is
+Nothing left is a single-cause bucket the way those two were. The remaining 12
+span five files and at least eight distinct causes, so from here the work is
 per-item rather than per-bucket.
 
-One thing worth doing that no failing test covers: **`equality/fuzzy.rs` is now
-~330 lines** and has an obvious seam (structural equality vs. the sensitivity
-tolerance) that the file's own module doc already names. It is over the ~200-line
-split guideline and was over it before this change.
+Two things worth doing that no failing test covers:
+
+- **`equality/fuzzy.rs` is ~330 lines** and has an obvious seam (structural
+  equality vs. the sensitivity tolerance) that the file's own module doc already
+  names. Over the ~200-line split guideline, and over it before that change too.
+- **`ops/numbers.rs` is ~640 lines** and holds two unrelated passes: numeric
+  folding (`evaluate_numbers` and the rounding family) and the polynomial-GCD
+  fraction cancellation (`reduce_rational`/`reduce_node`). The second now reaches
+  into `polynomials::kernel` and owns its own resource cap, which makes the seam
+  wider than it was. Splitting `reduce_rational` into its own module under
+  `ops/` would leave both halves under the guideline.
 
 ### Rejected: folding roots to powers in `canonicalize`
 

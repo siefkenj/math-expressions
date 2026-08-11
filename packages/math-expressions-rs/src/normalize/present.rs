@@ -30,8 +30,20 @@ pub(crate) fn present(e: &Expr) -> Expr {
         Expr::Add(ts) => present_add(ts),
         Expr::Mul(fs) => present_mul(fs),
         Expr::Pow(b, x) => present_pow(b, x),
-        _ => map_children(e, present),
+        _ => match negated_exp_call(e) {
+            Some(den) => Expr::Div(Box::new(Expr::int(1)), Box::new(den)),
+            None => map_children(e, present),
+        },
     }
+}
+
+/// The denominator `exp(−u)` belongs in, when `e` is an `exp` call whose
+/// argument is definitely negative: `exp(−t) → 1/exp(t)`. The `exp` spelling of
+/// [`present_pow`]'s `b^(−x) → 1/b^x`, and returning the denominator rather than
+/// the whole fraction lets [`present_mul`] reuse it for a single factor.
+fn negated_exp_call(e: &Expr) -> Option<Expr> {
+    let pos = negated_exponent(super::exp_call_arg(e)?)?;
+    Some(super::exp_call(present(&pos)))
 }
 
 /// Present an exponent. A fraction-spelled non-integer exponent displays as a
@@ -131,7 +143,10 @@ fn present_mul(fs: &[Expr]) -> Expr {
                     num_factors.push(present(f));
                 }
             }
-            _ => num_factors.push(present(f)),
+            _ => match negated_exp_call(f) {
+                Some(den) => den_factors.push(den),
+                None => num_factors.push(present(f)),
+            },
         }
     }
 
@@ -283,7 +298,21 @@ fn present_add(ts: &[Expr]) -> Expr {
             (deg_key(t), coeff_key(&p), p)
         })
         .collect();
-    items.sort_by(|a, b| key_order(&a.0, &b.0).then_with(|| coeff_order(&a.1, &b.1)));
+    // The last resort compares the *presented* terms, not the canonical ones —
+    // without it, terms that tie on both keys keep the relative order the stable
+    // sort inherited from `canonicalize`, which ranks operands by a scheme the
+    // reader of the output cannot see. Two unit groups tie here (a `unit` node
+    // has no degree and no coefficient), and canonical order compared their sums
+    // with the `Neg` term sorted last — `e, z, −c` before `f, y, −a` — while the
+    // display shows the `Neg` first, so `z deg` came out ahead of `y%` for a
+    // reason invisible on the page. Comparing what is actually printed puts this
+    // in step with `default_order`, which is where the same sums are ordered
+    // when nothing is being simplified.
+    items.sort_by(|a, b| {
+        key_order(&a.0, &b.0)
+            .then_with(|| coeff_order(&a.1, &b.1))
+            .then_with(|| super::cmp(&a.2, &b.2))
+    });
     Expr::Add(items.into_iter().map(|p| p.2).collect())
 }
 

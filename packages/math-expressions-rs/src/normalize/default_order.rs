@@ -605,14 +605,44 @@ fn sort_key(e: &Expr, ignore_negatives: bool) -> Key {
         }
     }
     match e {
-        Expr::Num(n) => {
-            let v = n.to_f64();
-            arr3(
-                0.0,
-                "number",
-                Key::Num(if ignore_negatives { v.abs() } else { v }),
-            )
-        }
+        // A `Num` that crosses to JS as a *tree* keys as that tree, not as a
+        // number. JS has no exact-rational leaf, so `-2/3` is `["/", -2, 3]`
+        // there and `sort_key` reaches it through the two-operand branch as
+        // `[4, "quotient", …]` — behind every symbol, whose key is
+        // `[1, "symbol", …]`. Keying it `[0, "number", …]` sorted a fraction
+        // *ahead* of a symbol and turned `x = -2/3` into `-2/3 = x`, where the
+        // oracle leaves the variable on the left.
+        //
+        // Asking the JS spelling rather than the `Number` variant is what makes
+        // this exact: a decimal-spelled rational (`19.9` is `Rat(199, 10)`)
+        // crosses as the plain number `19.9`, so it keeps the number key — the
+        // same split `number_to_js` makes.
+        Expr::Num(n) => match crate::expr::serde::to_js(e) {
+            serde_json::Value::Array(parts) => {
+                let factor_keys: Vec<Key> = parts[1..]
+                    .iter()
+                    // `ignore_negatives` is dropped on the way in, matching what
+                    // the generic branch below does and why (JS's
+                    // `operands.map(sort_key, params)` passes `params` as
+                    // `map`'s *thisArg*, so the nested call never sees it).
+                    .map(|v| arr3(0.0, "number", Key::Num(v.as_f64().unwrap_or(0.0))))
+                    .collect();
+                Key::Arr(vec![
+                    Key::Num(4.0),
+                    Key::Str("quotient".to_string()),
+                    Key::Num(factor_keys.len() as f64),
+                    Key::Arr(factor_keys),
+                ])
+            }
+            _ => {
+                let v = n.to_f64();
+                arr3(
+                    0.0,
+                    "number",
+                    Key::Num(if ignore_negatives { v.abs() } else { v }),
+                )
+            }
+        },
         Expr::Bool(b) => arr3(1.0, "boolean", Key::Bool(*b)),
         // A power keys as its base, then the marker, then its exponent — so
         // `x`, `x^2` and `x^3` land next to each other rather than being

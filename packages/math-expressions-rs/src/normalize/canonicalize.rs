@@ -243,7 +243,24 @@ fn canon_relation(mut operands: Vec<Expr>, ops: Vec<RelOp>) -> Expr {
         }
     }
     if ops.iter().all(|o| matches!(o, Eq)) || matches!(ops.as_slice(), [Ne]) {
-        operands.sort_by(cmp);
+        // Ordered by the *JS* `default_order` key, with the canonical `cmp` as
+        // the tie-break. Which order canonical form picks is free — equality
+        // only needs both sides sorted the same way — but the order is
+        // *displayed*, and the two keys disagree on where an exact fraction
+        // goes. `cmp` ranks every `Num` ahead of every `Sym`; legacy has no
+        // rational leaf, so `-2/3` is the tree `["/", -2, 3]` there and keys as
+        // a quotient, behind any symbol. Sorting by `cmp` alone turned
+        // `x = -2/3` into `-2/3 = x` while the oracle leaves the variable on
+        // the left, and left the engine holding two spellings of one relation:
+        // `solve_linear` builds `x = -2/3` directly and never re-enters this
+        // sort, so its answer stopped matching the same equation reached
+        // through `simplify`.
+        //
+        // `cmp` stays as the tie-break because the JS key is not a total order
+        // — distinct operands can key alike, and a stable sort would then leave
+        // canonical form dependent on the order they were authored in, which is
+        // exactly what would break `equals`.
+        operands.sort_by(|a, b| super::cmp_default_order(a, b).then_with(|| cmp(a, b)));
     }
     Expr::Relation { operands, ops }
 }

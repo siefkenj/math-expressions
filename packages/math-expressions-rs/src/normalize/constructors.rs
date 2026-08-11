@@ -337,6 +337,12 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
     // that one sign out front, which is sound precisely because there is no
     // second sign for it to interact with.
     let mut plus_minus: Vec<Expr> = Vec::new();
+    // The summed argument of the `exp`-spelled factors, which combine exactly as
+    // the `e^u` they spell: `exp(3)·exp(5) → exp(8)`. They get their own
+    // accumulator instead of joining `parts` under base `e` so that the author's
+    // spelling survives the round trip, and so a product mixing the two
+    // spellings leaves each alone rather than rewriting one into the other.
+    let mut exp_arg: Option<Expr> = None;
     for f in flat {
         if let Expr::Num(n) = &f {
             coeff = coeff.mul(n);
@@ -348,6 +354,14 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
         }
         if crate::ops::pm::contains_pm(&f) {
             plus_minus.push(f);
+            continue;
+        }
+        if let Some(u) = exp_call_arg(&f) {
+            let u = u.clone();
+            exp_arg = Some(match exp_arg.take() {
+                Some(prev) => add(vec![prev, u]),
+                None => u,
+            });
             continue;
         }
         let (base, exp) = split_pow(f);
@@ -376,6 +390,13 @@ pub(crate) fn mul(factors: Vec<Expr>) -> Expr {
                 refold = true;
                 out.extend(xs);
             }
+            other => out.push(other),
+        }
+    }
+    if let Some(u) = exp_arg {
+        match exp_call(u) {
+            // `exp(0)` is the 1 that `pow` would have produced for `e^0`.
+            Expr::Num(n) => coeff = coeff.mul(&n),
             other => out.push(other),
         }
     }
@@ -664,6 +685,16 @@ pub(crate) fn pow(base: Expr, exp: Expr) -> Expr {
             }
         }
     }
+    // `exp(u)^k = exp(u·k)` for integer `k` — the `exp`-spelled twin of the
+    // nested-power flatten just below, carrying the same integer restriction for
+    // the same reason. This is what lets `exp(3)/exp(5)` collect: its second
+    // factor canonicalizes to `exp(5)^(−1)`, which has to become `exp(−5)`
+    // before `mul`'s accumulator can add the two arguments.
+    if let Some(u) = exp_call_arg(&base) {
+        if as_int(&exp).is_some() {
+            return exp_call(mul(vec![u.clone(), exp]));
+        }
+    }
     // Flatten a nested power when the OUTER exponent is an integer:
     // `(b^a)^k = b^(a·k)` (repeated multiplication/division), valid for any base
     // and integer `k`. Restricting to integer `k` avoids the `(x^2)^(1/2) = |x|`
@@ -727,6 +758,34 @@ pub(crate) fn split_coeff(t: Expr) -> (Number, Option<Expr>) {
         }
         other => (Number::one(), Some(other)),
     }
+}
+
+/// The argument `u` when `f` is the `exp`-spelled power of e, `exp(u)`.
+///
+/// `exp(u)` and `e^u` are one value written two ways, and both layers keep
+/// whichever the author wrote — `evaluate_numbers` hands `exp(8)` back as
+/// `exp(8)`, not `e^8`, and the JS library does the same. So the exponent rules
+/// that already apply to `e^u` are restated for this spelling (here and in
+/// [`pow`]) rather than normalizing one spelling into the other, which would
+/// rewrite input nobody asked to have rewritten.
+pub(crate) fn exp_call_arg(f: &Expr) -> Option<&Expr> {
+    if let Expr::Apply(head, args) = f {
+        if let (Expr::Sym(s), [u]) = (&**head, args.as_slice()) {
+            if s.name() == "exp" {
+                return Some(u);
+            }
+        }
+    }
+    None
+}
+
+/// `exp(u)`, folding `exp(0)` to 1 as [`pow`] folds `b^0` — an accumulated
+/// argument really can cancel to zero (`exp(t)/exp(t)`).
+pub(crate) fn exp_call(u: Expr) -> Expr {
+    if matches!(&u, Expr::Num(n) if n.is_zero()) {
+        return Expr::Num(Number::one());
+    }
+    Expr::Apply(Box::new(Expr::sym("exp")), vec![u])
 }
 
 /// A factor split into (base, exponent).

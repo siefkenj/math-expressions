@@ -8,6 +8,7 @@ use crate::expr::map_children;
 use crate::expr::Expr;
 use crate::normalize::{canonicalize, present};
 use crate::num::{BigNumber, Number, Spelling};
+use crate::polynomials::kernel::{indeterminates, kernelize, Kernels};
 use std::collections::BTreeSet;
 
 /// Fold numeric subexpressions (`4 + x − 2` → `x + 2`) — the port of
@@ -385,6 +386,22 @@ fn respell(e: &Expr, spelling: Spelling) -> Expr {
     map_numbers(e, &|n| n.with_spelling(spelling))
 }
 
+/// Maximum distinct indeterminates (variables + kernels) [`reduce_node`] will
+/// build a dense polynomial over.
+///
+/// The recursive dense model is exponential in this count — `y/∏ᵏ(xᵢ+1)` costs
+/// 0.5 s at 10, 4.8 s at 12, 15.7 s at 13, tripling per variable, and the
+/// per-variable [`MAX_DEGREE`](crate::polynomials) cap does not touch it. That
+/// hole is as old as the pass, but it used to be hard to fall into: anything
+/// with a `sin` in it was refused before it got this far. Kernels remove that
+/// accidental shield, so the guard has to be explicit.
+///
+/// 10 is measured, not principled — an order of magnitude above the six a real
+/// rational function needs, and cheap at the boundary. `ratform` caps at 6
+/// because `together` multiplies denominators together and starts from a worse
+/// place; this pass only cancels a fraction that already exists.
+const MAX_INDETERMINATES: usize = 10;
+
 fn reduce_node(e: &Expr) -> Expr {
     let e = map_children(e, reduce_node);
     let Expr::Mul(factors) = &e else { return e };
@@ -414,14 +431,33 @@ fn reduce_node(e: &Expr) -> Expr {
     let num = crate::normalize::mul(num_parts);
     let den = crate::normalize::mul(den_parts);
 
-    // Common variable list (order fixed by BTreeSet). Constant symbols are
-    // rejected by the converter, so `pi/x` style fractions pass through.
-    let mut vars = BTreeSet::new();
-    collect_var_names(&num, &mut vars);
-    collect_var_names(&den, &mut vars);
-    let vars: Vec<String> = vars.into_iter().collect();
+    // The polynomial ring is over ℚ in named variables, so anything else that
+    // sits in the fraction — `π`, `e`, `cos x`, `√y` — has to become an
+    // indeterminate before the converter will look at it. That is exactly what
+    // cancellation needs: it is a polynomial *identity* (`num = g·qn`,
+    // `den = g·qd`), and identities survive specialization, so it never matters
+    // what the indeterminates later stand for. Without this the converter
+    // simply refuses, and `(a+b)(c+d) / ((e+f)(c+d))` comes back uncancelled
+    // for no better reason than the letter `e`.
+    //
+    // One `Kernels` spans both halves: give the same `cos x` two names and the
+    // common factor goes unseen.
+    let mut kernels = Kernels::default();
+    let num = kernelize(&num, &mut kernels);
+    let den = kernelize(&den, &mut kernels);
+
+    // Common indeterminate list, in a fixed order.
+    let vars = indeterminates(&num)
+        .into_iter()
+        .chain(indeterminates(&den))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<String>>();
     if vars.is_empty() {
         return e; // pure numeric fraction — Number arithmetic already reduced it
+    }
+    if vars.len() > MAX_INDETERMINATES {
+        return e;
     }
 
     let (Some(pn), Some(pd)) = (
@@ -444,6 +480,7 @@ fn reduce_node(e: &Expr) -> Expr {
     };
     // Normalize the quotients' rational content into a single scalar on the
     // numerator, so `(2x+4)/2` comes out as `x+2` rather than `½·(2x+4)`.
+    let (qn, qd) = crate::polynomials::normalize_fraction_sign(qn, qd);
     let (cn, qn) = crate::polynomials::strip_rational_content(&qn);
     let (cd, qd) = crate::polynomials::strip_rational_content(&qd);
     let scalar = Expr::Num(Number::from_bigrational_spelled(cn / cd, spelling));
@@ -452,20 +489,12 @@ fn reduce_node(e: &Expr) -> Expr {
         respell(&crate::polynomials::poly_to_expr(&qn, &vars), spelling),
     ]);
     let new_den = respell(&crate::polynomials::poly_to_expr(&qd, &vars), spelling);
+    // Respell first, restore second: the numbers the quotients carry are the
+    // ring's, and are the ones that need a spelling back. The numbers *inside* a
+    // kernel are the author's own (`cos(0.5)`) and are none of our business.
+    let new_num = kernels.restore(&new_num);
+    let new_den = kernels.restore(&new_den);
     canonicalize(&Expr::Div(Box::new(new_num), Box::new(new_den)))
-}
-
-/// Collect the free (non-constant) variable names of `e` into `out`.
-fn collect_var_names(e: &Expr, out: &mut BTreeSet<String>) {
-    if let Expr::Sym(s) = e {
-        let name = s.name();
-        if !crate::expr::sym::is_constant_symbol(&name) {
-            out.insert(name);
-        }
-    }
-    for c in e.children() {
-        collect_var_names(c, out);
-    }
 }
 
 /// Replace the constant symbols `pi` and `e` with their floating-point values

@@ -241,19 +241,27 @@ describe("evaluate_numbers", function () {
       ["tuple", 1, 6],
     ];
 
+    // DIVERGENCE (adopted): containers sort by kind first, then by components
+    // lexicographically. alpha94 keys them on (component count, then
+    // components) with the kind absent, so its output interleaves tuples,
+    // vectors, altvectors and intervals — `(1,6) <1,7> ⟨1,8⟩ (1,9)` — and an
+    // interval sorts among the 2-component containers because its endpoints are
+    // read as a pair. Ours groups each kind together, which is what the
+    // canonical comparator gives: the same comparator that makes `==` on
+    // canonical trees mean equality, and it ranks by variant before contents.
     let sorted_result = [
       "+",
+      ["tuple", 0, 4, 4],
       ["tuple", 1, 6],
+      ["tuple", 9, 8],
+      ["vector", 0, 5, 4],
       ["vector", 1, 7],
+      ["vector", 9, 7],
+      ["altvector", 0, 3, 4],
       ["altvector", 1, 8],
+      ["altvector", 9, 6],
       ["interval", ["tuple", 1, 9], ["tuple", false, false]],
       ["interval", ["tuple", 9, 5], ["tuple", false, false]],
-      ["altvector", 9, 6],
-      ["vector", 9, 7],
-      ["tuple", 9, 8],
-      ["altvector", 0, 3, 4],
-      ["tuple", 0, 4, 4],
-      ["vector", 0, 5, 4],
     ];
     expect(vector_sum.evaluate_numbers().tree).toEqual(sorted_result);
     expect(vector_sum.evaluate_numbers({ skip_ordering: true }).tree).toEqual(
@@ -280,13 +288,16 @@ describe("evaluate_numbers", function () {
       ["array", 1, 6],
     ];
 
+    // DIVERGENCE (adopted): same container ordering as the test above — kind
+    // first, so the arrays stay together instead of interleaving with the
+    // intervals the way alpha94's count-then-components key does.
     let sorted_result = [
       "union",
+      ["array", 0, 4, 4],
       ["array", 1, 6],
+      ["array", 9, 8],
       ["interval", ["tuple", 1, 9], ["tuple", true, true]],
       ["interval", ["tuple", 9, 5], ["tuple", true, true]],
-      ["array", 9, 8],
-      ["array", 0, 4, 4],
     ];
     expect(interval_union.evaluate_numbers().tree).toEqual(sorted_result);
     expect(

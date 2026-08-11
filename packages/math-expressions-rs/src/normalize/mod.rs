@@ -50,7 +50,9 @@ pub use syntactic::{
 };
 
 pub use canonicalize::canonicalize;
-pub(crate) use constructors::{add, mul, pow, split_coeff, without_like_term_collection};
+pub(crate) use constructors::{
+    add, exp_call, exp_call_arg, mul, pow, split_coeff, without_like_term_collection,
+};
 pub use default_order::{cmp_default_order, default_order};
 pub(crate) use default_order::{js_operands, legacy_operator};
 pub(crate) use full::full_simplify;

@@ -5,8 +5,8 @@ use super::Expression;
 use math_expressions::assumptions::tree_store::{Facts, VarMap};
 use math_expressions::expr::serde::{to_js, try_from_js};
 use math_expressions::{
-    canonicalize, create_discrete_infinite_set, simplify_with as rust_simplify_with, Assumptions,
-    EqOptions, Expr, TextToAst, TextToAstOptions,
+    canonicalize, create_discrete_infinite_set, simplify_with as rust_simplify_with,
+    solve_linear as rust_solve_linear, Assumptions, EqOptions, Expr, TextToAst, TextToAstOptions,
 };
 use wasm_bindgen::prelude::*;
 
@@ -191,6 +191,23 @@ impl WasmAssumptions {
     /// Simplify `expr` under these assumptions.
     pub fn simplify(&self, expr: &Expression) -> Expression {
         expr.derive(rust_simplify_with(&expr.0, &self.0))
+    }
+
+    /// Restate a relation with `variable` alone on the left (`3x+4 = 2` under
+    /// `x` becomes `x = -2/3`). `undefined` when the relation is not linear in
+    /// `variable`, when the coefficient cannot be shown nonzero, or — for an
+    /// inequality — when the coefficient's sign is unknown, since that is what
+    /// decides whether the direction flips.
+    ///
+    /// On the store rather than on `Expression` because the assumptions are the
+    /// argument that matters: `2uv-v = 3u+q` has no answer in `u` until `v < 0`
+    /// makes `2v-3` provably nonzero. The free [`solve_linear_ast`] is the
+    /// assumption-*free* entry point the store uses while deciding what to file,
+    /// and must stay that way — see its note on insertion order.
+    ///
+    /// [`solve_linear_ast`]: crate::tree_ops::solve_linear_ast
+    pub fn solve_linear(&self, expr: &Expression, variable: &str) -> Option<Expression> {
+        rust_solve_linear(&expr.0, variable, &self.0).map(|e| expr.derive(e))
     }
 
     // The eight three-valued predicates (`true` / `false` / `undefined`).

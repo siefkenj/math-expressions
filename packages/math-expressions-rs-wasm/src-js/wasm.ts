@@ -144,6 +144,13 @@ export interface WasmAssumptions {
   is_nonpositive(expr: WasmExpression): boolean | undefined;
   is_positive(expr: WasmExpression): boolean | undefined;
   is_negative(expr: WasmExpression): boolean | undefined;
+  simplify(expr: WasmExpression): WasmExpression;
+  /** `undefined` when `expr` is not linear in `variable`, or when the sign an
+   * inequality's direction depends on cannot be settled from these facts. */
+  solve_linear(
+    expr: WasmExpression,
+    variable: string,
+  ): WasmExpression | undefined;
 }
 
 export interface WasmAssumptionsConstructor {
