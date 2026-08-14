@@ -95,6 +95,17 @@ pub(super) fn fuzzy_tree_eq(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
 /// This is Kuhn's augmenting-path algorithm over the "these two are fuzzy-equal"
 /// bipartite graph, which answers the actual question — is there *any* pairing
 /// under which every term matches?
+///
+/// **Only when the allowance was actually spent.** The justification above is
+/// that forgiving ε in a number may have moved the term holding it, so the
+/// fallback declines whenever the terms match up *exactly* — a permutation that
+/// needs no allowance is not sort drift, it is the two expressions being written
+/// in different orders, and `equals_syntactic`'s order sensitivity has to stand
+/// for it. DoenetML's `<answer symbolicEquality allowedErrorInNumbers="...">`
+/// is the case that made this concrete: it is documented and tested as refusing
+/// a reordered response, and `e·25.6 + 2.15π` against `2.15π + e·25.6` — every
+/// number identical — was being graded correct purely because a tolerance had
+/// been requested somewhere else in the expression.
 fn unordered_eq(a: &[&Expr], b: &[&Expr], opts: &EqOptions) -> bool {
     // Guard the O(n²) edge build and O(n³) matching. A sum this wide is not a
     // graded response, and the ordered compare has already had its say.
@@ -103,6 +114,22 @@ fn unordered_eq(a: &[&Expr], b: &[&Expr], opts: &EqOptions) -> bool {
     if n > MAX_TERMS {
         return false;
     }
+    // A pure permutation: matched with the allowance switched off, so nothing
+    // about the ordering can be blamed on a forgiven number.
+    let exact = EqOptions {
+        allowed_error_in_numbers: 0.0,
+        ..opts.clone()
+    };
+    if matching_exists(a, b, &exact) {
+        return false;
+    }
+    matching_exists(a, b, opts)
+}
+
+/// Is there a pairing of `a` with `b` under which every term is
+/// [`fuzzy_tree_eq`] at `opts`?
+fn matching_exists(a: &[&Expr], b: &[&Expr], opts: &EqOptions) -> bool {
+    let n = a.len();
     let edges: Vec<Vec<usize>> = a
         .iter()
         .map(|x| {

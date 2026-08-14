@@ -520,3 +520,41 @@ fn log_base_one_is_undefined() {
         r#"["/",["apply","log",5],["apply","log",2]]"#
     );
 }
+
+/// A coefficient that folded to one *through a float* stayed written down.
+///
+/// `Number::is_one` recognized only `Int(1)`, where its sibling `is_zero` had
+/// always accepted `Float(0.0)`. That predicate is what drops the identity
+/// factor in `normalize::mul`, so `0.5 · 2 · x` came back `1·x` — but only
+/// along the JSON path, because the text parser turns a decimal literal into an
+/// exact rational (`Number::from_decimal_str`) while `expr::serde::try_from_js`
+/// hands `0.5` to `Number::from_f64` and gets a `Float`.
+///
+/// Same mathematics, two answers, decided by which door the expression came in
+/// through — and DoenetML comes in through `fromAst`. It reached grading:
+/// `<math simplify expand>` of `0.5(2x-2)(x+1)` produced `1·x² − 1` where the
+/// same answer typed `1/2(2x-2)(x+1)` produced `x² − 1`, so a correct response
+/// failed a `symbolicEquality` comparison against the expected `x² − 1`.
+#[test]
+fn a_float_valued_one_is_still_the_multiplicative_identity() {
+    // The JSON path, which is the one that was wrong.
+    assert_eq!(tree(&simplify(&js(r#"["*",0.5,2,"x"]"#))), r#""x""#);
+    assert_eq!(
+        tree(&simplify(&js(r#"["+",["*",0.5,2,["^","x",2]],-1]"#))),
+        r#"["+",["^","x",2],-1]"#
+    );
+    // It always agreed with the text parser on the answer's *value*; now it
+    // agrees on the spelling too.
+    assert_eq!(tree(&simplify(&p("0.5*2*x"))), r#""x""#);
+
+    // The identity exponent is dropped by the same predicate.
+    assert_eq!(tree(&simplify(&js(r#"["^","x",["*",0.5,2]]"#))), r#""x""#);
+    // And a float-valued one is still a base that absorbs its exponent.
+    assert_eq!(tree(&simplify(&js(r#"["^",["*",0.5,2],"x"]"#))), "1");
+
+    // Nothing else moves: a float coefficient that is not one stays.
+    assert_eq!(
+        tree(&simplify(&js(r#"["*",0.5,3,"x"]"#))),
+        r#"["*",1.5,"x"]"#
+    );
+}

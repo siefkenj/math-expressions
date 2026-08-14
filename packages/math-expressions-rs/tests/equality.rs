@@ -396,6 +396,50 @@ fn a_tolerance_survives_the_term_reordering_it_causes() {
 }
 
 #[test]
+fn order_sensitivity_survives_a_tolerance_that_was_never_spent() {
+    // The re-match above is justified only by "forgiving ε may have moved the
+    // term holding it". A permutation that needs no ε is not sort drift — it is
+    // the two expressions being written in different orders — so requesting a
+    // tolerance anywhere must not silently turn a form check into an unordered
+    // one.
+    //
+    // DoenetML is where this bit: `<answer symbolicEquality
+    // allowedErrorInNumbers="0.001">` is documented and tested as refusing a
+    // reordered response, and `e·25.602348230 + 2.15234262π` against
+    // `2.15234262π + e·25.602348230` — every number identical — graded correct.
+    let o = EqOptions {
+        allowed_error_in_numbers: 1e-3,
+        ..EqOptions::default()
+    };
+    let form = |a: &str, b: &str| equals_syntactic(&parse(a), &parse(b), &o);
+
+    assert!(!form("x+y", "y+x"));
+    assert!(!form("2x+3y", "3y+2x"));
+    assert!(!form(
+        "2.15234262pi+e*25.602348230",
+        "e*25.602348230+2.15234262pi"
+    ));
+    // Written in the same order, it still matches — the tolerance is doing its
+    // ordinary job on the numbers.
+    assert!(form(
+        "2.15234262pi+e*25.602348230",
+        "2.15234263pi+e*25.602348230"
+    ));
+    // And a reordering that the tolerance *did* pay for is still forgiven: this
+    // pair needs the allowance to pair its second terms up at all.
+    let reordered_and_fuzzed = EqOptions {
+        allowed_error_in_numbers: 1e-4,
+        include_error_in_number_exponents: true,
+        ..EqOptions::default()
+    };
+    assert!(equals_syntactic(
+        &simplify(&parse("exp(0.01xy+1000q^2)")),
+        &simplify(&parse("exp(0.01xy+1000q^(2-.00009))")),
+        &reordered_and_fuzzed
+    ));
+}
+
+#[test]
 fn order_sensitivity_is_intact_without_a_tolerance() {
     // The unordered re-match is gated on a nonzero `allowed_error_in_numbers`.
     // With none set, the order is a function of numbers being compared exactly,

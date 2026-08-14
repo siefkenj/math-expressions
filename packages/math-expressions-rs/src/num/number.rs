@@ -499,8 +499,26 @@ impl Number {
         }
     }
 
+    /// Exactly the value one, in whatever representation.
+    ///
+    /// `Float(1.0)` counts, symmetrically with [`is_zero`](Number::is_zero),
+    /// which has always accepted `Float(0.0)`. Only `Int(1)` used to, and the
+    /// asymmetry was observable: this predicate is what drops the identity
+    /// factor in [`mul`](crate::normalize::mul) and the identity exponent in
+    /// [`pow`](crate::normalize::pow), so a coefficient that folded to one
+    /// *through a float* stayed written down. `fromAst(["*", 0.5, 2, "x"])`
+    /// simplified to `1·x` while `fromText("0.5*2*x")` gave `x` — the same
+    /// mathematics, and a structural-equality answer that depended on which
+    /// door the expression came in through.
+    ///
+    /// (Only `Float` can hold a non-`Int` one: `Rat` maintains `den != 1` and
+    /// `Big` demotes to `Int` when it fits, so neither can represent it.)
     pub fn is_one(&self) -> bool {
-        matches!(self, Number::Int(1))
+        match self {
+            Number::Int(1) => true,
+            Number::Float(f) => f.get() == 1.0,
+            _ => false,
+        }
     }
 
     pub fn abs(&self) -> Number {
