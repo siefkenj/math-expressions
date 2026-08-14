@@ -1480,17 +1480,27 @@ fn simplify_root(
     // residual that visibly mentions `i`: `is_real` answers `None` for `i·x`
     // and `x + i` too, because it cannot rule out an imaginary `x`, and taking
     // that for real gave `cbrt(-i·x) → -cbrt(i·x)` — a different number, as
-    // this crate's own `equals` reports for the constant case. The check is on
-    // the *spelling* rather than on `is_real`, and asks
-    // [`constant_policy::is_i`] so that a document declaring `i` an ordinary
-    // variable keeps the real-branch rewrite.
+    // this crate's own `equals` reports for the constant case. The check is
+    // therefore *per subexpression* rather than on the residual as a whole:
+    // realness is not a fact this engine propagates through `+`, `*` or `^`
+    // (`is_real(sqrt(-2))` is `Some(false)` but `is_real(x·sqrt(-2))` is
+    // `None`), so asking only the root would take every one of
+    // `x·sqrt(-2)`, `x·ln(-1)`, `x·arcsin(2)`, `x + sqrt(-2)` — and, under an
+    // `x ∉ R` assumption, `x + 1` and `x·y` — for real. A residual declines
+    // when any part of it is *provably* non-real, or is spelled `i`
+    // ([`constant_policy::is_i`], asked separately so that a document
+    // declaring `i` an ordinary variable keeps the real-branch rewrite while
+    // one that does not still declines on `i·x`, whose `is_real` is `None`).
+    // A part being non-real does not make the whole non-real, so this
+    // over-declines — which only ever leaves an expression as written.
     //
     // When the residual declines, the sign stays under the radical and just
     // the perfect power comes out (`cbrt(-8i) → 2·cbrt(-i)`), which holds on
     // either branch because a positive real factor does not move the argument.
     let sign_is_real = rest.as_ref().is_none_or(|r| {
-        is_real(r, assumptions) != Some(false)
-            && !r.any_subexpr(&|e| crate::constant_policy::is_i(e))
+        !r.any_subexpr(&|e| {
+            crate::constant_policy::is_i(e) || is_real(e, assumptions) == Some(false)
+        })
     });
     let sign: i64 = if negative && sign_is_real { -1 } else { 1 };
     let inner_negated = negative && !sign_is_real;

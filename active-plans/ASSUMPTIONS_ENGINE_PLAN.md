@@ -3,8 +3,9 @@
 Goal: close the remaining feature gaps in the assumptions engine so
 `packages/math-expressions-js-compat/spec/slow_assumptions.spec.ts` passes
 *except* for the one test that cannot be passed soundly — see
-"Accepted divergence" below. Zero is **not** the target and never was
-reachable: legacy's expected answers there are partly false.
+"Accepted divergence" below. **Reached.** Passing that one test was never the
+target and was never reachable: legacy's expected answers there are partly
+false, so it is skipped with its reason rather than carried as a red test.
 
 ## Status
 
@@ -12,12 +13,17 @@ reachable: legacy's expected answers there are partly false.
 |-------|--------:|------|
 | start of session | 565 / 845 | |
 | after Phase 1 (done) | **234 / 845** | default-assumptions binding fix |
-| now (2026-08-13) | **1 / 845** | 843 pass, 1 skipped (`define constants`) |
-| target | 1 | `logical combinations`, accepted — see below |
+| now (2026-08-14) | **0 / 845** | 843 pass, 2 skipped (`define constants`, `logical combinations`) |
+| target | 0 | `logical combinations` is skipped, not failing — see below |
 
 ## Accepted divergence — `logical combinations`
 
-The one remaining failing test hides **six** failing assertions (vitest aborts
+Skipped at its site, with the reason, since the ninth review pass: it cannot be
+made green without asserting something untrue, and a permanently red test in a
+gating job is a check that has stopped checking. The assertions below are what
+it would report if it ran.
+
+That test hides **six** failing assertions (vitest aborts
 an `it` at its first failure; re-measure by converting that `it`'s `expect` to
 `expect.soft`, then revert the scaffolding): spec lines 7357, 7415, 7417, 7418,
 7419, 7420. On all six, legacy commits to an answer and this engine declines.
@@ -49,6 +55,30 @@ do not buy that risk. Anyone revisiting this must diff the whole compat suite
 by (file, name, occurrence) and the `simplify` corpora before believing it is
 inert.
 
+**The gap is incompleteness, but it was not inert, and the one place it was
+load-bearing has been fixed rather than left.** A `simplify` rule gated on a
+realness fact is safe when it *requires* `Some(true)`: a missing fact costs a
+rewrite and nothing else. It is unsafe when it treats `None` as permission, and
+exactly one rule in the crate did — `simplify_root`'s odd-root sign extraction,
+which asked `is_real(rest) != Some(false)`. Because `combine` never carries
+non-realness through an operator, `is_real(sqrt(-2))` is `Some(false)` while
+`is_real(x·sqrt(-2))` is `None`, so the residual as a whole read as real and
+the sign came out: `cbrt(-x·sqrt(-2)) → -cbrt(x·sqrt(-2))`, a different number.
+The engine contradicted itself about it — at `x = 1` the residual is closed,
+the fact is `Some(false)`, and it correctly declined — and `equals` inherited
+the contradiction, answering `true` for the symbolic pair and `false` for the
+`x = 1` instance. That is a wrong answer on the grading path.
+
+The fix is on the consumer, not on `combine`: the guard is per subexpression,
+so a residual declines when any *part* of it is provably non-real. That
+over-declines — a non-real part does not make the whole non-real — which only
+ever leaves an expression as written, and it turns no `None` into `Some(false)`,
+so no other rewrite anywhere moves. `tests/doenet_review_fixes.rs` →
+`odd_root_sign_extraction_declines_over_a_non_real_part` pins it. A `grep` for
+`Some(false)` outside `src/assumptions/` finds no other realness consumer, so
+that was the whole risk surface; anyone who later adds one must check its
+polarity against this note.
+
 ## Phase 1 — default assumptions source (DONE, −331)
 
 `lib/assumptions/element_of_sets.ts` built its predicates over a module-level
@@ -69,7 +99,7 @@ failures were a binding defect, **not** a reasoning-depth gap.
 ## The 234 post-Phase-1 failures, in six groups (historical)
 
 These groups are the breakdown of the **234** figure in the status table, not of
-what is failing today — the suite is at 1 failing (see "Accepted divergence"
+what is failing today — the suite is at 0 failing (see "Accepted divergence"
 above). Kept as the record of what the work was.
 
 ### Group A — negated assumptions (16) · Rust

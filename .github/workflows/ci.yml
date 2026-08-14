@@ -114,10 +114,12 @@ jobs:
             # exercise `dist/` — the artifact a consumer actually installs — and
             # skip themselves when it is absent.
             #
-            # Not all tests pass yet — see active-plans/JS_TEST_COVERAGE_AUDIT.md
-            # — so this job is informational until the compat layer is finished;
-            # `|| true` keeps a partial suite from failing CI. Drop that once it
-            # is green.
+            # This job gates. It used to end in `|| true`, from when the suite
+            # was hundreds of failures deep and the number was still falling;
+            # that made it incapable of reporting a regression, which is the
+            # only thing it is for now that the suite is green. The one test
+            # that cannot pass soundly is `it.skip`ped at its site with the
+            # reason, rather than left red — see `COMPAT_TEST_FAILURE_SUMMARY.md`.
             - name: Build the package and run the js-compat suite
               uses: devcontainers/ci@v0.3
               with:
@@ -126,7 +128,7 @@ jobs:
                       cd packages/math-expressions-js-compat
                       npm run build:package
                       npm run typecheck
-                      npm test || true
+                      npm test
 
     package-publishability:
         name: package publishability

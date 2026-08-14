@@ -4,11 +4,14 @@ Snapshot of `packages/math-expressions-js-compat` (`npx vitest run`) on branch
 `doenet`, after rebuilding `vendor/wasm` (`bash build-wasm.sh`) so results reflect
 current Rust source.
 
-**Current totals (2026-08-13, at `67e99ee` + working-tree work, re-measured):
-1 failed / 6337 passed / 6348 total** (10 skipped, 0 todo). The one remaining
-failure is `slow_assumptions` → `logical combinations`, where **legacy commits
-to answers that are mathematically false and this engine declines to** (see
-below) — every other spec passes.
+**Current totals (2026-08-14, at `c4ae2e4` + working-tree work, re-measured):
+0 failed / 6337 passed / 6348 total** (11 skipped, 0 todo). The suite is green.
+The eleventh skip is `slow_assumptions` → `logical combinations`, where **legacy
+commits to answers that are mathematically false and this engine declines to**
+(see below); it was carried as the one red test until the ninth review pass,
+which skipped it at its site with the reason and dropped the `|| true` from the
+CI job, so a *new* failure can now be reported. Nothing about the divergence
+changed — only whether the check is capable of checking.
 Previous snapshots: 380, 162, 97, 83, 82, 61, 55, 54, 46, 43, 38, 20, 16, 12, 11, 7.
 (The dated 2026-08-11 line this replaces read `1 failed / 6316 passed / 6329
 total`, 12 skipped and 2 todo; that was a historical snapshot at `7082f8a`, and
@@ -17,9 +20,11 @@ the suite has grown tests since.)
 Both `*-numerical-errors` files are at **zero**, and so are `slow_simplify` and
 `slow_rational`.
 
-Nine of the ten skips are **wontfix, not pending** — the deprecated `match`
-conditions under `quick_trees` below. Read the 54 → 46 step as a
-reclassification, not nine defects fixed.
+Ten of the eleven skips are **wontfix, not pending**: nine are the deprecated
+`match` conditions under `quick_trees` below — read the 54 → 46 step as a
+reclassification, not nine defects fixed — and the tenth is `logical
+combinations`. The eleventh, `define constants`, is skipped for a reason of its
+own recorded at the test.
 
 ## How to measure
 
@@ -47,11 +52,11 @@ A further caution: `slow_simplify`-style tests bundle 5–20 assertions each, so
 per-test bucket count is an upper bound on what any one fix buys. Attributing a
 test to the first assertion that fails hides everything behind it.
 
-## Remaining failures by spec file
+## Remaining divergences by spec file
 
 | count | spec file                                       | root cause / category                                                                    |
 | ----: | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
-|     1 | `slow_assumptions`                              | one test, `logical combinations` — legacy answers unsoundly where we decline, see below   |
+|     1 | `slow_assumptions`                              | one skipped test, `logical combinations` — legacy answers unsoundly where we decline, see below |
 
 The six other failures were feature gaps, now closed (see "Feature gaps
 closed" below): `quick_trees` (`allow_extended_match`, graceful invalid match
@@ -276,8 +281,9 @@ under `"number"`).
 
 ## Highest-leverage remaining item
 
-**`slow_assumptions` → `logical combinations`** is the only failure left, and it
-is **accepted, not a bucket of work**. Of its six failing assertions, three want
+**`slow_assumptions` → `logical combinations`** is the only divergence left, and
+it is **accepted, not a bucket of work** — skipped at its site rather than left
+red, so the suite's exit status is available to report regressions. Of its six failing assertions, three want
 answers that are mathematically false (`y = 0` is a model, so `xy` really can be
 real/nonpositive/nonnegative) and a fourth is legacy's first-conjunct-wins `and`
 answering under a contradiction — reproducing any of them means encoding unsound

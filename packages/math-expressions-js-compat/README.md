@@ -95,10 +95,13 @@ npm test               # vitest run
 npm run typecheck      # tsc over lib/ and over the published declarations
 ```
 
-The suite is the legacy JS test corpus, and it very nearly passes: 6,348 tests,
-6,337 passing, 10 skipped, and one failure — `slow_assumptions.spec.ts` →
-`logical combinations`. On that test **legacy commits to answers this engine
-declines to give**; the engine is incomplete there, never unsound. Vitest aborts
+The suite is the legacy JS test corpus and it passes: 6,348 tests, 6,337
+passing, 11 skipped, nothing failing. One of those skips is a divergence rather
+than an unported feature — `slow_assumptions.spec.ts` → `logical combinations`,
+on which **legacy commits to answers this engine declines to give**; the engine
+is incomplete there, never unsound. It is skipped rather than left red because
+the CI job gates, and a permanently red test would make that job unable to
+report anything else. Vitest aborts
 an `it` at its first failure, so the single failing test name hides **six**
 failing assertions (spec lines 7357, 7415, 7417, 7418, 7419, 7420 — count them
 by converting that `it`'s `expect` to `expect.soft`), from **two** unrelated

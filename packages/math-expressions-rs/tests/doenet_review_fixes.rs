@@ -320,6 +320,69 @@ fn odd_root_sign_extraction_declines_over_an_imaginary_residual() {
     );
 }
 
+/// The siblings of the case above, which the `i`-spelling check alone did not
+/// catch. Realness is not propagated through `+` or `*` — `combine::add` and
+/// `combine::mul` infer `real` only as "every operand is real" and never emit
+/// `Some(false)` — so a residual whose *parts* are provably non-real answers
+/// `None` as a whole: `is_real(sqrt(-2))` is `Some(false)` but
+/// `is_real(x·sqrt(-2))` is `None`, and none of these spellings mentions `i`.
+/// Each therefore had its sign pulled out of the odd root and became a
+/// different number.
+///
+/// The decisive evidence is that the engine contradicted *itself*: at `x = 1`
+/// the residual is closed, `is_real(sqrt(-2))` is `Some(false)`, and
+/// `cbrt(-sqrt(-2))` was correctly left alone — while the symbolic pair was
+/// rewritten. Those are different numbers (`cbrt(-sqrt(-2)) = 0.972 − 0.561i`
+/// against `-cbrt(sqrt(-2)) = -0.972 − 0.561i`), so one spelling of an answer
+/// graded against another is a wrong answer on the grading path.
+///
+/// Note the assertions below are on the *tree*, deliberately. `equals` is
+/// itself taken in by this — it answers `true` for
+/// `cbrt(-x·sqrt(-2)) = -cbrt(x·sqrt(-2))` while answering `false` for the
+/// `x = 1` instance — so an `equals`-based assertion here passes with the
+/// defect in place and pins nothing.
+#[test]
+fn odd_root_sign_extraction_declines_over_a_non_real_part() {
+    for src in [
+        "cbrt(-x*sqrt(-2))",
+        "cbrt(-x*ln(-1))",
+        "cbrt(-x*arcsin(2))",
+        "cbrt(-(x+sqrt(-2)))",
+        "nthroot(-x*sqrt(-2),5)",
+    ] {
+        let out = tree(&simplify(&p(src)));
+        assert!(
+            !out.starts_with(r#"["-",["apply""#),
+            "{src} should not extract the sign: {out}"
+        );
+    }
+
+    // A positive perfect power still comes out, as it does over a residual
+    // spelled with `i`: a positive real factor does not move the argument.
+    assert_eq!(
+        tree(&simplify(&p("cbrt(-8*x*sqrt(-2))"))),
+        r#"["*",2,["apply","cbrt",["-",["*","x",["apply","sqrt",-2]]]]]"#
+    );
+
+    // Non-realness that only an assumption establishes, likewise: `x ∉ R`
+    // makes `is_real(x)` false but says nothing about `x + 1` or `x·y`.
+    let mut a = Assumptions::new();
+    a.add(&p("x notelementof R"));
+    for src in ["cbrt(-(x+1))", "cbrt(-x*y)"] {
+        let out = tree(&math_expressions::simplify_with(&p(src), &a));
+        assert!(
+            !out.starts_with(r#"["-",["apply","cbrt""#),
+            "{src} should not extract the sign under `x ∉ R`: {out}"
+        );
+    }
+
+    // Still extracted where nothing is provably non-real.
+    assert_eq!(
+        tree(&simplify(&p("cbrt(-x*sqrt(2))"))),
+        r#"["-",["apply","cbrt",["*","x",["apply","sqrt",2]]]]"#
+    );
+}
+
 /// `∞ − ∞` written as two poles. `add` collects like terms, and the
 /// additive-inverse identity it relies on does not hold for an infinite term:
 /// `1/0 − 1/0` answered `0`, `1/0 + 2 − 1/0` answered `2` and `2/0 − 1/0`
