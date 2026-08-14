@@ -423,3 +423,45 @@ describe("item 6 — evaluate_numbers / passes", () => {
     expect(me.fromText("x+3").default_order().tree).toEqual(["+", "x", 3]);
   });
 });
+
+describe("review cycle 3 — legacy contracts that had quietly lapsed", () => {
+  it("compiles an expression whose tree holds ±Infinity or NaN", () => {
+    // `tree_json()` spells a non-finite as `{"$":"Inf"}`/`{"$":"NaN"}`, and the
+    // mathjs converter takes all three as *numbers*. The compile path parsed
+    // the JSON without decoding the tag, so it was handed a plain object and
+    // rejected it as `Invalid ast`. Everything DoenetML plots or searches for
+    // extrema goes through `f()`, and this PR deliberately folds `0/0` to NaN.
+    expect(me.fromText("x+infinity").f()({ x: 1 })).toBe(Infinity);
+    expect(me.fromText("x-infinity").f()({ x: 1 })).toBe(-Infinity);
+    expect(me.fromText("0/0").simplify().f()({})).toBeNaN();
+    expect(me.fromAst(["+", "x", NaN]).f()({ x: 1 })).toBeNaN();
+    // The ordinary case is unaffected.
+    expect(me.fromText("x^2").f()({ x: 3 })).toBe(9);
+  });
+
+  it("honors variables(include_subscripts)", () => {
+    // The argument was dropped, so a caller matching against a subscripted
+    // name — `Line.js`, deciding whether a coefficient mentions the line's own
+    // variables — never found one.
+    expect(me.fromText("x_1+y").variables(true)).toEqual(["x_1", "y"]);
+    expect(me.fromText("x_1+y").variables()).toEqual(["x", "y"]);
+    expect(me.fromText("x_1+y").variables(false)).toEqual(["x", "y"]);
+  });
+
+  it("accepts an Expression where a variable name is wanted", () => {
+    // These two took the argument raw into a `&str` binding, where wasm-bindgen
+    // reads a length off it and copies that many bytes — an out-of-bounds
+    // access in a crate built `panic = "abort"`. Every other variable-taking
+    // method already went through `varName`.
+    const x = me.fromText("x");
+    expect(
+      me
+        .fromText("x^2")
+        .critical_points(x)!
+        .map((p) => p.tree),
+    ).toEqual([0]);
+    expect(Array.from(me.fromText("x^2").evaluate_many(x, [1, 2, 3]))).toEqual([
+      1, 4, 9,
+    ]);
+  });
+});

@@ -401,8 +401,28 @@ class Expression {
   toJSON() {
     return JSON.parse(this._w.to_serialized());
   }
-  variables() {
-    return this._w.variables();
+  /**
+   * The free variable names, in first-appearance order.
+   *
+   * `include_subscripts` reports a subscripted variable under its full name:
+   * `x_1 + y` gives `["x_1", "y"]` rather than `["x", "y"]`. The argument was
+   * dropped on the floor here, so a caller testing membership against a
+   * subscripted name — `Line.js` deciding whether a coefficient mentions the
+   * line's own variables — never found one.
+   *
+   * Implemented by flattening the subscript nodes into plain symbols first,
+   * which is the same spelling `subscripts_to_strings` produces and the one
+   * legacy's own `include_subscripts` pass builds.
+   */
+  variables(include_subscripts) {
+    const source = include_subscripts
+      ? this._w.subscripts_to_strings()
+      : this._w;
+    try {
+      return source.variables();
+    } finally {
+      if (source !== this._w) source.free();
+    }
   }
   functions() {
     return this._w.functions();
@@ -828,7 +848,11 @@ class Expression {
    * finding them is not rational root-finding.
    */
   critical_points(variable) {
-    const pts = this._w.critical_points(variable);
+    // Through `varName`, like `derivative`/`integrate`/`solve_linear`: the
+    // wasm binding takes a `&str` and computes a length on whatever it is
+    // handed, so an `Expression` argument reads out of bounds rather than
+    // failing.
+    const pts = this._w.critical_points(varName(variable));
     return pts === undefined
       ? null
       : pts.map((p) => new Expression(p, this.context));
@@ -913,8 +937,22 @@ class Expression {
       const sc = s._w.evaluate_to_complex();
       if (sc !== undefined) return math.complex(sc[0], sc[1]);
     }
-    // Not a constant. A free (non-unit) variable means "unknown" → null (as
-    // legacy `x+1` did). A bare blank sitting in a computation is not-a-number
+    // Not a constant. A free (non-unit) variable means "unknown" → null.
+    // **This is a deliberate divergence, not the legacy behavior**: legacy
+    // answered `NaN` for `x+1` unless asked for `null` with
+    // `{nan_for_non_numeric: false}`. The distinction is worth having — `NaN`
+    // is a *value* an expression can evaluate to (`0/0`), and collapsing the
+    // two loses DoenetML's undefined-slope contract — but it is a contract
+    // change, and `null` is the more dangerous of the two to leak into
+    // arithmetic (`null * 2` is `0`). Callers must test for it; DoenetML does,
+    // through its `isNumericConstant`/`evaluateToNumber` helpers.
+    //
+    // Legacy's `nan_for_non_numeric` option is therefore *not* honored: this
+    // path always behaves as `false`. Honoring its `true` default would undo
+    // the divergence above, and honoring it only when passed would give the
+    // one question three answers. Left unimplemented rather than half-done.
+    //
+    // A bare blank sitting in a computation is not-a-number
     // (`1+2+＿` → NaN), but a hole that only stands in as an undefined
     // placeholder (`0·_`, `_/_`) stays undefined → null (it must not collapse to
     // `0`/`1` — DoenetML's undefined-slope contract). Anything else that cannot
@@ -951,44 +989,52 @@ class Expression {
    * consumers already test for.
    */
   evaluate_many(variable, values) {
+    // `varName` for the same reason as `critical_points` above.
     return this._w.evaluate_many(
-      variable,
+      varName(variable),
       values instanceof Float64Array ? values : Float64Array.from(values),
     );
   }
   /**
-   * Replace variables by their bindings, one binding at a time.
+   * Replace variables by their bindings, all at once.
    *
-   * Sequential, as the JS library was, and deliberately: a replacement is
-   * itself open to the bindings that follow it, which DoenetML depends on —
-   * its `<math>` machinery substitutes generated *codes* whose values contain
-   * further codes, and expects them to expand.
+   * Simultaneous, as the JS library was: no binding sees another's
+   * replacement, so `a·x + b·y` with `{a: "b", b: "a"}` swaps the two
+   * coefficients rather than collapsing both to `a`.
    *
-   * The cost is capture: `sin(x+y)` with `{x: "10y", y: "-pi"}` gives
-   * `sin(-10π − π)`, because the `y` the first binding introduced is still
-   * there for the second. A caller replacing several *independent* variables
-   * wants {@link substitute_all} instead.
+   * This *was* a left-to-right pass here, on the stated grounds that legacy
+   * was one too and that DoenetML relied on a substituted `<math>` code
+   * expanding into further codes. Neither holds — legacy walks the tree once
+   * (`trees/basic.js`), and `{c1: "c2", c2: 5}` leaves `c2` standing there as
+   * well. A sequential pass silently captures instead: `sin(x+y)` with
+   * `{x: "10y", y: "-π"}` answered `sin(-10π − π)`, and DoenetML substitutes
+   * variable names into `a·x + b·y + c` in `Line.js`, where a document
+   * declaring `variables="y x"` put both coefficients on one variable.
+   *
+   * Differs from {@link substitute_all} only in coercing each binding the way
+   * the rest of this API does — a string is *parsed* (`{x: "2y"}` binds the
+   * product `2y`, not a symbol spelled `"2y"`), matching legacy.
    */
   substitute(bindings) {
-    let cur = this._w;
-    for (const k of Object.keys(bindings || {})) {
-      const next = cur.substitute_var(k, toExpr(bindings[k], this.context)._w);
-      // Free the prior intermediate handle (wrapper-owned); never `this._w`
-      // (caller's own) and never the final handle we hand back via `wrap`.
-      if (cur !== this._w) cur.free();
-      cur = next;
-    }
-    return wrap(cur, this.context);
+    const keys = Object.keys(bindings || {});
+    if (keys.length === 0) return this;
+    const map = {};
+    for (const k of keys) map[k] = toExpr(bindings[k], this.context);
+    return wrap(
+      this._w.substitute_map(JSON.stringify(map, astReplacer)),
+      this.context,
+    );
   }
 
   /**
-   * Replace variables by their bindings **simultaneously** — no binding sees
-   * another's replacement.
+   * Replace variables by their bindings **simultaneously**, taking each
+   * binding as the tree it already is.
    *
-   * This is what evaluating a multi-variable function at given arguments
-   * needs: `f(x,y) = sin(x+y)` at `(10y, -π)` is `sin(10y − π)`, and
-   * {@link substitute}'s left-to-right pass would turn the freshly-substituted
-   * `y` into `-π` and answer `sin(-11π)`.
+   * Same substitution as {@link substitute}; the difference is coercion. This
+   * one serializes the binding as given, so a string binds a *symbol* of that
+   * name (`{x: "2y"}` binds the single symbol `2y`), where `substitute` parses
+   * it into the product `2·y`. Reach for this when the bindings are trees or
+   * `Expression`s and there is nothing to parse.
    */
   substitute_all(bindings) {
     const keys = Object.keys(bindings || {});

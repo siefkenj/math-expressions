@@ -527,6 +527,37 @@ function freeHandle(h: RustExprLike): void {
  * @param normalize  set `false` if `expr` is already normalized, to skip the
  *                   extra WASM round-trip and handle allocation.
  */
+/**
+ * The non-finite wire tags, as JS scalars. JSON cannot carry `Infinity` or
+ * `NaN`, so `tree_json()` spells them `{"$":"Inf"}`, `{"$":"-Inf"}` and
+ * `{"$":"NaN"}` — and {@link TreeToMathjs.convert} takes all three as *numbers*
+ * (it has branches for each). Parsing without decoding them therefore handed it
+ * a plain object, which it rejected as `Invalid ast`: compiling `x + infinity`,
+ * or anything `simplify` had folded to `NaN`, threw instead of evaluating.
+ *
+ * Null-prototype so a tag spelled `constructor` cannot match an inherited
+ * property. `{"$":"None"}` is deliberately absent — it has no numeric value, so
+ * it stays tagged and is still rejected, which is the right answer for it.
+ *
+ * A duplicate of `math-expressions-js-compat`'s `untagNonFinite`; this package
+ * is the one that package is built on, so it cannot import from it.
+ */
+const NON_FINITE_TAGS: Record<string, number> = Object.assign(
+  Object.create(null),
+  { Inf: Infinity, "-Inf": -Infinity, NaN: NaN },
+);
+
+/** `JSON.parse` reviver decoding {@link NON_FINITE_TAGS}. */
+function untagNonFinite(_key: string, value: unknown): unknown {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const tag = (value as { $?: unknown }).$;
+    if (typeof tag === "string" && tag in NON_FINITE_TAGS) {
+      return NON_FINITE_TAGS[tag];
+    }
+  }
+  return value;
+}
+
 export function rustExprToMathNode(
   math: MathJsInstance,
   expr: RustExprLike,
@@ -534,7 +565,7 @@ export function rustExprToMathNode(
 ): MathNode {
   const source = normalize ? expr.normalize_function_names() : expr;
   try {
-    const tree = JSON.parse(source.tree_json()) as Tree;
+    const tree = JSON.parse(source.tree_json(), untagNonFinite) as Tree;
     return treeToMathNode(math, tree);
   } finally {
     if (source !== expr) freeHandle(source);

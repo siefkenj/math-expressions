@@ -63,18 +63,44 @@ describe("exp and e^ are one spelling", () => {
   });
 });
 
-describe("substitute: sequential, with a simultaneous sibling", () => {
+describe("substitute: simultaneous, differing from its sibling only in coercion", () => {
   const f = () => me.fromText("sin(x+y)");
 
-  it("substitute keeps the JS left-to-right pass", () => {
-    // A replacement is open to the bindings that follow it, which DoenetML's
-    // `<math>` code expansion depends on — its codes' values contain further
-    // codes and must expand.
+  it("substitute binds every variable at once, as the JS library did", () => {
+    // No binding sees another's replacement. This was a left-to-right pass
+    // here for a while, on the belief that legacy was one; legacy walks the
+    // tree once, and `sin(10 (-π) - π)` was capture, not a feature.
     expect(
       f()
         .substitute({ x: me.fromText("10y"), y: me.fromText("-pi") })
         .toString(),
-    ).toBe("sin(10 (-π) - π)");
+    ).toBe("sin(10 y - π)");
+    // The classic swap, which no sequential pass can do. DoenetML's `Line.js`
+    // needs exactly this, substituting a line's declared variable names into
+    // `a·x + b·y + c`.
+    expect(
+      f()
+        .substitute({ x: me.fromText("y"), y: me.fromText("x") })
+        .toString(),
+    ).toBe("sin(y + x)");
+    // And a substituted value is *not* reopened to the bindings that follow:
+    // legacy leaves the inner `c2` standing.
+    expect(
+      me
+        .fromText("c1+1")
+        .substitute({ c1: me.fromText("c2"), c2: me.fromText("5") })
+        .toString(),
+    ).toBe("c2 + 1");
+  });
+
+  it("substitute parses a string binding; substitute_all takes it as a symbol", () => {
+    // The one difference between the two. Legacy `substitute` parses.
+    expect(me.fromText("x+1").substitute({ x: "2y" }).toString()).toBe(
+      "2 y + 1",
+    );
+    expect(me.fromText("x+1").substitute_all({ x: "2y" }).toString()).toBe(
+      "2y + 1",
+    );
   });
 
   it("substitute_all binds every variable at once", () => {
@@ -83,7 +109,6 @@ describe("substitute: sequential, with a simultaneous sibling", () => {
         .substitute_all({ x: me.fromText("10y"), y: me.fromText("-pi") })
         .toString(),
     ).toBe("sin(10 y - π)");
-    // The classic swap, which no sequential pass can do.
     expect(
       f()
         .substitute_all({ x: me.fromText("y"), y: me.fromText("x") })
