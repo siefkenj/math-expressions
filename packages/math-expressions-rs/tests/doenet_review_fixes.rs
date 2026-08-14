@@ -8,10 +8,12 @@
 //! because student input is adversarial by construction.
 
 use math_expressions::{
-    is_integer, is_negative, is_nonnegative, is_nonpositive, is_positive, is_real, simplify,
-    Assumptions, Expr, MathConst, TextToAst,
+    is_integer, is_negative, is_nonnegative, is_nonpositive, is_positive, is_real, resource_limits,
+    simplify, Assumptions, Expr, MathConst, TextToAst,
 };
-use std::time::Instant;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 fn p(s: &str) -> Expr {
     TextToAst::new(Default::default())
@@ -555,17 +557,61 @@ fn negating_i64_min_widens_instead_of_overflowing() {
 /// not finish in twenty seconds. Student input is adversarial by construction,
 /// which is why the neighbouring passes (`max_expand_power`, `polynomial_pow`)
 /// are bounded too.
+///
+/// Asserted on the *shape* of the result rather than on a clock, because a
+/// clock cannot report this. Without the bound the offending call does not
+/// return at all — it was still running after 400 s — so a trailing
+/// `assert!(elapsed < 10s)` placed after the loop is never reached and the
+/// regression surfaces only as a CI job timeout, on some other job's name.
+/// The bound refuses to fold, which is directly observable: the power comes
+/// back written as it was typed. The nested calls are kept as well, on a
+/// worker thread joined with a timeout, so that a hang there is this test
+/// failing rather than the suite wedging.
 #[test]
 fn nested_gaussian_powers_are_bounded() {
+    // Straight at the limit, so the assertion is about the bound and not about
+    // this machine. `2+i` is a 2-bit base, so `^64` asks for 128 bits of
+    // result and is refused, while `^32` asks for exactly 64 and folds.
+    let tight = resource_limits::ResourceLimits {
+        max_gaussian_pow_bits: 64,
+        ..Default::default()
+    };
+    resource_limits::with(tight, || {
+        assert_eq!(tree(&simplify(&p("(2+i)^64"))), r#"["^",["+","i",2],64]"#);
+        assert_eq!(
+            tree(&simplify(&p("(2+i)^32"))),
+            r#"["+",["*",116749235904,"i"],-98248054847]"#
+        );
+    });
+
+    // The same refusal under the shipped limit, where it takes the nesting to
+    // reach: the inner `((2+i)^64+1)^64` folds to a ~4.8 kbit Gaussian integer
+    // and the outer `^64` would be ~305 kbit, so the outer power is left
+    // standing. Limits are thread-local, so the worker below runs under the
+    // defaults, which is what is wanted here.
+    let (tx, rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        let shapes: Vec<String> = ["(((2+i)^64+1)^64+1)^64", "((((2+i)^64+1)^64+1)^64+1)^64"]
+            .iter()
+            .map(|src| tree(&simplify(&p(src))))
+            .collect();
+        let _ = tx.send(shapes);
+    });
     let start = Instant::now();
-    for src in ["(((2+i)^64+1)^64+1)^64", "((((2+i)^64+1)^64+1)^64+1)^64"] {
-        let _ = simplify(&p(src));
+    let shapes = match rx.recv_timeout(Duration::from_secs(30)) {
+        Ok(shapes) => shapes,
+        // Deliberately not joined: the worker is wedged, and joining it would
+        // wedge the harness in exactly the way this rewrite exists to avoid.
+        Err(e) => panic!("nested Gaussian powers did not finish in {:?} ({e}) — the max_gaussian_pow_bits bound is not holding", start.elapsed()),
+    };
+    worker.join().unwrap();
+    for shape in &shapes {
+        assert!(
+            shape.starts_with(r#"["^","#) && shape.ends_with(",64]"),
+            "the outer power should have been left unfolded, got {shape}"
+        );
     }
-    assert!(
-        start.elapsed().as_secs() < 10,
-        "nested Gaussian powers took {:?}",
-        start.elapsed()
-    );
+
     // The bound is on the *result*, so the ordinary cases still fold exactly.
     assert_eq!(tree(&simplify(&p("(2+i)^4"))), r#"["+",["*",24,"i"],-7]"#);
     assert_eq!(tree(&simplify(&p("(2+i)(2-i)"))), "5");

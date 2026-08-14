@@ -2,12 +2,22 @@
 //! *signed* infinity, with the sign flowing through products and negation, while
 //! a bare `−0` still reads as plain `0` everywhere else.
 
-use math_expressions::{expr, simplify, TextToAst};
+use math_expressions::{evaluate_numbers_preserve_order, expr, simplify, TextToAst};
 
 /// Parse `s`, canonicalise/simplify, and spell the result as its JS tree.
 fn run(s: &str) -> String {
     let e = TextToAst::new(Default::default()).convert(s).unwrap();
     expr::serde::to_js(&simplify(&e)).to_string()
+}
+
+/// The same, folded along the **`skip_ordering`** path instead — the separate
+/// pass behind DoenetML's `simplify="numberspreserveorder"`. It shares no code
+/// with `simplify`'s canonical layer (it keeps trees unflattened and un-peeled
+/// to preserve operand order), so it decides the indeterminate forms with its
+/// own predicate and has to be asserted on separately.
+fn preserve_order(s: &str) -> String {
+    let e = TextToAst::new(Default::default()).convert(s).unwrap();
+    expr::serde::to_js(&evaluate_numbers_preserve_order(&e)).to_string()
 }
 
 #[test]
@@ -43,8 +53,44 @@ fn bare_negative_zero_reads_as_plain_zero() {
 /// The indeterminate forms the `∞`/`NaN` cluster in `normalize::simplify`
 /// documents. Named there as the pin for that comment, so the two stay honest
 /// about which behaviour is current.
+///
+/// The load-bearing half is the `skip_ordering` path: `simplify` decides these
+/// in `constructors::mul`, *after* `peel_nonzero_scaling` has flattened the
+/// product and split every factor into a `(base, exponent)` pair, so it only
+/// ever sees a bare leaf. `evaluate_numbers_preserve_order` cannot do that
+/// without losing the order it exists to preserve, so it walks the wrappers
+/// itself (`ops::preserve_order::is_non_finite`) — an entirely separate
+/// decision, which the `simplify` assertions below do not touch. When it got
+/// this wrong the answer was a wrong *number* (`0`) rather than an error, on
+/// the path DoenetML's equality checking, `MathOperators` and `Parabola` run.
 #[test]
 fn indeterminate_forms_do_not_annihilate() {
+    // The four spellings that reach the pass with the infinity still wrapped:
+    // under an exponent, under a fraction bar, inside a sum, and as a pole.
+    assert_eq!(preserve_order("0*infinity^2"), r#"{"$":"NaN"}"#);
+    assert_eq!(preserve_order("0*(infinity/2)"), r#"{"$":"NaN"}"#);
+    assert_eq!(preserve_order("0*(infinity+1)"), r#"{"$":"NaN"}"#);
+    assert_eq!(preserve_order("0*(0^(-1))"), r#"{"$":"NaN"}"#);
+    // And the bare ones, plus `0^0`, which has no infinity in it at all.
+    assert_eq!(preserve_order("0*infinity"), r#"{"$":"NaN"}"#);
+    assert_eq!(preserve_order("0*(-infinity)"), r#"{"$":"NaN"}"#);
+    assert_eq!(preserve_order("0*(1/0)"), r#"{"$":"NaN"}"#);
+    assert_eq!(preserve_order("x*0*infinity"), r#"{"$":"NaN"}"#);
+    assert_eq!(preserve_order("0^0"), r#"{"$":"NaN"}"#);
+    // Nothing provably non-finite: the zero still annihilates. `1/x` and a
+    // bare symbol are *unknown*, not infinite, and `1/∞` is a plain zero.
+    assert_eq!(preserve_order("0*x"), "0");
+    assert_eq!(preserve_order("0*(x+1)"), "0");
+    assert_eq!(preserve_order("0*(1/x)"), "0");
+    assert_eq!(preserve_order("0*(1/infinity)"), "0");
+
+    // The canonical layer agrees on every one of them, which is the property
+    // that matters: one expression must not get two answers depending on which
+    // pass DoenetML ran.
+    assert_eq!(run("0*infinity^2"), r#"{"$":"NaN"}"#);
+    assert_eq!(run("0*(infinity/2)"), r#"{"$":"NaN"}"#);
+    assert_eq!(run("0*(infinity+1)"), r#"{"$":"NaN"}"#);
+    assert_eq!(run("0*(0^(-1))"), r#"{"$":"NaN"}"#);
     assert_eq!(run("0*infinity"), r#"{"$":"NaN"}"#);
     assert_eq!(run("0*(-infinity)"), r#"{"$":"NaN"}"#);
     assert_eq!(run("0*(1/0)"), r#"{"$":"NaN"}"#);

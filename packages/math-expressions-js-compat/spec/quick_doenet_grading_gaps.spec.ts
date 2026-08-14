@@ -93,7 +93,7 @@ describe("substitute: simultaneous, differing from its sibling only in coercion"
     ).toBe("c2 + 1");
   });
 
-  it("substitute parses a string binding; substitute_all takes it as a symbol", () => {
+  it("substitute parses a string binding, and still binds it simultaneously; substitute_all takes it as a symbol", () => {
     // The one difference between the two. Legacy `substitute` parses.
     expect(me.fromText("x+1").substitute({ x: "2y" }).toString()).toBe(
       "2 y + 1",
@@ -101,6 +101,25 @@ describe("substitute: simultaneous, differing from its sibling only in coercion"
     expect(me.fromText("x+1").substitute_all({ x: "2y" }).toString()).toBe(
       "2y + 1",
     );
+    // Coercion is *all* that separates them, which those two lines alone do
+    // not show: they hold under a left-to-right pass too. A string binding is
+    // parsed into a tree and then bound at the same instant as every other, so
+    // the classic swap survives being written as strings — `x → y, y → x` is
+    // `y + x`, where substituting one at a time gives `x + x`.
+    expect(me.fromText("x+y").substitute({ x: "y", y: "x" }).toString()).toBe(
+      "y + x",
+    );
+    // Both properties in one expression: the bindings are parsed (`3y` is a
+    // product, so it prints spaced, against `substitute_all`'s single symbol
+    // `3y`), and neither replacement is reopened to the other. Sequentially
+    // this reads `2 * 3 * 2 x + 3 * 2 x`, with the first binding's fresh `y`
+    // captured by the second.
+    expect(
+      me.fromText("2x+3y").substitute({ x: "3y", y: "2x" }).toString(),
+    ).toBe("2 * 3 y + 3 * 2 x");
+    expect(
+      me.fromText("2x+3y").substitute_all({ x: "3y", y: "2x" }).toString(),
+    ).toBe("2 * 3y + 3 * 2x");
   });
 
   it("substitute_all binds every variable at once", () => {
