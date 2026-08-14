@@ -196,6 +196,16 @@ fn power(b: Expr, x: Expr) -> Expr {
         return Expr::Num(Number::one());
     }
     if let (Expr::Num(n), Expr::Num(Number::Int(k))) = (&b, &x) {
+        // `0^0` is indeterminate, and this pass has to say so itself. Every
+        // other indeterminate form on this path is caught by `is_non_finite`
+        // above, which looks for an infinity; `0^0` has none, so it fell
+        // through to `checked_pow_int` and came back `1` — and then vanished,
+        // because `x·1` is `x`. `simplify` answers `NaN` under the default
+        // policy, and this is the path DoenetML's equality checking runs, so
+        // the two must not disagree about it.
+        if n.is_zero() && *k == 0 {
+            return Expr::Const(MathConst::NaN);
+        }
         if let Some(v) = n.checked_pow_int(*k) {
             return Expr::Num(v);
         }
@@ -406,6 +416,27 @@ mod tests {
         assert_eq!(run("1/0+x"), r#"["+",{"$":"Inf"},"x"]"#);
         assert_eq!(run("0/0+x"), r#"["+",{"$":"NaN"},"x"]"#);
         assert_eq!(run("0*(1/0)"), r#"{"$":"NaN"}"#);
+    }
+
+    /// `0^0` is the indeterminate form with no infinity in it, so nothing in
+    /// the annihilation guard above catches it: it folded to `1` here and then
+    /// vanished into whatever it multiplied, while `simplify` answers `NaN`.
+    /// That is two different answers for one expression on the two paths
+    /// DoenetML compares along.
+    #[test]
+    fn zero_to_the_zero_is_indeterminate_here_too() {
+        assert_eq!(run("0^0"), r#"{"$":"NaN"}"#);
+        // Left in place rather than collapsed, as this pass leaves every other
+        // non-finite operand: the point is that it is *visible*, where `1` was
+        // dropped by the `is_one` retain below and the expression read as `x`.
+        assert_eq!(run("x*0^0"), r#"["*","x",{"$":"NaN"}]"#);
+        assert_eq!(run("0^0+x"), r#"["+",{"$":"NaN"},"x"]"#);
+        // The neighbouring powers are unaffected.
+        assert_eq!(run("0^2"), "0");
+        assert_eq!(run("2^0"), "1");
+        // A negative exponent is not an integer power this pass folds at all,
+        // so the pole stays written out; `is_non_finite` recognises it there.
+        assert_eq!(run("0^(-1)"), r#"["^",0,-1]"#);
     }
 
     /// A non-finite factor blocks annihilation however it is *spelled*. This

@@ -201,3 +201,31 @@ fn from_ast_names_the_actual_problem() {
     // And the tag that *is* legal still round-trips.
     assert_eq!(js(r#"{"$":"None"}"#), Expr::Const(MathConst::None));
 }
+
+/// `is_single_delimited_group` (`print/latex.rs`) stepped one *byte* at a time
+/// over anything that was not a `\left`/`\right` token, so a multi-byte
+/// character inside the group put the next `&s[i..]` off a UTF-8 boundary and
+/// panicked — an abort, in this crate, taking the worker with it.
+///
+/// `＿` (U+FF3F) is three bytes and is exactly what DoenetML leaves in a slot
+/// the student has not filled, and the guard only runs on a rendering that
+/// already contains a space, which `and` supplies. The text-printer twin
+/// `is_single_paren_group` walks `char_indices` and never had this.
+#[test]
+fn latex_of_a_delimited_group_holding_a_blank_does_not_abort() {
+    let latex =
+        math_expressions::to_latex(&p("(_, _) and x"), &math_expressions::LatexOpts::default());
+    assert!(latex.contains('＿'), "unexpected latex: {latex}");
+
+    // The guard's own answer is unchanged for the ASCII case it was written
+    // for: an operand that is itself a spaced compound keeps its delimiters,
+    // so the re-parse binds it the same way.
+    let compound = math_expressions::to_latex(
+        &p("(a and b) or c"),
+        &math_expressions::LatexOpts::default(),
+    );
+    assert!(
+        compound.contains("\\left(a \\land b\\right)"),
+        "unexpected latex: {compound}"
+    );
+}

@@ -707,7 +707,13 @@ fn is_single_delimited_group(s: &str) -> bool {
                 return &s[i..] == ")";
             }
         } else {
-            i += 1;
+            // A whole character, not a byte: `i` has to stay on a UTF-8
+            // boundary or the next `&s[i..]` panics — and this crate is built
+            // `panic = "abort"`, so that takes the module down. The blank glyph
+            // `＿` (U+FF3F) is three bytes and is exactly what DoenetML leaves
+            // in an unfilled slot, so `\left(＿, ＿\right) …` aborted. The text
+            // twin `is_single_paren_group` walks `char_indices` for this reason.
+            i += rest.chars().next().map_or(1, char::len_utf8);
         }
     }
     false
