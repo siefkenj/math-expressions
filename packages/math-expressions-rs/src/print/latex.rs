@@ -166,6 +166,21 @@ impl Writer<'_> {
 
     fn render_number(&self, n: &Number) -> (String, u8) {
         use prec::{ATOM, NEG};
+        // A non-finite *float* has no positional spelling. The shared helper
+        // answers the text word (`Infinity`), which in LaTeX re-parses as a
+        // product of eight letters; spell it the way `Const(Inf)` is spelled
+        // instead. The test is on the variant rather than on `to_f64`, which
+        // overflows to infinity for a perfectly finite big integer.
+        if let Number::Float(f) = n {
+            let v = f.get();
+            if v.is_infinite() {
+                return if v > 0.0 {
+                    ("\\infty".to_string(), ATOM)
+                } else {
+                    ("-\\infty".to_string(), NEG)
+                };
+            }
+        }
         let decimal = n.decimal_spelling();
         // A fraction renders as `\frac` (self-delimiting, so an atom). It is
         // checked first so `3/6` prints `\frac{1}{2}` rather than `0.5` —
@@ -308,31 +323,7 @@ impl Writer<'_> {
     }
 
     fn render_add(&self, terms: &[Expr]) -> String {
-        if terms.len() == 1 {
-            return format!("+{}", self.emit(&terms[0], prec::ADD + 1));
-        }
-        let mut out = String::new();
-        for (i, t) in terms.iter().enumerate() {
-            // A `\pm` term carries its own operator, so it is joined with a plain
-            // space rather than ` + ` — `5 + \pm 3` would be wrong.
-            if i > 0 && crate::ops::pm::is_pm(t) {
-                out.push(' ');
-                out.push_str(&self.emit(t, prec::ADD + 1));
-                continue;
-            }
-            let (neg, body) = split_sign(t);
-            if i == 0 {
-                if neg {
-                    out.push('-');
-                }
-            } else if neg {
-                out.push_str(" - ");
-            } else {
-                out.push_str(" + ");
-            }
-            out.push_str(&self.emit(&body, prec::ADD + 1));
-        }
-        out
+        super::render_add_terms(terms, |e, ctx| self.emit(e, ctx))
     }
 
     /// Returns the product's precedence too: a negative leading factor makes
@@ -362,7 +353,7 @@ impl Writer<'_> {
                 // otherwise absorb the next factor); a space otherwise.
                 if self.opts.explicit_multiplication_symbols
                     || s.starts_with(|c: char| c.is_ascii_digit())
-                    || is_shorthand_angle(&factors[i - 1])
+                    || super::is_shorthand_angle(&factors[i - 1])
                 {
                     out.push_str(" \\cdot ");
                 } else {
@@ -513,6 +504,11 @@ impl Writer<'_> {
 
     fn render_other(&self, name: &str, args: &[Expr]) -> (String, u8) {
         use prec::*;
+        // A head with too few operands to render in its own notation drops to
+        // the generic form; see [`super::other_op_min_arity`].
+        if args.len() < super::other_op_min_arity(name) {
+            return self.render_other_generic(name, args);
+        }
         let one = |w: &Self, ctx| w.emit(&args[0], ctx);
         match name {
             "pm" => (format!("\\pm {}", one(self, MUL)), NEG),
@@ -548,15 +544,22 @@ impl Writer<'_> {
             "d" => (format!("d{}", one(self, ATOM)), POW),
             "derivative_leibniz" => (self.render_leibniz("d", args), ATOM),
             "partial_derivative_leibniz" => (self.render_leibniz("\\partial", args), ATOM),
-            _ => (
-                format!(
-                    "\\operatorname{{{}}}\\left({}\\right)",
-                    name,
-                    self.join(args, &self.arg_sep(), LIST + 1)
-                ),
-                ATOM,
-            ),
+            _ => self.render_other_generic(name, args),
         }
+    }
+
+    /// `\operatorname{name}(args…)` — the form every unrecognized head takes,
+    /// and the fallback for a recognized head whose operand count is too low
+    /// for its notation.
+    fn render_other_generic(&self, name: &str, args: &[Expr]) -> (String, u8) {
+        (
+            format!(
+                "\\operatorname{{{}}}\\left({}\\right)",
+                name,
+                self.join(args, &self.arg_sep(), prec::LIST + 1)
+            ),
+            prec::ATOM,
+        )
     }
 
     fn render_angle(&self, args: &[Expr]) -> String {
@@ -611,10 +614,6 @@ impl Writer<'_> {
         };
         format!("\\frac{{{}}}{{{}}}", num, den)
     }
-}
-
-fn is_shorthand_angle(e: &Expr) -> bool {
-    matches!(e, Expr::OtherOp(name, args) if name.name() == "angle" && args.len() == 1)
 }
 
 /// Concatenate two LaTeX fragments, inserting a space only where one is needed.

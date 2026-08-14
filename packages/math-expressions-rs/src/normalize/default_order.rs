@@ -525,7 +525,31 @@ enum Key {
     Arr(Vec<Key>),
 }
 
-/// JS `arrayCompare`.
+/// JS `arrayCompare`, made *total*.
+///
+/// JS compares two key entries with `a < b ? -1 : a > b ? 1 : 0`, which ties
+/// whenever the comparison coerces to `NaN` — so its comparator is not a
+/// strict weak ordering and its `sort` is therefore not a normal form. This
+/// crate cannot copy that: [`default_order`] backs `simplify="normalizeOrder"`,
+/// where two spellings of one expression must reduce to the same tree, and
+/// Rust's `sort_by` *panics* on a detected order violation, which under
+/// `panic = "abort"` is a dead worker.
+///
+/// Totality is restored by stratifying the key domain — numbers and booleans
+/// below strings below arrays — and comparing numerically only *within* the
+/// first stratum. That is invisible to every key this file builds except one:
+/// [`append_unit`] stringifies index 1, which for a `Seq`/`Array`/`Interval`
+/// holds the operand count rather than a kind name, so a unit-annotated
+/// container's `Str` there met a plain container's `Num`. JS ties those
+/// (`"2_%" < 3` is `false` both ways) and so ranked one unit-annotated
+/// container equal to *every* plain one while the plain ones still ordered by
+/// length; `(z,z) + (y,y)% + (x,x,x)` came out three different ways depending
+/// on which of its six input orderings it was given. Units reach this from
+/// ordinary text and LaTeX (`(1,2)%`, `(30,45)deg`).
+///
+/// The kind-name keys units were designed for are unaffected, because both
+/// sides are strings there: `5%` still keys `[0, "number_%", 5]` beside
+/// `[0, "number", 5]`, and `$x` still keys `[1, "symbol_$", "x"]`.
 fn cmp_key(a: &Key, b: &Key) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match (a, b) {
@@ -538,20 +562,37 @@ fn cmp_key(a: &Key, b: &Key) -> std::cmp::Ordering {
             }
             xs.len().cmp(&ys.len())
         }
-        // A non-array comes before an array.
-        (Key::Arr(_), _) => Ordering::Greater,
-        (_, Key::Arr(_)) => Ordering::Less,
-        // Two strings compare as strings; anything else compares numerically,
-        // as JS `<` does after ToPrimitive. A comparison that yields NaN is
-        // neither less nor greater, so it ties — which is what JS's
-        // `a < b ? -1 : a > b ? 1 : 0` returns.
+        // Two strings compare as strings, as JS does.
         (Key::Str(x), Key::Str(y)) => x.cmp(y),
-        _ => scalar_f64(a)
-            .partial_cmp(&scalar_f64(b))
-            .unwrap_or(Ordering::Equal),
+        // Numbers and booleans compare numerically, as JS does after
+        // ToPrimitive — except that a `NaN` sorts last within the stratum
+        // instead of tying with everything in it.
+        (Key::Num(_) | Key::Bool(_), Key::Num(_) | Key::Bool(_)) => {
+            let (x, y) = (scalar_f64(a), scalar_f64(b));
+            x.partial_cmp(&y)
+                .unwrap_or_else(|| y.is_nan().cmp(&x.is_nan()))
+        }
+        // Mixed types never share a key index in the schema this file builds,
+        // save for `append_unit`'s stringification; rank them so the whole
+        // relation is a strict weak ordering.
+        _ => stratum(a).cmp(&stratum(b)),
     }
 }
 
+/// The rank of a key entry's type: numbers and booleans, then strings, then
+/// arrays. Ordering across strata is by rank alone, which is what makes
+/// [`cmp_key`] total; the array rank also reproduces JS's "a non-array comes
+/// before an array".
+fn stratum(k: &Key) -> u8 {
+    match k {
+        Key::Num(_) | Key::Bool(_) => 0,
+        Key::Str(_) => 1,
+        Key::Arr(_) => 2,
+    }
+}
+
+/// JS `ToNumber` for the two types [`cmp_key`] compares numerically. `NaN` for
+/// anything else, which only the stratum ranking can reach.
 fn scalar_f64(k: &Key) -> f64 {
     match k {
         Key::Num(v) => *v,
@@ -562,16 +603,24 @@ fn scalar_f64(k: &Key) -> f64 {
                 0.0
             }
         }
-        Key::Str(s) => s.trim().parse::<f64>().unwrap_or(f64::NAN),
-        Key::Arr(_) => f64::NAN,
+        Key::Str(_) | Key::Arr(_) => f64::NAN,
     }
 }
 
 /// JS `sort_key`. `ignore_negatives` is the caller-supplied flag; note that JS
-/// loses it one level down (`operands.map(sort_key, params)` passes the array
-/// index where the function expects its options), so nested keys are always
-/// built without it. That quirk is reproduced rather than fixed: it is the
-/// order existing documents were authored against.
+/// loses it in the branches that recurse through `operands.map(sort_key,
+/// params)`, because `map` passes the array index where the function expects
+/// its options. That quirk is reproduced rather than fixed — it is the order
+/// existing documents were authored against — so the generic operator branch
+/// and the `Num`-as-quotient branch build their nested keys with `false`.
+///
+/// The branches JS does *not* route through `map` keep it: `Pow`, `Apply` and
+/// the `unit` prefix all pass `ignore_negatives` down, matching their JS
+/// counterparts, which recurse by direct call.
+///
+/// All three of this crate's call sites pass `false` today (`cmp_default_order`
+/// and the two `sort_by`s), so the distinction is currently unobservable; it is
+/// documented because the parameter is the one lever that would change it.
 fn sort_key(e: &Expr, ignore_negatives: bool) -> Key {
     // Every branch returns an array, which is what lets `^` splice two keys
     // together below.
@@ -789,6 +838,11 @@ fn arr3(tag: f64, kind: &str, value: Key) -> Key {
 /// carries its operand count there and JS turns that into `"2_%"`; the tag at
 /// index 0 is untouched either way, which is what keeps the unit sorting with
 /// the kind of thing it annotates.
+///
+/// The container case is why [`cmp_key`] ranks a `Str` above a `Num` rather
+/// than coercing: JS's own comparison of `"2_%"` with `3` is `NaN` in both
+/// directions, which ties a unit-annotated container with every plain one and
+/// leaves the sort without a normal form.
 fn append_unit(key: Key, unit: &str) -> Key {
     match key {
         Key::Arr(mut items) if items.len() > 1 => {

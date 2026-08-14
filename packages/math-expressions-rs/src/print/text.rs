@@ -354,32 +354,7 @@ impl Writer<'_> {
     /// never by string-matching, and never pulling a sign out of a Mul (which
     /// would not round-trip).
     fn render_add(&self, terms: &[Expr]) -> String {
-        // A single-element Add is the parser's unary-plus form (`+x`).
-        if terms.len() == 1 {
-            return format!("+{}", self.emit(&terms[0], prec::ADD + 1));
-        }
-        let mut out = String::new();
-        for (i, t) in terms.iter().enumerate() {
-            // A `±` term carries its own operator (`± …`), so it is joined with a
-            // plain space rather than ` + ` — `5 + ±3` would be wrong.
-            if i > 0 && crate::ops::pm::is_pm(t) {
-                out.push(' ');
-                out.push_str(&self.emit(t, prec::ADD + 1));
-                continue;
-            }
-            let (neg, body) = split_sign(t);
-            if i == 0 {
-                if neg {
-                    out.push('-');
-                }
-            } else if neg {
-                out.push_str(" - ");
-            } else {
-                out.push_str(" + ");
-            }
-            out.push_str(&self.emit(&body, prec::ADD + 1));
-        }
-        out
+        super::render_add_terms(terms, |e, ctx| self.emit(e, ctx))
     }
 
     /// Returns the product's precedence too: a negative leading factor makes
@@ -414,7 +389,7 @@ impl Writer<'_> {
                 // right factor begins with a digit (so two numbers don't merge)
                 // or the left factor is a shorthand `∠A` (which would absorb it).
                 else if s.starts_with(|c: char| c.is_ascii_digit())
-                    || is_shorthand_angle(&factors[i - 1])
+                    || super::is_shorthand_angle(&factors[i - 1])
                 {
                     out.push_str(" * ");
                 } else {
@@ -652,6 +627,11 @@ impl Writer<'_> {
     /// The long tail of notation operators carried as `OtherOp`.
     fn render_other(&self, name: &str, args: &[Expr]) -> (String, u8) {
         use prec::*;
+        // A head with too few operands to render in its own notation drops to
+        // the generic form; see [`super::other_op_min_arity`].
+        if args.len() < super::other_op_min_arity(name) {
+            return self.render_other_generic(name, args);
+        }
         let one = |w: &Self, ctx| w.emit(&args[0], ctx);
         match name {
             // ASCII spells it as the word the lexer keyword-matches. `+-` would
@@ -792,11 +772,21 @@ impl Writer<'_> {
             "d" => (format!("d{}", one(self, ATOM)), POW),
             "derivative_leibniz" => (self.render_leibniz("d", args), MUL),
             "partial_derivative_leibniz" => (self.render_leibniz("∂", args), MUL),
-            _ => (
-                format!("{}({})", name, self.join(args, &self.arg_sep(), LIST + 1)),
-                ATOM,
-            ),
+            _ => self.render_other_generic(name, args),
         }
+    }
+
+    /// `name(args…)` — the form every unrecognized head takes, and the fallback
+    /// for a recognized head whose operand count is too low for its notation.
+    fn render_other_generic(&self, name: &str, args: &[Expr]) -> (String, u8) {
+        (
+            format!(
+                "{}({})",
+                name,
+                self.join(args, &self.arg_sep(), prec::LIST + 1)
+            ),
+            prec::ATOM,
+        )
     }
 
     fn render_angle(&self, args: &[Expr]) -> String {
@@ -894,11 +884,6 @@ fn is_single_paren_group(s: &str) -> bool {
         }
     }
     false
-}
-
-/// A single-argument `angle` renders as the greedy shorthand `∠A`.
-fn is_shorthand_angle(e: &Expr) -> bool {
-    matches!(e, Expr::OtherOp(name, args) if name.name() == "angle" && args.len() == 1)
 }
 
 /// Can this expression appear bare in a sub/superscript slot (a single tight

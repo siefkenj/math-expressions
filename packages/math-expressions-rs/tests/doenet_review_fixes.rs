@@ -229,3 +229,294 @@ fn latex_of_a_delimited_group_holding_a_blank_does_not_abort() {
         "unexpected latex: {compound}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Fourth review cycle. Everything below reproduced against the public API
+// before the fix and was re-checked after it.
+// ---------------------------------------------------------------------------
+
+/// `default_order` has to be a *normal form*: `simplify="normalizeOrder"` is
+/// how two spellings of one answer are made to match, so an order that depends
+/// on the input order grades the same answer differently depending on how the
+/// student wrote it.
+///
+/// `append_unit` stringifies sort-key index 1, which for a `Seq`/`Array`/
+/// `Interval` holds the operand count rather than a kind name, and `cmp_key`
+/// compared that `Str` with the plain containers' `Num` numerically —
+/// `"2_%".parse::<f64>()` is `NaN`, which tied it with *every* plain container
+/// while the plain ones still ordered by length. Six input orderings gave three
+/// different trees. (`sort_by` on a non-total comparator can also panic
+/// outright, which in a `panic = "abort"` crate is a dead worker.)
+#[test]
+fn default_order_of_a_unit_annotated_container_is_a_normal_form() {
+    let terms = ["(z,z)", "(y,y)%", "(x,x,x)"];
+    let mut seen = std::collections::BTreeSet::new();
+    for perm in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ] {
+        let src = format!(
+            "{} + {} + {}",
+            terms[perm[0]], terms[perm[1]], terms[perm[2]]
+        );
+        let ordered = math_expressions::default_order(&p(&src));
+        seen.insert(math_expressions::to_text(&ordered, &Default::default()));
+    }
+    assert_eq!(seen.len(), 1, "not a normal form: {seen:?}");
+
+    // The kind-name keys units were designed for are untouched: both sides are
+    // strings there, so `5%` still sorts among the numbers.
+    assert_eq!(
+        math_expressions::to_text(
+            &math_expressions::default_order(&p("x + 5% + 3")),
+            &Default::default()
+        ),
+        math_expressions::to_text(
+            &math_expressions::default_order(&p("3 + 5% + x")),
+            &Default::default()
+        )
+    );
+}
+
+/// Pulling the sign out of an odd root picks the *real* branch, so it may not
+/// be done over a radicand that is not real. `is_real` answers `None` for
+/// `i·x` and `x + i` — it cannot rule out an imaginary `x` — and the rule
+/// accepted anything not *provably* non-real, so `cbrt(-i·x)` became
+/// `-cbrt(i·x)`, a different number.
+#[test]
+fn odd_root_sign_extraction_declines_over_an_imaginary_residual() {
+    // `simplify` leaves these alone rather than moving the sign.
+    for src in ["cbrt(-x*i)", "cbrt(-x-i)"] {
+        let out = tree(&simplify(&p(src)));
+        assert!(
+            !out.starts_with(r#"["-",["apply","cbrt""#),
+            "{src} should not extract the sign: {out}"
+        );
+    }
+
+    // The convention that makes a *symbol* of unknown realness count as real
+    // is unchanged — that is what `cbrt(-8)` folding to `-2` rests on.
+    assert_eq!(
+        tree(&simplify(&p("cbrt(-x)"))),
+        r#"["-",["apply","cbrt","x"]]"#
+    );
+    assert_eq!(tree(&simplify(&p("cbrt(-8)"))), "-2");
+    assert_eq!(
+        tree(&simplify(&p("cbrt(-8x)"))),
+        r#"["*",-2,["apply","cbrt","x"]]"#
+    );
+    // A provably non-real residual keeps the sign under the radical and lets
+    // only the positive perfect power out, as before.
+    assert_eq!(
+        tree(&simplify(&p("cbrt(-8i)"))),
+        r#"["*",2,["apply","cbrt",["-","i"]]]"#
+    );
+}
+
+/// `∞ − ∞` written as two poles. `add` collects like terms, and the
+/// additive-inverse identity it relies on does not hold for an infinite term:
+/// `1/0 − 1/0` answered `0`, `1/0 + 2 − 1/0` answered `2` and `2/0 − 1/0`
+/// answered `∞`. `simplify::is_infnan_constant` already counted a zero-pole;
+/// the two layers disagreed and `constructors` ran first (it is
+/// `canonicalize`, which precedes every rewrite), so `constructors` won.
+#[test]
+fn poles_do_not_cancel_as_like_terms() {
+    for src in [
+        "1/0 - 1/0",
+        "x/0 - x/0",
+        "1/0 + 2 - 1/0",
+        "2/0 - 1/0",
+        "1/0 - 1/0 + y",
+        "1/(0^2) - 1/(0^2)",
+    ] {
+        assert_eq!(tree(&simplify(&p(src))), r#"{"$":"NaN"}"#, "{src}");
+    }
+
+    // Coefficients that all pull the same way are still collected: `c·∞` is
+    // `∞` for positive `c`, so nothing here is indeterminate.
+    assert_eq!(tree(&simplify(&p("1/0 + 1/0"))), r#"{"$":"Inf"}"#);
+    assert_eq!(tree(&simplify(&p("3 + 1/0"))), r#"{"$":"Inf"}"#);
+    // A pole *inside* a finite subexpression is finite and must still cancel:
+    // `1/(1 + 1/0)` is an exact zero.
+    assert_eq!(tree(&simplify(&p("1/(1+1/0) - 1/(1+1/0)"))), "0");
+}
+
+/// One operation the sweep below runs over each hand-built tree.
+type PrintOp = Box<dyn Fn(&Expr)>;
+
+/// `expr/serde.rs`'s catch-all builds an `OtherOp` for any unknown head with
+/// no arity check, so `me.fromAst(["pm"])`, `["binom","x"]`, `["unit","x"]`
+/// and `["d"]` are all constructible from JS — and both printers indexed
+/// `args[0]`/`args[1]` without looking. In a `panic = "abort"` crate that is a
+/// worker kill on the one operation every expression meets.
+///
+/// The transform layers were already clean; this sweep asserts that and pins
+/// the printers alongside them.
+#[test]
+fn printers_survive_every_arity_of_every_notation_head() {
+    let heads = [
+        "pm",
+        "forall",
+        "exists",
+        "implies",
+        "impliedby",
+        "iff",
+        "rightarrow",
+        "leftarrow",
+        "leftrightarrow",
+        "perp",
+        "parallel",
+        ":",
+        "|",
+        "binom",
+        "vec",
+        "linesegment",
+        "angle",
+        "unit",
+        "d",
+        "derivative_leibniz",
+        "partial_derivative_leibniz",
+        "wombat",
+    ];
+    let arities: [&[&str]; 4] = [&[], &["\"x\""], &["\"x\"", "2"], &["\"x\"", "2", "3"]];
+    let wrappers = ["{}", r#"["+",{},1]"#, r#"["*",{},2]"#, r#"["^",{},2]"#];
+
+    let mut trouble = Vec::new();
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    for head in heads {
+        for arity in arities {
+            let inner = format!(
+                "[\"{head}\"{}{}]",
+                if arity.is_empty() { "" } else { "," },
+                arity.join(",")
+            );
+            for wrapper in wrappers {
+                let json = wrapper.replace("{}", &inner);
+                let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+                let Ok(e) = math_expressions::expr::serde::try_from_js(&value) else {
+                    continue;
+                };
+                let ops: [(&str, PrintOp); 6] = [
+                    (
+                        "to_text",
+                        Box::new(|e: &Expr| {
+                            math_expressions::to_text(e, &Default::default());
+                        }),
+                    ),
+                    (
+                        "to_latex",
+                        Box::new(|e: &Expr| {
+                            math_expressions::to_latex(e, &Default::default());
+                        }),
+                    ),
+                    (
+                        "simplify",
+                        Box::new(|e: &Expr| {
+                            simplify(e);
+                        }),
+                    ),
+                    (
+                        "default_order",
+                        Box::new(|e: &Expr| {
+                            math_expressions::default_order(e);
+                        }),
+                    ),
+                    (
+                        "canonicalize",
+                        Box::new(|e: &Expr| {
+                            math_expressions::canonicalize(e);
+                        }),
+                    ),
+                    (
+                        "expand",
+                        Box::new(|e: &Expr| {
+                            math_expressions::expand(e);
+                        }),
+                    ),
+                ];
+                for (label, op) in ops {
+                    let e = e.clone();
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(&e))).is_err() {
+                        trouble.push(format!("{label} {json}"));
+                    }
+                }
+            }
+        }
+    }
+    std::panic::set_hook(previous);
+    assert!(trouble.is_empty(), "{} panics: {trouble:#?}", trouble.len());
+}
+
+/// `i64::MIN` has no positive counterpart in `i64`, and `Number::neg` negated
+/// in place. Under `overflow-checks` that is an abort; without them it wraps
+/// back to `i64::MIN`, which is a wrong number. Both reachable sites are
+/// typeable: `rule_distribute_sign` and `present`'s `negated_exponent`.
+#[test]
+fn negating_i64_min_widens_instead_of_overflowing() {
+    let big = "9223372036854775808";
+    assert_eq!(
+        math_expressions::to_text(
+            &simplify(&p("-9223372036854775808(1-x)")),
+            &Default::default()
+        ),
+        format!("{big} (x - 1)")
+    );
+    assert_eq!(
+        math_expressions::to_text(
+            &simplify(&p("2^(-9223372036854775808/1)")),
+            &Default::default()
+        ),
+        format!("1/2^{big}")
+    );
+    // The exact value survives the widening rather than being rounded to f64.
+    assert_eq!(
+        math_expressions::to_text(
+            &simplify(&p("-(-9223372036854775808)")),
+            &Default::default()
+        ),
+        big
+    );
+}
+
+/// `rule_gaussian`'s exponent cap is per node, and `rewrite` runs bottom-up,
+/// so nesting compounds it: each level multiplies the operand size by up to
+/// 64. `(((2+i)^64+1)^64+1)^64` is about thirty typeable characters and did
+/// not finish in twenty seconds. Student input is adversarial by construction,
+/// which is why the neighbouring passes (`max_expand_power`, `polynomial_pow`)
+/// are bounded too.
+#[test]
+fn nested_gaussian_powers_are_bounded() {
+    let start = Instant::now();
+    for src in ["(((2+i)^64+1)^64+1)^64", "((((2+i)^64+1)^64+1)^64+1)^64"] {
+        let _ = simplify(&p(src));
+    }
+    assert!(
+        start.elapsed().as_secs() < 10,
+        "nested Gaussian powers took {:?}",
+        start.elapsed()
+    );
+    // The bound is on the *result*, so the ordinary cases still fold exactly.
+    assert_eq!(tree(&simplify(&p("(2+i)^4"))), r#"["+",["*",24,"i"],-7]"#);
+    assert_eq!(tree(&simplify(&p("(2+i)(2-i)"))), "5");
+}
+
+/// `log_b(a) → log(a)/log(b)` is invalid at `b = 1`, where `log b` is `0`:
+/// it answered `log_1(5) → ∞`, and `log_1(1) → 1` through the numeric pass
+/// beside it. There is no base-1 logarithm, so it joins the other undefined
+/// forms at `NaN`.
+#[test]
+fn log_base_one_is_undefined() {
+    assert_eq!(tree(&simplify(&p("log_1(5)"))), r#"{"$":"NaN"}"#);
+    assert_eq!(tree(&simplify(&p("log_1(1)"))), r#"{"$":"NaN"}"#);
+    // Every other base is unaffected.
+    assert_eq!(tree(&simplify(&p("log_2(8)"))), "3");
+    assert_eq!(
+        tree(&simplify(&p("log_2(5)"))),
+        r#"["/",["apply","log",5],["apply","log",2]]"#
+    );
+}

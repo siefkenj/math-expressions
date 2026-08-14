@@ -117,20 +117,18 @@ fn negated_exponent(x: &Expr) -> Option<Expr> {
 /// numerator/denominator split across the fraction bar (`(2/3)·x⁻¹ →
 /// 2/(3 x)`, `(1/2)·x → x/2`).
 fn present_mul(fs: &[Expr]) -> Expr {
-    let mut negative = false;
-    let mut coeff_num = Number::Int(1);
-    let mut coeff_den = Number::Int(1);
+    // A canonical `Mul` carries at most one numeric factor, but the numeric
+    // ones are *accumulated* rather than assigned so that nothing here depends
+    // on that: this is a display pass, and display passes are handed whatever
+    // reaches the screen. Accumulating also keeps the fraction in lowest terms,
+    // which splitting each factor separately would not.
+    let mut coeff = Number::Int(1);
     let mut num_factors: Vec<Expr> = Vec::new();
     let mut den_factors: Vec<Expr> = Vec::new();
 
     for f in fs {
         match f {
-            Expr::Num(n) => {
-                let (neg, num, den) = split_number(n);
-                negative ^= neg;
-                coeff_num = num;
-                coeff_den = den;
-            }
+            Expr::Num(n) => coeff = coeff.mul(n),
             Expr::Pow(b, x) => {
                 let neg_exp = if matches!(**b, Expr::Matrix { .. }) {
                     None // A^(-1) is an inverse, not a fraction (MATRIX_PLAN §1a)
@@ -153,6 +151,7 @@ fn present_mul(fs: &[Expr]) -> Expr {
     sort_factors(&mut num_factors);
     sort_factors(&mut den_factors);
 
+    let (negative, coeff_num, coeff_den) = split_number(&coeff);
     let num = assemble(coeff_num, num_factors);
     let out = if den_factors.is_empty() && coeff_den.is_one() {
         num

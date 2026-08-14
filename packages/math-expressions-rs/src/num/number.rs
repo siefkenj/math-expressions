@@ -449,13 +449,28 @@ impl Number {
         }
     }
 
+    /// Negation. `i64::MIN` has no positive counterpart in `i64`, so both
+    /// integer tiers widen to `Big` rather than negating in place: a plain
+    /// `-i` traps under `overflow-checks` (an *abort*, in this crate) and
+    /// wraps back to `i64::MIN` without them, which is a wrong number on a
+    /// grading path. `-9223372036854775808(1-x)` and
+    /// `2^(-9223372036854775808/1)` are both typeable and both reached it.
     pub fn neg(&self) -> Number {
         match self {
             // Exact zero flips sign: −(+0) = −0, −(−0) = +0.
             Number::Int(0) => Number::NegZero,
             Number::NegZero => Number::Int(0),
-            Number::Int(i) => Number::Int(-i),
-            Number::Rat(n, d, s) => Number::Rat(-n, *d, *s),
+            Number::Int(i) => match i.checked_neg() {
+                Some(v) => Number::Int(v),
+                None => Number::Big(Box::new(BigNumber::Int(-BigInt::from(*i)))),
+            },
+            Number::Rat(n, d, s) => match n.checked_neg() {
+                Some(v) => Number::Rat(v, *d, *s),
+                None => Number::from_bigrational_spelled(
+                    -BigRational::new(BigInt::from(*n), BigInt::from(*d)),
+                    *s,
+                ),
+            },
             Number::Float(f) => Number::Float(F64::new(-f.get())),
             Number::Big(b) => match &**b {
                 BigNumber::Int(i) => Number::from_bigint(-i),

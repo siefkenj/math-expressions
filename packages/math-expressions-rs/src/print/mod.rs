@@ -39,6 +39,73 @@ pub(crate) mod prec {
     pub const ATOM: u8 = 100;
 }
 
+/// How many operands a specially-rendered `OtherOp` head needs before either
+/// printer may index into its argument list; `0` for every head whose renderer
+/// only ever `join`s, and for every head with no special rendering at all.
+///
+/// `expr/serde.rs`'s catch-all builds `OtherOp(name, args)` for any unknown
+/// head with no arity check whatsoever, so `me.fromAst(["pm"])`,
+/// `["binom","x"]`, `["unit","x"]` and `["d"]` are all constructible from JS.
+/// The transform layers cope — a sweep of 22 heads × 4 arities × 4 wrappers ×
+/// 6 operations found no panic in `simplify`, `canonicalize`, `expand` or
+/// `default_order` — but the printers indexed `args[0]`/`args[1]` directly,
+/// which was 104 panics. This crate is built `panic = "abort"`, so each one
+/// killed the worker, and printing is the one thing that happens to *every*
+/// expression on its way to the screen.
+///
+/// A head that does not meet its arity falls through to the generic
+/// `name(args…)` form, which is what `render_angle` already does by hand and
+/// what an unrecognized head has always got.
+pub(crate) fn other_op_min_arity(name: &str) -> usize {
+    match name {
+        "binom" | "unit" | "derivative_leibniz" | "partial_derivative_leibniz" => 2,
+        "pm" | "forall" | "exists" | "vec" | "d" => 1,
+        _ => 0,
+    }
+}
+
+/// The shared body of both printers' `Add` rendering: `a + b - c`, with the
+/// leading term's sign attached rather than spelled with an operator, and a
+/// `pm` term joined by a plain space because it carries its own operator
+/// (`5 + ±3` would be wrong).
+///
+/// The two printers differ only in how a term renders, so that is the one
+/// thing passed in; the joining logic was byte-identical in both.
+///
+/// A single-element `Add` is the parsers' unary-plus form (`+x`) and keeps its
+/// sign.
+pub(crate) fn render_add_terms(terms: &[Expr], emit: impl Fn(&Expr, u8) -> String) -> String {
+    if terms.len() == 1 {
+        return format!("+{}", emit(&terms[0], prec::ADD + 1));
+    }
+    let mut out = String::new();
+    for (i, t) in terms.iter().enumerate() {
+        if i > 0 && crate::ops::pm::is_pm(t) {
+            out.push(' ');
+            out.push_str(&emit(t, prec::ADD + 1));
+            continue;
+        }
+        let (neg, body) = split_sign(t);
+        if i == 0 {
+            if neg {
+                out.push('-');
+            }
+        } else if neg {
+            out.push_str(" - ");
+        } else {
+            out.push_str(" + ");
+        }
+        out.push_str(&emit(&body, prec::ADD + 1));
+    }
+    out
+}
+
+/// A one-argument `angle`, which both printers render with the prefix
+/// shorthand (`∠A` / `\angle A`) rather than the parenthesized form.
+pub(crate) fn is_shorthand_angle(e: &Expr) -> bool {
+    matches!(e, Expr::OtherOp(name, args) if name.name() == "angle" && args.len() == 1)
+}
+
 /// Split a leading sign out of a term, structurally. Borrows where possible;
 /// an owned node is returned only when the sign has to be pushed inward
 /// (negating a number, or a product's first factor).
@@ -48,9 +115,10 @@ pub(crate) mod prec {
 /// render `a - 3 b` rather than `a + (-3) b`, and a bare product `-3 b` rather
 /// than `(-3) b` (DoenetML open item 10). This is display-only: the positive
 /// product re-parses to `Neg(Mul(...))`, an equal but distinct tree. That is
-/// acceptable because the parsers never emit a `Mul` with a negative leading
-/// factor — they use `Neg` — so no expression this changes was round-tripping
-/// through the leading-negative `Mul` form to begin with.
+/// acceptable because the form is one the parsers only reach through an
+/// explicitly parenthesized negative literal — `parse_text("(-3)b")` is
+/// `Mul([Num(-3), Sym("b")])`, while `-3b` is a `Neg` — and that case is
+/// exactly the one this rule exists to render readably.
 pub(crate) fn split_sign(e: &Expr) -> (bool, std::borrow::Cow<'_, Expr>) {
     use std::borrow::Cow;
     match e {

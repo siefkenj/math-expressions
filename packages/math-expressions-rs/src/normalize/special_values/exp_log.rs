@@ -36,12 +36,20 @@ pub(super) fn fold_log(arg: &Expr) -> Option<Expr> {
 /// it never combined with anything, and `log_b(a) − log(a)/log(b)` did not
 /// simplify to zero.
 ///
+/// Base 1 is the one base the rewrite may not take, because `log 1` is `0`:
+/// it answered `log_1(5) → ∞` (and `log_1(1) → 1`, through the numeric pass
+/// below) where there is no such logarithm at all — `1^y` is `1` for every `y`.
+/// It folds to `NaN` with the crate's other undefined forms.
+///
 /// Declines when the numeric pass would produce an exact value instead
 /// (`log_2(8)` is `3`, not `log 8 / log 2`). That pass runs *after* this one in
 /// the `full_simplify` round, so the check has to happen here rather than being
 /// left to ordering. Once rewritten the node is no longer an `Index`-headed
 /// apply, so the surrounding fixpoint cannot re-enter it.
 pub(super) fn change_of_base(arg: &Expr, base: &Expr) -> Option<Expr> {
+    if is_one_expr(base) {
+        return Some(Expr::Const(crate::expr::MathConst::NaN));
+    }
     let head = Expr::Index(Box::new(Expr::sym("log")), Box::new(base.clone()));
     if crate::normalize::fold_apply::folds_to_a_number(&head, std::slice::from_ref(arg)) {
         return None;

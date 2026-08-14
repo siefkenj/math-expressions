@@ -132,6 +132,27 @@ pub(crate) fn add(terms: Vec<Expr>) -> Expr {
         }
     }
 
+    // `∞ − ∞` written as two like terms. Collecting `c₁·u + c₂·u` into
+    // `(c₁+c₂)·u` is the additive-inverse identity, and that does not hold for
+    // an infinite `u`: every one of `1/0 − 1/0`, `x/0 − x/0`, `1/0 + 2 − 1/0`
+    // and `2/0 − 1/0` is `NaN`, but collection answered `0`, `0`, `2` and `∞`.
+    // The pre-pass above cannot catch these because it only recognizes an
+    // infinity *constant*, and a pole is still written `Pow(0, −1)` here —
+    // `pow` deliberately leaves it unfolded (see [`is_pole`]) and `add` runs
+    // during canonicalization, before `simplify`'s `rule_infnan` would fold it.
+    //
+    // Coefficients that all pull the same way are still fine, since `c·∞ = ∞`
+    // for positive `c`: `1/0 + 1/0` stays `∞` and `x/0 + x/0` stays `2x/0`.
+    for (rest, _, coeffs) in &parts {
+        if coeffs.len() > 1
+            && has_nonfinite_factor(rest)
+            && coeffs.iter().any(Number::is_negative)
+            && !coeffs.iter().all(Number::is_negative)
+        {
+            return Expr::Const(MathConst::NaN);
+        }
+    }
+
     let mut out = Vec::with_capacity(parts.len() + mats.len() + 1);
     for (rows, cols, acc) in mats {
         // `acc` carries exactly one accumulator per entry of a rows×cols
@@ -529,6 +550,20 @@ fn is_pole(e: &Expr) -> bool {
     }
     let base = peel_nonzero_scaling(base);
     is_nonfinite_const(base) || matches!(base, Expr::Num(n) if n.is_zero())
+}
+
+/// Does a term with this non-constant part have an infinite *factor* — an
+/// unfolded pole or a non-finite constant?
+///
+/// Only the top-level factors are asked, because a non-finite subexpression
+/// does not make the product non-finite: `1/(1 + 1/0)` is an exact `0`, and a
+/// recursive scan would refuse to cancel two of them.
+fn has_nonfinite_factor(rest: &Expr) -> bool {
+    let factors: &[Expr] = match rest {
+        Expr::Mul(xs) => xs,
+        other => std::slice::from_ref(other),
+    };
+    factors.iter().any(|f| is_pole(f) || is_nonfinite_const(f))
 }
 
 /// Is `e` provably infinite or `NaN`?

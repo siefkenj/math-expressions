@@ -19,15 +19,19 @@
 //!    outright when no facts are in scope (`sqrt(x²) → |x|` under `x ∈ R`,
 //!    `|u| → u` under `u ≥ 0`).
 //! 2. `rule_infnan` — ∞/NaN folding.
-//! 3. `rule_trig_pythagorean` — `sin²+cos² → 1` and its relatives.
-//! 4. `rule_seq_arith` — componentwise arithmetic on tuples/vectors.
-//! 5. `rule_radical` — numeric root extraction (`sqrt(8) → 2√2`, `cbrt(-8) → -2`).
-//! 6. `rule_distribute_neg_over_sum` — `-(a+b) → -a-b`, the one distribution
-//!    that cannot grow the tree, and the one JS `.simplify()` performs.
-//! 7. `rule_distribute_sign` — moving a product's sign into one factor
+//! 3. `rule_gaussian` — exact arithmetic in Q(i) (`(2+i)(2-i) → 5`).
+//! 4. `rule_trig_pythagorean` — `sin²+cos² → 1` and its relatives.
+//! 5. `rule_seq_arith` — componentwise arithmetic on tuples/vectors.
+//! 6. `rule_radical` — numeric root extraction (`sqrt(8) → 2√2`, `cbrt(-8) → -2`).
+//! 7. `rule_flatten_negated_sum_term` — splicing a negated sum into its parent
+//!    sum (`a - (b + c) → a - b - c`), run before the two sign clusters so they
+//!    see settled term counts.
+//! 8. `rule_factor_sign_out_of_sum` — pulling a common minus sign out of a sum
+//!    (`-a - b → -(a + b)`), when that shortens it.
+//! 9. `rule_distribute_sign` — moving a product's sign into one factor
 //!    (`-2(1-x) → 2(x-1)`), when doing so does not add minus signs.
 //!
-//! Only cluster 1 *needs* facts to do anything. Cluster 5 reads them to decline
+//! Only cluster 1 *needs* facts to do anything. Cluster 6 reads them to decline
 //! a rewrite it cannot justify (an odd root's sign stays put over a radicand
 //! known to be non-real), so an empty context makes it more eager, never wrong;
 //! the rest ignore them outright. That is what lets the equality path reuse the
@@ -299,13 +303,20 @@ fn rule_assumptions(e: &Expr, a: &Assumptions) -> Option<Expr> {
         }
         return None;
     }
-    let (degree, radicand, root) = match (f.name().as_str(), args.as_slice()) {
+    let (degree, radicand, root) = as_root_call(&f.name(), args)?;
+    extract_powers_from_root(degree, radicand, root, a)
+}
+
+/// `sqrt(r)`, `cbrt(r)` and `nthroot(r, n)` as the one `(degree, radicand,
+/// Root)` triple the two radical passes both work in. `None` for any other
+/// head, and for an `nthroot` whose degree is not an integer `≥ 2`.
+fn as_root_call<'a>(name: &str, args: &'a [Expr]) -> Option<(i64, &'a Expr, Root)> {
+    Some(match (name, args) {
         ("sqrt", [r]) => (2i64, r, Root::Sqrt),
         ("cbrt", [r]) => (3, r, Root::Cbrt),
         ("nthroot", [r, Expr::Num(Number::Int(n))]) if *n >= 2 => (*n, r, Root::Nth(*n)),
         _ => return None,
-    };
-    extract_powers_from_root(degree, radicand, root, a)
+    })
 }
 
 /// Pull whole `q`-th powers of a *variable* factor out from under a root:
@@ -604,14 +615,6 @@ fn fold_infnan_add(terms: &[Expr]) -> Option<Expr> {
     }))
 }
 
-// ---- Cluster: trigonometric Pythagorean identity ----
-//
-// `C·sin(θ)² + C·cos(θ)² → C` for a shared coefficient `C` and argument `θ`.
-// Runs on a canonical `Add`, pairing each `sin` square with a matching `cos`
-// square; unmatched terms pass through. This is the one trig identity the
-// equality path needs (the `sin²+cos²` corpus cases, including one nested inside
-// a set membership). Broader trig normalization is a later addition.
-
 // ---- Cluster: exact arithmetic in ℚ(i) ----
 
 /// Evaluate a variable-free subtree that mentions `i` exactly, in ℚ(i).
@@ -697,6 +700,23 @@ fn gaussian_eval(e: &Expr) -> Option<(BigRational, BigRational)> {
                 return None;
             }
             let (br, bi) = gaussian_eval(b)?;
+            // The exponent bound alone is *per node*, and `rewrite` is
+            // bottom-up, so nesting multiplies it: `(((2+i)^64+1)^64+1)^64` is
+            // about thirty typeable characters and did not finish in twenty
+            // seconds, with one more level far worse again. The base arrives
+            // already folded, so bound the size of the *result* as well —
+            // untrusted student input is what this pass runs on.
+            let base_bits = [&br, &bi]
+                .into_iter()
+                .map(|q| q.numer().bits().max(q.denom().bits()))
+                .max()
+                .unwrap_or(0);
+            if base_bits > 1
+                && k.unsigned_abs().saturating_mul(base_bits)
+                    > crate::resource_limits::current().max_gaussian_pow_bits
+            {
+                return None;
+            }
             let (mut ar, mut ai) = (BigRational::one(), BigRational::zero());
             for _ in 0..k.unsigned_abs() {
                 let (nr, ni) = (&ar * &br - &ai * &bi, &ar * &bi + &ai * &br);
@@ -753,6 +773,14 @@ fn gaussian_expr(re: &BigRational, im: &BigRational) -> Option<Expr> {
         _ => add(terms),
     })
 }
+
+// ---- Cluster: trigonometric Pythagorean identity ----
+//
+// `C·sin(θ)² + C·cos(θ)² → C` for a shared coefficient `C` and argument `θ`.
+// Runs on a canonical `Add`, pairing each `sin` square with a matching `cos`
+// square; unmatched terms pass through. This is the one trig identity the
+// equality path needs (the `sin²+cos²` corpus cases, including one nested inside
+// a set membership). Broader trig normalization is a later addition.
 
 fn rule_trig_pythagorean(e: &Expr) -> Option<Expr> {
     let Expr::Add(terms) = e else { return None };
@@ -886,6 +914,15 @@ fn trig_fn(name: &str) -> Option<TrigFn> {
 /// Sequence kinds that behave like coordinate vectors, so arithmetic acts
 /// componentwise. Sets and plain lists are excluded — componentwise arithmetic
 /// over an unordered/heterogeneous collection is not meaningful.
+///
+/// `Array` is included even though [`vector_class`] below notes that `[a, b]`
+/// is the container `createIntervals` reads as an interval. The two are not in
+/// conflict: an interval in *this* crate is [`Expr::Interval`], which is not a
+/// `Seq` at all and is left alone here (negating one would have to swap its
+/// endpoints, and `-[1, 2]` as an interval is `[-2, -1]`). A `Seq(Array)` is
+/// the bracket *spelling* of a coordinate list, so `-[1, 2]` is `[-1, -2]`;
+/// what `vector_class` withholds from it is merging with a tuple, not
+/// componentwise arithmetic.
 fn is_vectorlike(k: SeqKind) -> bool {
     matches!(
         k,
@@ -1313,10 +1350,13 @@ fn rule_distribute_sign(e: &Expr) -> Option<Expr> {
 // - Perfect q-th-power factors of the numeric coefficient come out front
 //   (`sqrt(8) → 2·sqrt(2)`). The coefficient may be a fraction, which extracts
 //   independently in the numerator and the denominator (`sqrt(2/9) → sqrt(2)/3`).
-// - Even root of a *negative number*: no real value, so the principal complex
-//   root. Exact on the imaginary axis at q = 2 (`sqrt(-4) → 2i`,
-//   `sqrt(-2) → i·sqrt(2)`); higher even roots need the surd `cos(π/q)+i·sin(π/q)`
-//   form we don't build for roots yet, and stay symbolic.
+// - Even root of a *negative number*: the positive perfect-power factor comes
+//   out and the sign stays under the radical (`sqrt(-18) → 3·sqrt(-2)`), which
+//   is valid on either branch. `i` surfaces only when the radicand is exactly
+//   minus a perfect square at q = 2 (`sqrt(-4) → 2i`, `sqrt(-1) → i`); a
+//   non-square residual (`sqrt(-2)`) is left alone, and higher even roots need
+//   the surd `cos(π/q)+i·sin(π/q)` form we don't build yet. See
+//   `negative_even_root`.
 //
 // A variable radicand of an even root (`sqrt(-4x)`, `sqrt(x²)`) has unknown
 // sign, so it never folds. Symbolic radicands that are not a numeric multiple
@@ -1337,12 +1377,7 @@ fn rule_radical(e: &Expr, assumptions: &Assumptions) -> Option<Expr> {
         // sqrt / cbrt / nthroot applications.
         Expr::Apply(head, args) => {
             let Expr::Sym(s) = &**head else { return None };
-            let (degree, radicand, root) = match (s.name().as_str(), args.as_slice()) {
-                ("sqrt", [r]) => (2i64, r, Root::Sqrt),
-                ("cbrt", [r]) => (3, r, Root::Cbrt),
-                ("nthroot", [r, Expr::Num(Number::Int(n))]) if *n >= 2 => (*n, r, Root::Nth(*n)),
-                _ => return None,
-            };
+            let (degree, radicand, root) = as_root_call(&s.name(), args)?;
             simplify_root(degree, radicand, root, assumptions)
         }
         _ => None,
@@ -1438,15 +1473,25 @@ fn simplify_root(
     // Pulling the sign out of an odd root picks the *real* branch:
     // `cbrt(-u) = -cbrt(u)` holds for real `u`, but not on the principal
     // complex branch — `cbrt(-i)` is `e^(-iπ/6)` while `-cbrt(i)` is
-    // `e^(-i5π/6)`, a different number. A residual of unknown sign still
-    // counts as real, since that is the same convention that lets `cbrt(-8)`
-    // fold to `-2`; only a residual *known* to be non-real declines. When it
-    // does, the sign stays under the radical and just the perfect power comes
-    // out (`cbrt(-8i) → 2·cbrt(-i)`), which holds on either branch because a
-    // positive real factor does not move the argument.
-    let sign_is_real = rest
-        .as_ref()
-        .is_none_or(|r| is_real(r, assumptions) != Some(false));
+    // `e^(-i5π/6)`, a different number. A residual whose realness is merely
+    // *unproven* still counts as real, since a bare symbol is exactly that
+    // (`is_real("x")` is `None`) and `cbrt(-x) → -cbrt(x)` is the convention
+    // this crate and the JS library share. What must not count as real is a
+    // residual that visibly mentions `i`: `is_real` answers `None` for `i·x`
+    // and `x + i` too, because it cannot rule out an imaginary `x`, and taking
+    // that for real gave `cbrt(-i·x) → -cbrt(i·x)` — a different number, as
+    // this crate's own `equals` reports for the constant case. The check is on
+    // the *spelling* rather than on `is_real`, and asks
+    // [`constant_policy::is_i`] so that a document declaring `i` an ordinary
+    // variable keeps the real-branch rewrite.
+    //
+    // When the residual declines, the sign stays under the radical and just
+    // the perfect power comes out (`cbrt(-8i) → 2·cbrt(-i)`), which holds on
+    // either branch because a positive real factor does not move the argument.
+    let sign_is_real = rest.as_ref().is_none_or(|r| {
+        is_real(r, assumptions) != Some(false)
+            && !r.any_subexpr(&|e| crate::constant_policy::is_i(e))
+    });
     let sign: i64 = if negative && sign_is_real { -1 } else { 1 };
     let inner_negated = negative && !sign_is_real;
     let (m, r) = extract_qth_power_rational(cn.unsigned_abs(), cd, q, spelling)?;
