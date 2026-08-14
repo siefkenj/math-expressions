@@ -273,8 +273,10 @@ fn orient_relations(v: &Value) -> Value {
         "notni" => "notin",
         "superset" => "subset",
         "notsuperset" => "notsubset",
-        "supseteq" => "subseteq",
-        "notsupseteq" => "notsubseteq",
+        // `superseteq`, not the LaTeX command `supseteq`: these are JS AST
+        // operator names, spelled by `RelOp`'s `Display` in `expr/tree.rs`.
+        "superseteq" => "subseteq",
+        "notsuperseteq" => "notsubseteq",
         _ => return Value::Array(out),
     };
     // Binary form only: a chained relation ("x < y < z") carries its operators

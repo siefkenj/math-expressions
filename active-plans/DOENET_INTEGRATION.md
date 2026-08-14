@@ -4,16 +4,19 @@
 **Against:** `siefkenj/math-expressions@doenet`, `970c1c3`
 **Date:** 2026-08-04
 
-The detail lives in [`upstream_requests/`](upstream_requests/), one file per request, each
-self-contained enough to file as an issue. This page is the cover note. Nothing that has already been
-fixed is repeated here — see the git history of this file if you want the record of what was.
+Each item below is self-contained enough to file as an issue, and carries the response it got
+inline. Nothing that has already been fixed is repeated here — see the git history of this file if
+you want the record of what was.
 
 DoenetML has switched permanently to the Rust engine. There is no JavaScript engine to fall back to,
 so everything below is on the path to shipping.
 
-## Still open — three items
+## Filed — three items
 
-**1. [Display rounding loses precision at large magnitudes](upstream_requests/08-round-to-decimals-loses-precision.md)**
+As filed. The [Response](#response) below resolves them: **1** is fixed, **2** is answered as not a
+defect, and **3** is the only one still open.
+
+**1. Display rounding loses precision at large magnitudes**
 — 8 failures, and it is the *normal* display path rather than an edge case.
 
 ```js
@@ -27,7 +30,7 @@ which is exactly representable. The value is parsed exactly and survives untouch
 only the rounding corrupts it, and asking for *more* digits eventually returns the exact answer,
 which points at a decimal-string round trip.
 
-**2. [`parseScientificNotation` has no effect](upstream_requests/09-parse-scientific-notation-ignored.md)**
+**2. `parseScientificNotation` has no effect**
 — low severity, but a documented option that silently does nothing.
 
 ```js
@@ -37,7 +40,7 @@ new me.converters.textToAstObj({ parseScientificNotation: true }).convert("7e-12
 
 Either honour it or drop it from the option list in `lib/converters/text-to-ast.ts`.
 
-**3. [WASM32 stack safety](upstream_requests/03-wasm32-stack-safety.md)** — a crash class reachable
+**3. WASM32 stack safety** — a crash class reachable
 from student input, and already your own `STACK_SAFETY_PLAN.md`. Deep expressions can overflow the
 ~1 MB shadow stack, including on `Drop`, and the input arrives from a text box. Steps 1 and 2 of your
 plan — iterative `Drop`, parser depth cap — close the vector end-to-end.
@@ -62,11 +65,14 @@ let us delete the last two workarounds in our seam — with **no change in resul
 is how we verify an upstream fix actually covers our usage. `packages/math/src/engine-rust.ts` is now
 a straight re-export.
 
-Most of what is left is ours: 61 coordinate/array mismatches from a bug in our own dependency
+Most of what was left was ours: 61 coordinate/array mismatches from a bug in our own dependency
 resolution, 16 unattributed `matchesPattern` cases, 15 blank-comparison scoring failures in our
 `booleanLogic.js`, 12 tagged-value leaks into `.tree` consumers, and 5 residual `unexpected value
-null` call sites. 8 are item 1 above. The per-cluster ledger is in
-[`upstream_requests/README.md`](upstream_requests/README.md).
+null` call sites. 8 were item 1 above.
+
+**These counts are stale.** They were measured at pin `970c1c3`; the branch is several revisions past
+it and most of the clusters above have since been closed from one side or the other. Treat them as
+the shape of the work, not as current numbers, and re-measure before citing any of them.
 
 ### How items 1 and 2 were found
 

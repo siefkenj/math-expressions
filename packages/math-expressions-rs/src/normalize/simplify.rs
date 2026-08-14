@@ -402,13 +402,21 @@ fn extract_powers_from_root(q: i64, radicand: &Expr, root: Root, a: &Assumptions
 // Fold arithmetic that produces an infinity or NaN. Scope is deliberately the
 // subset compatible with our *exact* number model.
 //
-// The indeterminate forms are *not* a divergence: `0·∞`, `0/0`, `0·(1/0)` and
-// `0^0` all fold to `NaN`, matching JS. See `normalize::constructors::annihilate`
-// for why — DoenetML computes an undefined slope as `0/0`, so annihilating it to
-// `0` reports a degenerate line as horizontal, which is a wrong number on a
-// grading path rather than a visible failure. Pinned by `tests/signed_zero.rs`.
-// (An earlier revision of this crate did fold them to `0`/`1`, and this comment
-// described that; do not restore it without also restoring the tests.)
+// The indeterminate forms fold to `NaN` rather than annihilating: `0·∞`, `0/0`
+// and `0·(1/0)` unconditionally (see `normalize::constructors::annihilate`),
+// and `0^0` under the default `pow_strict` policy. An earlier revision of this
+// crate folded them to `0`/`1` and this comment described that; the change is
+// deliberate — DoenetML computes an undefined slope as `0/0`, so annihilating
+// it to `0` reports a degenerate line as horizontal, a wrong number on a
+// grading path rather than a visible failure. Pinned by
+// `tests/signed_zero.rs::indeterminate_forms_do_not_annihilate`.
+//
+// Two of those *are* divergences from JS, deliberately: JS evaluates `0 ** 0`
+// as `1`, and `0 * Infinity` only reaches `NaN` because JS has no exact zero to
+// annihilate with. `0^0` is therefore policy-dependent — clearing
+// `constant_policy::pow_strict` (legacy's `me.math.pow_strict`) restores the JS
+// answer. `0·∞` is not: the `skip_ordering` path folds it in
+// `ops::preserve_order`, which does not read that policy.
 //
 // We DO track a signed zero (`Number::NegZero`), narrowly: it is value-equal to
 // `0` everywhere except the pole fold, so `6/-0 → −∞` and `1/((−1)·0) → −∞`

@@ -39,15 +39,27 @@ pub fn from_ast(tree_json: &str) -> Result<Expression, JsError> {
 /// is a measured loss — see `ATOM_HANDLES`). Those two JSON traversals were
 /// the largest remaining allocation source in the extrema search.
 ///
-/// Non-finite values are accepted and land on `Number::Float`, matching what
-/// the JSON path produces for the `{"$":"NaN"}` / `{"$":"Inf"}` tags. Integral
-/// values demote to `Int` exactly as `from_ast` would, so this is a shortcut,
-/// not a second set of semantics.
+/// This is a shortcut, not a second set of semantics, so it has to agree with
+/// `from_ast` on every input. Integral values demote to `Int` the same way, and
+/// non-finite ones become `Expr::Const`, which is what `expr::serde` produces
+/// for the `{"$":"NaN"}` / `{"$":"Inf"}` tags the JSON path carries them in.
+/// `Number::from_f64` would instead give a `Num(Float(NaN))`, which the ∞/NaN
+/// folds in `normalize::simplify` and `normalize::constructors` do not match —
+/// so `me.fromAst(NaN)` would simplify differently depending on which path it
+/// took.
 #[wasm_bindgen]
 pub fn from_number(value: f64) -> Expression {
-    Expression::with_default_notation(math_expressions::Expr::Num(
-        math_expressions::num::Number::from_f64(value),
-    ))
+    use math_expressions::expr::MathConst;
+    let expr = if value.is_nan() {
+        math_expressions::Expr::Const(MathConst::NaN)
+    } else if value == f64::INFINITY {
+        math_expressions::Expr::Const(MathConst::Inf)
+    } else if value == f64::NEG_INFINITY {
+        math_expressions::Expr::Const(MathConst::NegInf)
+    } else {
+        math_expressions::Expr::Num(math_expressions::num::Number::from_f64(value))
+    };
+    Expression::with_default_notation(expr)
 }
 
 /// Revive an expression serialized by [`Expression::to_serialized`] (or by

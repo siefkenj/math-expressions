@@ -19,6 +19,11 @@ pub fn poly_div(f: &Poly, divs: &[Poly]) -> (Vec<(usize, Mono)>, Poly) {
 }
 
 /// Reduce `polys[i]` against every *other* polynomial in the list.
+///
+/// # Panics
+///
+/// If `i` is out of range. Callers reachable from JS must bounds-check first —
+/// the wasm crate is built `panic = "abort"`, where a panic traps the module.
 pub fn reduce_ith(i: usize, polys: &[Poly]) -> Poly {
     // A zero initial term is never divisible, so index `i` can never be chosen
     // — that is how the polynomial is kept from cancelling against itself.

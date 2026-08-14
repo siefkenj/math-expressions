@@ -75,9 +75,11 @@ export function transform(tree, F) {
 /**
  * Replace the subtree `tree` of `root` with `replacement`.
  *
- * Matching is by **reference identity**, not by value: `tree` has to be a node
- * actually inside `root`. An equal-looking tree built separately is left alone,
- * which is what lets a caller rewrite one occurrence of `x` in `x + x`.
+ * Matching is by `===`, so for an *array* subtree it is reference identity:
+ * `tree` has to be a node actually inside `root`, and an equal-looking tree
+ * built separately is left alone. That does not extend to leaves, where `===`
+ * is value equality — replacing `"x"` in `["+","x","x"]` rewrites both
+ * occurrences, not one.
  */
 export function replaceSubtree(root, tree, replacement) {
   if (root === tree) return deepClone(replacement);
@@ -127,10 +129,13 @@ export function applyAllTransformations(tree, transformations, depth = 5) {
         // operands it stepped over have to be spliced back around the rewritten
         // part, or the transformation silently deletes them.
         //
-        // Unreachable today: `_skipped`/`_skipped_before` come from
-        // `allow_extended_match`, which `js_match.rs` has not ported, so the
-        // matcher never sets them. Kept because the alternative to writing it
-        // now is a silent operand-dropping bug the day extended match lands.
+        // `_skipped` is live: `allow_extended_match` is handled on the JS side
+        // (`trees/flatten.ts`, which sets it in `extendedMatch`) rather than in
+        // `js_match.rs`. `_skipped_before` is not — `extendedMatch` never
+        // reports operands to the *left* separately — so the `addLeft` half is
+        // dead for now. Kept because the alternative to writing it when
+        // extended match starts reporting both is a silent operand-dropping
+        // bug.
         const skipped = m as {
           _skipped?: unknown[];
           _skipped_before?: unknown[];
@@ -146,9 +151,13 @@ export function applyAllTransformations(tree, transformations, depth = 5) {
           result = [pattern[0]].concat(addLeft, result, addRight);
         }
 
-        // Legacy folds both before and after the splice: the rewrite itself can
-        // produce numbers to combine, and so can putting the skipped operands
-        // back next to them.
+        // Legacy folds both before *and* after the splice; this folds only
+        // after. The pre-fold's only observable effect is on the `result[0]
+        // === pattern[0]` test above — a replacement that folds to a bare
+        // number is wrapped rather than spliced flat — and the fold below then
+        // combines the same operands either way. Left as one pass because a
+        // second `fromAst` round-trip per rewrite, per round, is the hot loop
+        // of `simplify`.
         if (params.evaluate_numbers) result = evaluateNumbers(result, params);
         return result;
       });

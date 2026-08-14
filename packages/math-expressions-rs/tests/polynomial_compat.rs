@@ -185,3 +185,30 @@ fn division_records_the_quotient_it_built() {
     );
     assert_eq!(poly::poly_to_json(&remainder), json!(2));
 }
+
+#[test]
+fn the_elimination_variable_does_not_depend_on_how_the_input_is_spelled() {
+    // `poly_lcm` eliminates by rejecting the basis elements led by its
+    // auxiliary variable, and a `Poly::Rec` is led by its *least* variable
+    // under the default order. The JS engine's `_t` sorts after every
+    // uppercase name (`"A" < "_t"` byte-wise), so a gcd in `A` used to come
+    // back still carrying the auxiliary variable and reduce to nothing.
+    for v in ["x", "A", "Z", "alpha"] {
+        assert_eq!(
+            read_pair_reduced(&format!("{v}^2-1"), &format!("{v}^2+2{v}+1")),
+            (
+                json!(["polynomial", v, [[0, -1], [1, 1]]]),
+                json!(["polynomial", v, [[0, 1], [1, 1]]])
+            ),
+            "reducing a rational expression in {v:?}"
+        );
+    }
+}
+
+/// `top/bottom` in lowest terms, both sides in their AST spelling.
+fn read_pair_reduced(top: &str, bottom: &str) -> (Value, Value) {
+    let top = poly::expression_to_polynomial(&parse(top)).expect("a polynomial");
+    let bottom = poly::expression_to_polynomial(&parse(bottom)).expect("a polynomial");
+    let (t, b) = poly::reduce_rational_expression(&top, &bottom).expect("a reduction");
+    (poly::poly_to_json(&t), poly::poly_to_json(&b))
+}

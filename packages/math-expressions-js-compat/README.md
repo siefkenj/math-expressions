@@ -19,7 +19,7 @@ me.fromText("x^2").derivative("x").toString(); // "2 x"
 
 > **Using this from DoenetML?** See
 > [`DOENET_INTEGRATION.md`](../../active-plans/DOENET_INTEGRATION.md) — the behavior changes,
-> the known blockers, and the two things we need from you.
+> the known blockers, and the one request still open (wasm32 stack safety).
 
 ## Alpha limitation: wasm handle lifetimes
 
@@ -69,8 +69,8 @@ npm test               # vitest run
 The suite is the legacy JS test corpus. It is **not expected to fully pass** yet:
 the Rust core is intentionally not byte-for-byte identical (clean-slate
 formatter, folded normalization passes) and some legacy areas are unported
-(polynomial/Groebner, MathML converters, richly-structured
-`get_assumptions`). Those specs still *run* and fail per-assertion. See
+(MathML converters, richly-structured `get_assumptions`). Those specs still
+*run* and fail per-assertion. See
 `../../active-plans/JS_TEST_COVERAGE_AUDIT.md` for the coverage ledger.
 
 **Known exclusion:** `spec/slow_check-symbolic-equality-numerical-errors.spec.ts`

@@ -39,3 +39,20 @@ fn bare_negative_zero_reads_as_plain_zero() {
     // `0/0` is still the indeterminate NaN, sign or no sign.
     assert_eq!(run("0/0"), r#"{"$":"NaN"}"#);
 }
+
+/// The indeterminate forms the `∞`/`NaN` cluster in `normalize::simplify`
+/// documents. Named there as the pin for that comment, so the two stay honest
+/// about which behaviour is current.
+#[test]
+fn indeterminate_forms_do_not_annihilate() {
+    assert_eq!(run("0*infinity"), r#"{"$":"NaN"}"#);
+    assert_eq!(run("0*(-infinity)"), r#"{"$":"NaN"}"#);
+    assert_eq!(run("0*(1/0)"), r#"{"$":"NaN"}"#);
+    assert_eq!(run("x*0*infinity"), r#"{"$":"NaN"}"#);
+    // `0^0` under the default strict `pow` policy; JS answers `1` here, and so
+    // does this engine with `constant_policy::pow_strict` cleared.
+    assert_eq!(run("0^0"), r#"{"$":"NaN"}"#);
+    // An ordinary zero product is still zero: nothing here is provably
+    // non-finite.
+    assert_eq!(run("0*x"), "0");
+}

@@ -92,14 +92,31 @@ pub fn polynomial_add(p: &Poly, q: &Poly) -> Poly {
         }
     }
 
-    // Everything cancelled, or only a term that is constant in `var` survived.
-    if sum.is_empty() {
+    finish(var, sum)
+}
+
+/// Assemble a term list into a [`Poly`], restoring the invariant the module doc
+/// states: everything cancelled is [`Poly::zero`], and a lone degree-0 term is
+/// its own coefficient rather than a one-term polynomial. Callers compare the
+/// returned AST with deep equality, so the two spellings are not
+/// interchangeable — `["polynomial","x",[[0,12]]]` is not `12`.
+fn finish(var: Expr, mut terms: Vec<(i64, Poly)>) -> Poly {
+    if terms.is_empty() {
         return Poly::zero();
     }
-    if sum.len() == 1 && sum[0].0 == 0 {
-        return sum.remove(0).1;
+    if terms.len() == 1 && terms[0].0 == 0 {
+        return terms.remove(0).1;
     }
-    Poly::Rec { var, terms: sum }
+    Poly::Rec { var, terms }
+}
+
+/// Is `p` a single term? Such a polynomial stays one term under multiplication,
+/// so raising it to a power costs nothing regardless of the exponent.
+fn is_monomial(p: &Poly) -> bool {
+    match p {
+        Poly::Coeff(_) => true,
+        Poly::Rec { terms, .. } => terms.len() <= 1 && terms.iter().all(|(_, c)| is_monomial(c)),
+    }
 }
 
 pub fn polynomial_neg(p: &Poly) -> Poly {
@@ -125,24 +142,24 @@ pub fn polynomial_mul(p: &Poly, q: &Poly) -> Poly {
         (Poly::Coeff(a), Poly::Rec { .. }) if !p.truthy() => return Poly::Coeff(a.clone()),
         (Poly::Rec { .. }, Poly::Coeff(b)) if !q.truthy() => return Poly::Coeff(b.clone()),
         (Poly::Coeff(_), Poly::Rec { var, terms }) => {
-            return Poly::Rec {
-                var: var.clone(),
-                terms: terms
+            return finish(
+                var.clone(),
+                terms
                     .iter()
                     .filter(|(_, c)| c.truthy())
                     .map(|(d, c)| (*d, polynomial_mul(p, c)))
                     .collect(),
-            }
+            )
         }
         (Poly::Rec { var, terms }, Poly::Coeff(_)) => {
-            return Poly::Rec {
-                var: var.clone(),
-                terms: terms
+            return finish(
+                var.clone(),
+                terms
                     .iter()
                     .filter(|(_, c)| c.truthy())
                     .map(|(d, c)| (*d, polynomial_mul(c, q)))
                     .collect(),
-            }
+            )
         }
         _ => {}
     }
@@ -176,17 +193,29 @@ pub fn polynomial_mul(p: &Poly, q: &Poly) -> Poly {
         }
     }
 
-    Poly::Rec { var, terms }
+    finish(var, terms)
 }
 
 /// `p^e` by binary exponentiation, or `None` when `e` is not a literal
-/// non-negative integer.
+/// non-negative integer, or when the expansion is refused as too large.
+///
+/// Raising a multi-term polynomial is a multinomial expansion — the same work
+/// [`normalize::expand`](crate::normalize::expand) does — and
+/// [`polynomial_mul`] is quadratic in the term count, so the cost grows about
+/// cubically in the exponent: `(x+1)^400` takes seconds. This is reachable from
+/// a Doenet answer box through `expression_to_polynomial`, so the exponent is
+/// held to the same `max_expand_power` budget `expand` uses. A *monomial* base
+/// is exempt: `x^1000` is one term however large the exponent, and refusing it
+/// would reject ordinary input.
 pub fn polynomial_pow(p: &Poly, e: &Poly) -> Option<Poly> {
     let Poly::Coeff(Expr::Num(n)) = e else {
         return None;
     };
     let v = n.to_f64();
     if !v.is_finite() || v < 0.0 || v.fract() != 0.0 || v > i64::MAX as f64 {
+        return None;
+    }
+    if v > crate::resource_limits::current().max_expand_power as f64 && !is_monomial(p) {
         return None;
     }
 

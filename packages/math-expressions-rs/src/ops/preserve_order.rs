@@ -225,20 +225,55 @@ fn spell_exponent(x: Expr) -> Expr {
 /// not count — legacy's `is_nonzero` returned a third "undefined" state there
 /// and fell through to `0`.
 ///
-/// Negations are peeled first. This pass deliberately preserves `Neg` wrappers
-/// that the canonical path removes, so matching only a bare `Const` let
-/// `0·(−∞)` annihilate to `0` — a wrong *number* on the `skip_ordering` path
-/// DoenetML's equality checking uses, which is the same failure shape
-/// `constructors::annihilate` exists to prevent. `−∞` is as non-finite as `∞`.
+/// The canonical `mul` decides this after `peel_nonzero_scaling` has already
+/// flattened the product and split every factor into a `(base, exponent)` pair,
+/// so `constructors::is_infinite_factor` only ever sees a bare leaf. This pass
+/// deliberately does neither, to keep the operand order it was asked to
+/// preserve, so it has to walk the wrappers itself: `0·(−∞)`, `0·(∞/2)`,
+/// `0·(∞+1)` and `0·(0^(-1))` are every bit as indeterminate as `0·∞`, and
+/// folding any of them to `0` is a wrong *number* on the `skip_ordering` path
+/// DoenetML's equality checking, `MathOperators` and `Parabola` all use —
+/// the failure shape `constructors::annihilate` exists to prevent.
 fn is_non_finite(e: &Expr) -> bool {
-    let mut e = e;
+    match e {
+        Expr::Const(MathConst::Inf | MathConst::NegInf | MathConst::NaN | MathConst::None) => true,
+        // Sign never makes a non-finite value finite.
+        Expr::Neg(inner) => is_non_finite(inner),
+        // A non-finite operand carries out through a sum or a product: `∞+x` is
+        // `∞` or `NaN`, `∞·x` is `±∞` or `NaN`, and all of those are non-finite.
+        Expr::Add(xs) | Expr::Mul(xs) => xs.iter().any(is_non_finite),
+        // `∞/x` is non-finite whatever `x` is, and `x/0` is the pole that makes
+        // `0·(1/0)` indeterminate. `x/∞` is `0`, so a non-finite *denominator*
+        // deliberately falls through as finite.
+        Expr::Div(num, den) => is_non_finite(num) || matches!(&**den, Expr::Num(n) if n.is_zero()),
+        // Mirrors `constructors::is_infinite_factor`: the exponent's sign
+        // decides both poles (`0^(-1)` is `±∞`) and their reciprocals
+        // (`∞^(-1)` is `0`, which annihilates like any other zero).
+        Expr::Pow(base, exp) => {
+            let negative_exponent = is_negative_literal(exp);
+            if matches!(&**base, Expr::Num(n) if n.is_zero()) {
+                return negative_exponent;
+            }
+            is_non_finite(base) && !negative_exponent
+        }
+        _ => false,
+    }
+}
+
+/// Is `e` a literal negative number? Written to see through the `Neg` wrappers
+/// this pass preserves, which the canonical layer has already folded into the
+/// number itself by the time `is_infinite_factor` runs.
+fn is_negative_literal(e: &Expr) -> bool {
+    let (mut e, mut negated) = (e, false);
     while let Expr::Neg(inner) = e {
+        negated = !negated;
         e = inner;
     }
-    matches!(
-        e,
-        Expr::Const(MathConst::Inf | MathConst::NegInf | MathConst::NaN)
-    )
+    match e {
+        Expr::Num(n) if negated => n.is_positive(),
+        Expr::Num(n) => n.is_negative(),
+        _ => false,
+    }
 }
 
 fn as_add(e: Expr) -> Result<Vec<Expr>, Expr> {
@@ -373,17 +408,25 @@ mod tests {
         assert_eq!(run("0*(1/0)"), r#"{"$":"NaN"}"#);
     }
 
-    /// A *negated* infinity blocks annihilation just as a bare one does. This
-    /// pass keeps the `Neg` wrapper the canonical path peels off, so matching
-    /// only `Expr::Const(…)` used to let these fold to `0` — a wrong number,
-    /// not a visible failure, on the `skip_ordering` path DoenetML's equality
-    /// checking uses.
+    /// A non-finite factor blocks annihilation however it is *spelled*. This
+    /// pass keeps the wrappers the canonical path peels off before it decides,
+    /// so matching only `Expr::Const(…)` let every one of these fold to `0` —
+    /// a wrong number, not a visible failure, on the `skip_ordering` path
+    /// DoenetML's equality checking uses.
     #[test]
-    fn a_negated_infinity_blocks_annihilation() {
+    fn a_wrapped_infinity_blocks_annihilation() {
         assert_eq!(run("0*(-infinity)"), r#"{"$":"NaN"}"#);
         assert_eq!(run("0*(-(-infinity))"), r#"{"$":"NaN"}"#);
         assert_eq!(run("x*0*(-infinity)"), r#"{"$":"NaN"}"#);
-        // Still annihilates when nothing is provably non-finite.
+        assert_eq!(run("0*infinity^2"), r#"{"$":"NaN"}"#);
+        assert_eq!(run("0*(infinity/2)"), r#"{"$":"NaN"}"#);
+        assert_eq!(run("0*(infinity+1)"), r#"{"$":"NaN"}"#);
+        assert_eq!(run("0*(0^(-1))"), r#"{"$":"NaN"}"#);
+        assert_eq!(run("x*0*infinity^3"), r#"{"$":"NaN"}"#);
+        // Still annihilates when nothing is provably non-finite: an unknown
+        // symbol, and the reciprocal of an infinity, which is a plain zero.
         assert_eq!(run("0*(-x)"), "0");
+        assert_eq!(run("0*infinity^(-1)"), "0");
+        assert_eq!(run("0*(1/infinity)"), "0");
     }
 }

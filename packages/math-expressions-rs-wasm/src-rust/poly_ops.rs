@@ -86,7 +86,14 @@ fn dispatch(op: &str, args: &[Value]) -> Result<Option<Value>, String> {
         "reduce" => poly::polys_to_json(&poly::reduce(&ps(0)?)),
         "reduce_ith" => {
             let i = arg(0)?.as_u64().ok_or("reduce_ith: index")? as usize;
-            poly::poly_to_json(&poly::reduce_ith(i, &ps(1)?))
+            let polys = ps(1)?;
+            // `reduce_ith` indexes the list directly, and this crate is built
+            // `panic = "abort"`, so an out-of-range index from JS would trap
+            // the module for the whole page rather than raise an error.
+            if i >= polys.len() {
+                return Ok(None);
+            }
+            poly::poly_to_json(&poly::reduce_ith(i, &polys))
         }
         "reduced_grobner" => poly::polys_to_json(&poly::reduced_grobner(&ps(0)?)),
 

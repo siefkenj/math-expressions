@@ -97,8 +97,12 @@ fn vector_scalar_mult(e: &Expr) -> Expr {
     // reproduces that in one pass: a walled-off candidate consumes nothing and
     // yields to the next.
     for (pos, kind) in candidates(factors, vector_kind) {
+        // `candidates` only yields positions where `vector_kind` matched, so
+        // this destructure always succeeds; skipping beats asserting it, as in
+        // the sibling `matrix_scalar_mult`. This crate compiles to wasm with
+        // `panic = "abort"`, where an `unreachable!` takes down the worker.
         let Expr::Seq(_, data) = &factors[pos] else {
-            unreachable!()
+            continue;
         };
         let (pre, data, post) = consume_scalars(&factors[..pos], data.clone(), &factors[pos + 1..]);
         if let Some(data) = data {
@@ -321,9 +325,13 @@ fn combine_vectors(n: usize, group: &[Expr]) -> Expr {
             Expr::Add(
                 group
                     .iter()
+                    // The group was formed from `n`-length containers only, so
+                    // every index resolves. Substituting zero if one somehow
+                    // did not keeps a malformed addend from aborting the
+                    // worker — the same reasoning as `combine_matrices`.
                     .map(|x| match x {
-                        Expr::Seq(_, xs) => xs[i].clone(),
-                        _ => unreachable!(),
+                        Expr::Seq(_, xs) => xs.get(i).cloned().unwrap_or_else(|| Expr::int(0)),
+                        _ => Expr::int(0),
                     })
                     .collect(),
             )

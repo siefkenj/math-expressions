@@ -1717,7 +1717,12 @@ const Context = {
   },
   _assumptionTexts: [],
   set_to_default() {
-    // A fresh handle is the reset: it carries the per-variable facts too.
+    // A fresh handle is the reset: it carries the per-variable facts too. The
+    // one being replaced is wasm-side memory that nothing else holds, and
+    // `clear_assumptions` delegates here, so a worker that clears between
+    // problems would otherwise leak one `Assumptions` per clear. `free?.()`
+    // because a test may have injected a stand-in module.
+    this._assumptionsHandleCache?.free?.();
     this._assumptionsHandle = new wasm.Assumptions();
     this._assumptionTexts = [];
   },
@@ -1774,6 +1779,18 @@ const Context = {
     return (this._assumptionsFacadeCache ??= makeAssumptionsFacade());
   },
 };
+
+// The lazy handle above is a cached wasm object, so it belongs to whichever
+// module minted it — see `onWasmModuleChange`. Without this, a host that calls
+// `setWasmModule` after anything has touched an assumption keeps handing the
+// old module's `Assumptions` the new module's `Expression`s, and every
+// `equals`/`solve_linear` fails with "expected instance of Expression". Drop
+// the texts too: they are the same facts in the other representation, and a
+// handle rebuilt from an empty store must not claim to hold them.
+onWasmModuleChange(() => {
+  Context._assumptionsHandleCache = undefined;
+  Context._assumptionTexts = [];
+});
 
 /**
  * Mirror an assumption into the wasm handle and the `simplify_with_assumptions`

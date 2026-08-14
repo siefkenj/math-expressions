@@ -254,10 +254,19 @@ export default class astToGuppy {
       operands = tree.slice(2);
     }
 
+    // No emitter for this operator — an unported function symbol, or `~`,
+    // which the legacy file dispatched on without ever adding a `"~"` entry.
+    // Falling through to the parenthesized default beats a `TypeError` out of
+    // `operators[operator](...)`.
+    const emit = operators[operator as string];
+    if (!emit) {
+      return paren(this.expression(tree));
+    }
+
     // Absolute value doesn't need any special parentheses handling, but its
     // operand is really an expression
     if (operator === "abs") {
-      return operators[operator](operands.map((v) => this.expression(v)));
+      return emit(operands.map((v) => this.expression(v)));
     } else if (isFunctionSymbol(operator)) {
       // A short or purely numeric factorial argument needs no grouping.
       if (
@@ -265,17 +274,13 @@ export default class astToGuppy {
         (String(operands[0]).length === 1 ||
           /^[0-9]*$/.test(String(operands[0])))
       )
-        return operators[operator](operands.map(String));
+        return emit(operands.map(String));
 
-      return operators[operator](operands.map((v) => this.factor(v)));
+      return emit(operands.map((v) => this.factor(v)));
     }
 
-    if (operator === "^") {
-      return operators[operator](operands.map((v) => this.factor(v)));
-    }
-
-    if (operator === "~") {
-      return operators[operator](operands.map((v) => this.factor(v)));
+    if (operator === "^" || operator === "~") {
+      return emit(operands.map((v) => this.factor(v)));
     }
 
     return paren(this.expression(tree));

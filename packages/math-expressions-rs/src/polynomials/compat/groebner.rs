@@ -106,10 +106,23 @@ pub fn reduced_grobner(polys: &[Poly]) -> Vec<Poly> {
     reduce(&basis)
 }
 
-/// The auxiliary elimination variable. `_t` is the name the JS engine used; it
-/// only has to be a variable the inputs do not carry.
+/// The auxiliary elimination variable used by [`poly_lcm`].
+///
+/// Two requirements, and the second is easy to miss. It has to be a variable
+/// the inputs cannot carry — and it has to sort *first* under
+/// [`cmp_var`](super::rep::cmp_var), because a `Poly::Rec` is written in its
+/// least variable and `poly_lcm` eliminates by rejecting the basis elements
+/// whose leading variable is this one. The JS engine spelled it `_t`, which
+/// fails the second requirement: the default order compares symbol names
+/// byte-wise, so `"A" < "_t"`, and `poly_gcd`/`reduce_rational_expression` then
+/// returned a basis element still carrying `_t` for *any* variable ordering
+/// before `_` — every uppercase name. `reduce_rational_expression` on
+/// `(A²−1)/(A²+2A+1)` answered `1/1` rather than `(A−1)/(A+1)`.
+///
+/// A leading control character sorts below every character a parser will accept
+/// in a name, which satisfies both requirements at once.
 fn aux_var() -> Expr {
-    Expr::sym("_t")
+    Expr::sym("\u{1}t")
 }
 
 /// The least common multiple of `f` and `g`.

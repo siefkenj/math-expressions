@@ -1,14 +1,19 @@
 // The `is_integer` / `is_real` / … predicates. Each takes an Expression (and an
 // optional assumptions source) and returns true / false / undefined, mapping to
 // the wasm `Assumptions` three-valued predicates.
-import wasm from "../_wasm";
+import wasm, { onWasmModuleChange } from "../_wasm";
 import Context from "../math-expressions";
 
 // Constructed lazily, like `Context._assumptionsHandle` and for the same
 // reason: a `new wasm.Assumptions()` evaluated in this module's body would
-// force the wasm load before a host had any chance to `setWasmModule`.
+// force the wasm load before a host had any chance to `setWasmModule`. And
+// dropped on a swap for the other reason a cached handle must be: it belongs to
+// the module that minted it.
 let emptyCache;
 const empty = () => (emptyCache ??= new wasm.Assumptions());
+onWasmModuleChange(() => {
+  emptyCache = undefined;
+});
 
 function handleFor(assumptions) {
   // No explicit source: consult the context's live global assumptions, so
