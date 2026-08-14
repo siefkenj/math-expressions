@@ -182,11 +182,13 @@ const entities: Record<string, string> = {
   "&#x03C1;": "\\rho",
   "\\u03C1;": "\\rho",
   "&#962;": "\\sigma",
-  // Legacy typo kept intentionally: the key should be `&sigmaf;`, but the
-  // bare `;` it degenerated to is unreachable (text content never equals `;`
-  // alone after the surrounding markup is stripped), so fixing it would be a
-  // behaviour change with no test to justify it.
-  ";": "\\sigma",
+  // Legacy carried a bare `";"` here — the remains of a `&sigmaf;` key that
+  // lost its head — with a note calling it unreachable because "text content
+  // never equals `;` alone after the surrounding markup is stripped". It does:
+  // `content()` matches `/^([^<]*)/`, so `<mo>;</mo>` yields exactly `";"`, and
+  // MathJax emits `<mo>;</mo>` for every semicolon separator. `f(x; y)`
+  // converted to `f ( x \sigma y )`. Spelled as the entity it was meant to be.
+  "&sigmaf;": "\\sigma",
   "&#x03C2;": "\\sigma",
   "\\u03C2;": "\\sigma",
   "&#963;": "\\sigma",

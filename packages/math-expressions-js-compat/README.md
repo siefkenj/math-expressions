@@ -69,7 +69,9 @@ npm test               # vitest run
 The suite is the legacy JS test corpus. It is **not expected to fully pass** yet:
 the Rust core is intentionally not byte-for-byte identical (clean-slate
 formatter, folded normalization passes) and some legacy areas are unported
-(MathML converters, richly-structured `get_assumptions`). Those specs still
+(richly-structured `get_assumptions`; the MathML converters are ported, but
+`Context.fromMml` is still `notImplemented` and `me.from` does not try MathML as
+its third fallback the way legacy's `create_from_multiple` did). Those specs still
 *run* and fail per-assertion. See
 `../../active-plans/JS_TEST_COVERAGE_AUDIT.md` for the coverage ledger.
 

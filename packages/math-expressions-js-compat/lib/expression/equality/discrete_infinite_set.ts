@@ -8,13 +8,11 @@
 import wasm from "../../_wasm";
 import Context from "../../math-expressions";
 import { get_tree } from "../../trees/util";
-import { tagNonFinite } from "../../converters/ast-json";
+import { astToJson } from "../../converters/ast-json";
 
 /** Expression-or-tree → a throwaway wasm handle the caller must `free()`. */
 function handle(value) {
-  return wasm.from_ast(
-    JSON.stringify(get_tree(value), (_k, v) => tagNonFinite(v)),
-  );
+  return wasm.from_ast(astToJson(get_tree(value)));
 }
 
 /**

@@ -20,8 +20,14 @@ function handleFor(assumptions) {
   // `is_real(me.fromText("x+y"))` sees `me.add_assumption(...)` state. The
   // original JS predicates defaulted to the global store this way; falling
   // back to an empty one made every no-argument query answer "unknown".
-  if (!assumptions) return Context.assumptions ?? empty();
-  // Our Context exposes its live handle as `.assumptions`.
+  // `Context.assumptions` is the *facade*, not the handle — it mirrors the
+  // predicate methods, so calling one on it works, and it is a lazily built
+  // object that is never nullish (hence no fallback here). Reaching through it
+  // to `_assumptionsHandle` would be the tidier symmetry with the branch below,
+  // but the facade is what the rest of the API hands out, so this keeps one
+  // answer to "what are the current assumptions".
+  if (!assumptions) return Context.assumptions;
+  // A facade passed in explicitly, whose live handle is what the caller means.
   if (assumptions._assumptionsHandle) return assumptions._assumptionsHandle;
   if (typeof assumptions.is_integer === "function") return assumptions; // a raw handle
   return empty();

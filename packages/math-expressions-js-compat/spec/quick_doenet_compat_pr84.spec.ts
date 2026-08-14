@@ -464,4 +464,19 @@ describe("review cycle 3 — legacy contracts that had quietly lapsed", () => {
       1, 4, 9,
     ]);
   });
+
+  it("does not translate a literal semicolon into sigma", () => {
+    // The entity table carried a bare `";"` key — the remains of `&sigmaf;` —
+    // with a note calling it unreachable. `content()` matches `/^([^<]*)/`, so
+    // `<mo>;</mo>` yields exactly `";"`, and MathJax emits that for every
+    // semicolon separator.
+    const mml = new me.converters.mmlToLatexObj();
+    expect(
+      mml.convert(
+        "<math><mi>f</mi><mo>(</mo><mi>x</mi><mo>;</mo><mi>y</mi><mo>)</mo></math>",
+      ),
+    ).not.toContain("\\sigma");
+    // The entity it was meant to be still maps.
+    expect(mml.convert("<math><mi>&sigmaf;</mi></math>")).toContain("\\sigma");
+  });
 });

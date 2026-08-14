@@ -239,8 +239,10 @@ const COMPONENT_CONTAINERS = new Set([
 /** The Context (`me`) shape, used for the back-reference on each Expression. */
 type Ctx = typeof Context;
 
-// Legacy `.equals` options are snake_case; the wasm `equals_with_options` takes
-// camelCase JSON keys. Map the ones the Rust side understands; drop the rest.
+// Legacy `.equals` options are snake_case; the wasm entry points that read them
+// — `Assumptions#equals_expressions` and `Expression#structural_equality_with_options`
+// — take camelCase JSON keys. Map the ones the Rust side understands; drop the
+// rest.
 const EQ_OPTION_KEYS: Record<string, string> = {
   relative_tolerance: "relativeTolerance",
   absolute_tolerance: "absoluteTolerance",
