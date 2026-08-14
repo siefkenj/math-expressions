@@ -6,7 +6,9 @@ import { astToJson } from "./ast-json";
 import { renderOptions } from "./render-options";
 
 export default class AstToLatex {
-  constructor(params) {
+  /** Emitter options, forwarded through `renderOptions`. */
+  params: Record<string, unknown>;
+  constructor(params?: Record<string, unknown>) {
     this.params = params || {};
   }
   convert(ast) {

@@ -416,9 +416,9 @@ class Expression {
    * which is the same spelling `subscripts_to_strings` produces and the one
    * legacy's own `include_subscripts` pass builds.
    */
-  variables(include_subscripts) {
+  variables(include_subscripts?: boolean) {
     const source = include_subscripts
-      ? this._w.subscripts_to_strings()
+      ? this._w.subscripts_to_strings(false)
       : this._w;
     try {
       return source.variables();
@@ -438,7 +438,7 @@ class Expression {
   }
 
   // ---- equality ----
-  equals(other, options) {
+  equals(other, options?) {
     const o = toExpr(other, this.context);
     // Routed through the context's assumption store, not `this._w.equals`.
     // Discrete infinite sets are the one stage of the chain that needs it — the
@@ -921,7 +921,7 @@ class Expression {
       // `Infinity*i` and `Infinity*i + Infinity` are complex NaN
       // (`{re:NaN, im:NaN}`), matching mathjs. A real non-finite value stays as
       // it is (`Infinity`, or scalar `NaN` for `0/0` / `Infinity - Infinity`).
-      if (!Number.isFinite(v) && treeHasImaginary(e.tree)) {
+      if (!Number.isFinite(v) && treeHasImaginary(e.tree as Tree)) {
         return math.complex(NaN, NaN);
       }
       return v;
@@ -932,7 +932,7 @@ class Expression {
     // simplification (`\det[[1,2],[3,4]]` → −2), so retry once via the simplified
     // form — but *only* for those, since simplification would also absorb an
     // undefined leaf (`0·＿` → `0`) and wrongly turn a `null` into a number.
-    if (treeHasMatrixReduction(e.tree)) {
+    if (treeHasMatrixReduction(e.tree as Tree)) {
       const s = e.simplify();
       const sv = s._w.evaluate_to_constant();
       if (sv !== undefined) return sv;
@@ -961,8 +961,8 @@ class Expression {
     // be a number — a matrix, a leftover unit — is NaN.
     const freeVars = e.variables().filter((n) => !UNIT_NAMES.has(String(n)));
     if (freeVars.length > 0) return null;
-    if (treeHasBareBlank(e.tree)) return NaN;
-    if (treeHasBlank(e.tree)) return null;
+    if (treeHasBareBlank(e.tree as Tree)) return NaN;
+    if (treeHasBlank(e.tree as Tree)) return null;
     return NaN;
   }
   evaluate_to_complex() {
@@ -1169,7 +1169,7 @@ class Expression {
 // would never run. Feature-detecting keeps `using expr = me.fromText(…)` working
 // where it is supported and simply unavailable where it is not.
 if (typeof Symbol.dispose === "symbol") {
-  (Expression.prototype as Record<symbol, unknown>)[Symbol.dispose] = function (
+  (Expression.prototype as unknown as Record<symbol, unknown>)[Symbol.dispose] = function (
     this: Expression,
   ) {
     this.free();
@@ -1234,7 +1234,7 @@ for (const name of [
   "toMathjs",
   "finite_field_evaluate",
 ]) {
-  (Expression.prototype as Record<string, unknown>)[name] =
+  (Expression.prototype as unknown as Record<string, unknown>)[name] =
     notImplemented(name);
 }
 
@@ -1253,7 +1253,7 @@ for (const name of [
 // (`assumptions::expand::expand_relations`) — only the public binding was
 // missing.
 for (const name of ["applyAllTransformations"]) {
-  (Expression.prototype as Record<string, unknown>)[name] = function (
+  (Expression.prototype as unknown as Record<string, unknown>)[name] = function (
     this: Expression,
   ) {
     return this;

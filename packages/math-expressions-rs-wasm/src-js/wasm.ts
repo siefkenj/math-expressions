@@ -10,6 +10,14 @@
  * declares the structural surface the bindings actually rely on. Nothing here
  * imports the generated glue, keeping the package type-checkable and
  * installable without first building the wasm.
+ *
+ * **Scope of the claim.** It covers what `lib/**` calls, and that much is
+ * enforced: `math-expressions-js-compat`'s `npm run typecheck` type-checks
+ * `lib/**` against these declarations and CI gates on it. It is not a mirror of
+ * the whole generated surface — plenty of wasm-bindgen exports are absent
+ * because nothing calls them — and it says nothing about `spec/**`, which is
+ * not type-checked. Before this was enforced the file had drifted ten members
+ * and one arity behind its own consumers, silently.
  */
 
 /** A parsed Rust/WASM `Expression` handle — the full method surface. */
@@ -32,6 +40,13 @@ export interface WasmExpression {
   /** Structural comparison against `key` under a criterion JSON (e.g.
    * `"sameStructure"`, which routes to Rust `equals_syntactic`). */
   structural_equality(key: WasmExpression, comparisonJson: string): boolean;
+  /** {@link structural_equality} under the `.equals` option object (tolerances,
+   * `nSignErrorsMatched`, …) rather than the criterion alone. */
+  structural_equality_with_options(
+    key: WasmExpression,
+    comparisonJson: string,
+    optionsJson: string,
+  ): boolean;
   /** Structure-only check (no key): is this expression in the form named by the
    * criterion JSON? Returns a JSON string `{"ok":boolean,"why":string|null}`; an
    * unknown criterion yields `{"ok":false,"why":"unknown structural comparison"}`. */
@@ -65,11 +80,25 @@ export interface WasmExpression {
   evaluate_numbers(): WasmExpression;
   /** The `skip_ordering` fold: `1+x+2` stays `1+x+2`. */
   evaluate_numbers_preserve_order(): WasmExpression;
+  /** Fold numbers *and* applied functions (`floor(55.33)` → `55`). */
+  evaluate_numbers_evaluate_functions(): WasmExpression;
+  /** Fold to floats rather than exact rationals, capped at `max_digits`. */
+  evaluate_numbers_to_floats(
+    skipOrdering: boolean,
+    evaluateFunctions: boolean,
+    maxDigits: number,
+  ): WasmExpression;
   collect_like_terms_factors(): WasmExpression;
   simplify_ratios(): WasmExpression;
   reduce_rational(): WasmExpression;
   together(): WasmExpression;
   normalize_function_names(): WasmExpression;
+  /** Canonicalize applied-function spellings (`sin^2 x` → `(sin x)^2`). */
+  normalize_applied_functions(): WasmExpression;
+  /** Rewrite `a + (-b)` as `a - b` and friends. */
+  normalize_negative_numbers(): WasmExpression;
+  /** Split a chained relation (`a < b < c`) into its conjunction. */
+  expand_relations(): WasmExpression;
   constants_to_floats(): WasmExpression;
 
   tuples_to_vectors(): WasmExpression;
@@ -77,7 +106,9 @@ export interface WasmExpression {
   to_intervals(): WasmExpression;
   /** Move `+`/scalar-`*` inside vector & matrix containers (the grading shape pass). */
   perform_vector_matrix_additions_scalar_multiplications(): WasmExpression;
-  subscripts_to_strings(): WasmExpression;
+  /** `force` flattens even subscripts that would round-trip, which is what
+   * `variables(include_subscripts)` needs. */
+  subscripts_to_strings(force: boolean): WasmExpression;
   strings_to_subscripts(): WasmExpression;
   copy(): WasmExpression;
 
@@ -99,6 +130,9 @@ export interface WasmExpression {
   /** One call, many points of a single variable; `NaN` where there is no finite real value. */
   evaluate_many(variable: string, values: Float64Array): Float64Array;
   substitute_var(variable: string, value: WasmExpression): WasmExpression;
+  /** Simultaneous substitution from a JSON `{name: tree}` map — not a sequence
+   * of `substitute_var` calls, so bindings cannot capture each other. */
+  substitute_map(mapJson: string): WasmExpression;
 
   /** Operand path into the tree spelling, 0-based; `undefined` if out of range. */
   get_component(path: Uint32Array): WasmExpression | undefined;
@@ -145,6 +179,12 @@ export interface WasmAssumptions {
   is_positive(expr: WasmExpression): boolean | undefined;
   is_negative(expr: WasmExpression): boolean | undefined;
   simplify(expr: WasmExpression): WasmExpression;
+  /** `.equals` evaluated under these assumptions. */
+  equals_expressions(
+    a: WasmExpression,
+    b: WasmExpression,
+    optionsJson?: string | null,
+  ): boolean;
   /** `undefined` when `expr` is not linear in `variable`, or when the sign an
    * inequality's direction depends on cannot be settled from these facts. */
   solve_linear(
@@ -166,6 +206,17 @@ export interface WasmModule {
   parse_latex_with_options(source: string, optionsJson: string): WasmExpression;
   from_ast(treeJson: string): WasmExpression;
   from_serialized(json: string): WasmExpression;
+  /** A numeric literal, built without a JSON round trip. Non-finite input
+   * builds the same `Const` spelling the JSON path does. */
+  from_number(value: number): WasmExpression;
+  /** `{offsets + k·periods : k}` over an index range; `undefined` if the
+   * arguments do not describe one. */
+  discrete_infinite_set(
+    offsets: WasmExpression,
+    periods: WasmExpression,
+    minIndexJson?: string | null,
+    maxIndexJson?: string | null,
+  ): WasmExpression | undefined;
   match_template(treeJson: string, patternJson: string): string | undefined;
   match_template_with_options(
     treeJson: string,
