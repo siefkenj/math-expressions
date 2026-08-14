@@ -82,16 +82,29 @@ fn eval_complex_inner(e: &Expr, env: &Env) -> Option<Complex64> {
         Expr::Pow(b, e) => {
             let base = eval_complex(b, env)?;
             let exp = eval_complex(e, env)?;
-            // Real base with a small integer exponent: exact real powi —
-            // `powc` goes through exp/ln and yields 3² = 9.000000000000002,
-            // which mathjs (real pow) does not. Matches mathjs fidelity and
-            // removes float noise from the sampler.
-            if base.im == 0.0
-                && exp.im == 0.0
-                && exp.re.fract() == 0.0
-                && exp.re.abs() <= i32::MAX as f64
-            {
-                Complex64::new(base.re.powi(exp.re as i32), 0.0)
+            // An integer exponent is repeated multiplication, so compute it
+            // that way rather than through `powc`'s exp/ln round trip.
+            //
+            // For a *real* base that is mathjs fidelity: `powc` yields
+            // 3² = 9.000000000000002, which mathjs (real pow) does not.
+            //
+            // For a base off the real axis it is a soundness matter. `powc`
+            // returns i² = -1 + 1.2246e-16i and i⁴ = 1 - 2.449e-16i, and the
+            // assumptions layer classifies a constant by testing `im != 0.0`
+            // exactly (`assumptions::facts::Facts::of_constant`) — so `i^2`
+            // came back not-real, not-integer, not-negative, while `simplify`
+            // folded the same expression to `-1`. Killing the residue here
+            // fixes it at the source; the alternative, an epsilon in
+            // `of_constant`, would let a genuinely tiny imaginary part claim
+            // to be real, which is the unsound direction. Exponentiation by
+            // squaring over exact complex multiplication introduces no residue
+            // of its own: every Gaussian-integer power lands exactly.
+            if exp.im == 0.0 && exp.re.fract() == 0.0 && exp.re.abs() <= i32::MAX as f64 {
+                if base.im == 0.0 {
+                    Complex64::new(base.re.powi(exp.re as i32), 0.0)
+                } else {
+                    base.powi(exp.re as i32)
+                }
             } else {
                 base.powc(exp)
             }

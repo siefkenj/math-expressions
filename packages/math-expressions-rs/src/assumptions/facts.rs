@@ -167,9 +167,17 @@ impl Facts {
     /// every definite value; where the two branches give *conflicting* definite
     /// answers the premises are contradictory, and the sound three-valued
     /// answer under an inconsistent premise is to decline (unknown) rather than
-    /// pick a side. That is the one place this diverges from the legacy engine,
-    /// which returns the first branch's answer (`left || right`) and so reports
-    /// `is_real(x)` true for `x ∈ R and x ∉ R`; we report unknown.
+    /// pick a side. The legacy engine returns the first branch's answer
+    /// (`left || right`) and so reports `is_real(x)` true for
+    /// `x ∈ R and x ∉ R`; we report unknown.
+    ///
+    /// That is one of **two** places the answers differ on
+    /// `slow_assumptions.spec.ts` → `logical combinations` (this one is its
+    /// spec:7357 assertion). The other is `combine::mul`, which never carries a
+    /// `real: Some(false)` operand through a product, so `is_positive(x·y)`
+    /// with `x ∉ R` comes back unknown where legacy says false — see
+    /// `active-plans/COMPAT_TEST_FAILURE_SUMMARY.md`. Both leave this engine
+    /// *incomplete* relative to legacy, never unsound.
     pub(super) fn and_meet(&self, other: &Facts) -> Facts {
         fn meet(a: MaybeBool, b: MaybeBool) -> MaybeBool {
             match (a, b) {

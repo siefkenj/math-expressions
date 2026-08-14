@@ -47,7 +47,7 @@ Rust tests live in `packages/math-expressions-rs/tests/` (+ inline `src/`).
 | `quick_mml-to-latex` | 1 | none | ⛔ |
 | `slow_math-expressions` | ~900 pairs + 14 | `equality_corpus.rs` (824-pair `equality-corpus.json`) + `equality.rs` (22 hand) | ✅ |
 | `slow_simplify` | 74 (474 expects) | `simplify_corpus.rs` (342) + `norm.rs` / `display.rs` / `expand.rs` / `matrix.rs` | ✅ |
-| `slow_assumptions` | 44 (420 expects) | `assumptions_corpus.rs` (546) + `assumptions.rs` + `doenet_utils.rs` | ✅ |
+| `slow_assumptions` | **845 run** (45 `it(` sites, 420 literal expects — most tests are generated from tables inside a loop, so the source count badly understates it) | `assumptions_corpus.rs` (546) + `assumptions.rs` + `doenet_utils.rs` | ✅ |
 | `slow_matrix` | 12 (~30) | `matrix.rs` (31) | ✅ |
 | `slow_polynomial` | 23 | `polynomial_compat.rs` (12) over `polynomials/compat/`, exported through `lib/polynomial/polynomial.ts` | ✅ |
 | `slow_rational` | 2 | `reduce_rational.rs` (5) | ✅ |

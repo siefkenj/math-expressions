@@ -4,11 +4,15 @@ Snapshot of `packages/math-expressions-js-compat` (`npx vitest run`) on branch
 `doenet`, after rebuilding `vendor/wasm` (`bash build-wasm.sh`) so results reflect
 current Rust source.
 
-**Current totals (2026-08-11, at `7082f8a` + uncommitted working-tree work):
-1 failed / 6316 passed / 6329 total** (12 skipped, 2 todo). The one remaining
-failure is `slow_assumptions` → `logical combinations`, a **deliberate soundness
-divergence** (see below) — every other spec passes.
+**Current totals (2026-08-13, at `67e99ee` + working-tree work, re-measured):
+1 failed / 6337 passed / 6348 total** (10 skipped, 0 todo). The one remaining
+failure is `slow_assumptions` → `logical combinations`, where **legacy commits
+to answers that are mathematically false and this engine declines to** (see
+below) — every other spec passes.
 Previous snapshots: 380, 162, 97, 83, 82, 61, 55, 54, 46, 43, 38, 20, 16, 12, 11, 7.
+(The dated 2026-08-11 line this replaces read `1 failed / 6316 passed / 6329
+total`, 12 skipped and 2 todo; that was a historical snapshot at `7082f8a`, and
+the suite has grown tests since.)
 
 Both `*-numerical-errors` files are at **zero**, and so are `slow_simplify` and
 `slow_rational`.
@@ -47,7 +51,7 @@ test to the first assertion that fails hides everything behind it.
 
 | count | spec file                                       | root cause / category                                                                    |
 | ----: | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
-|     1 | `slow_assumptions`                              | one test, `logical combinations` — a deliberate soundness divergence, see below          |
+|     1 | `slow_assumptions`                              | one test, `logical combinations` — legacy answers unsoundly where we decline, see below   |
 
 The six other failures were feature gaps, now closed (see "Feature gaps
 closed" below): `quick_trees` (`allow_extended_match`, graceful invalid match
@@ -122,12 +126,13 @@ anywhere neither sign rule could see it. And the cost table at
 while the unconditional rule preempted it and distributed. Both are now correct
 and covered.
 
-### `slow_assumptions` — 4 of 5 fixed, 1 a deliberate soundness divergence
+### `slow_assumptions` — 4 of 5 fixed, 1 where legacy answers unsoundly
 
 The five test *names* here were hiding **52** failing assertions (each `it`
 aborts at its first failure; re-run with `expect` → `expect.soft` to see them
-all). Four of the five tests are now green; the plan and the fix are written up
-in `SLOW_ASSUMPTIONS_PLAN.md`. In brief:
+all). Four of the five tests are now green. There is no separate plan document
+for this — the writeup is the list below, and the tests are
+`packages/math-expressions-rs/tests/assumptions_sound_reasoning.rs`. In brief:
 
 - `is integer / via assumptions` (**fixed**) — the text printer lost negation
   scope on the assumption round trip: `paren_if_spaced` tested
@@ -143,20 +148,42 @@ in `SLOW_ASSUMPTIONS_PLAN.md`. In brief:
   chaining, disjunctions) instead of the flat one, and walks its boolean
   structure with sound semantics (`and` = meet, `or` = join). See
   `src/assumptions/infer/vars.rs` and `assumptions_sound_reasoning.rs`.
-- `logical combinations` (**still failing — deliberate**). 18 of its 24 failing
-  assertions were fixed by the change above. The other 6 need reasoning where
-  **legacy is partly unsound**, and we decline to reproduce it:
-  - `x ∈ R and x ∉ R ⟹ is_real(x)` — legacy returns `true` (first conjunct
-    wins). No `x` satisfies both; we answer `undefined`.
-  - `x ∈ C, x ∉ R, y ∈ R ⟹ is_real/nonpositive/nonnegative(xy)` — legacy returns
-    `false` for all, but `y` may be `0`, making `xy = 0`, which *is*
-    real/nonpositive/nonnegative. Genuinely unsound; we answer `undefined`.
-  - `is_positive/negative(xy)` in the same block — here `false` *is* sound (a
-    non-real-or-zero value is never positive/negative), but our engine returns
-    `undefined` because it does not reason by cases. This is incompleteness, not
-    a divergence; closing it needs a sound `Mul` rule and would still leave the
-    three genuine divergences above, so the test stays red either way. Left
-    unfudged rather than assert an incomplete value as intended.
+- `logical combinations` (**still failing — accepted**). 18 of its 24 failing
+  assertions were fixed by the change above. **6 remain**, measured by
+  converting that one `it`'s `expect` to `expect.soft` (revert the scaffolding
+  afterwards): spec lines **7357, 7415, 7417, 7418, 7419, 7420**. Note the
+  direction — on every one of them **legacy commits to an answer that is
+  mathematically false, or that we simply cannot yet prove, and this engine
+  declines instead**. It is *incomplete* here, never unsound. Two unrelated
+  root causes:
+  - **(a) contradictory premises** (1 assertion, spec:7357).
+    `x ∈ R and x ∉ R ⟹ is_real(x)` — legacy returns `true`, because its `and`
+    is `left || right` and the first conjunct wins. No `x` satisfies both
+    premises, so `true` is not entailed by anything; `Facts::and_meet`
+    (`src/assumptions/facts.rs`) meets the two definite answers to `None` and
+    we return `undefined`.
+  - **(b) non-realness does not propagate through an operator** (5 assertions,
+    spec:7415 and 7417–7420). Under `x ∈ C, x ∉ R, y ∈ R`:
+    - `is_real/nonpositive/nonnegative(xy)` — legacy returns `false`, which is
+      **wrong**: `y = 0` is a model of the premises, and there `xy = 0`, which
+      *is* real, nonpositive and nonnegative. We answer `undefined`.
+    - `is_positive/negative(xy)` — here `false` *is* sound (a value that is
+      non-real-or-zero is never positive or negative), and we still answer
+      `undefined`, because `combine::mul` in
+      `src/assumptions/infer/combine/mod.rs` never carries a `real: Some(false)`
+      operand through the product and so cannot reason by cases. Pure
+      incompleteness on our side.
+
+    **Deliberately not fixed.** The rule that would close the sound half —
+    propagating non-realness through `+`/`*`/`^` — turns facts that are
+    `None` today into `Some(false)`, and `simplify`'s rewrites are gated on
+    exactly those facts. More definite answers means different rewrites, which
+    means different grading on DoenetML's answer path. That is not a trade
+    worth two assertions in a test that stays red either way (the three
+    genuinely-unsound legacy answers above are unreachable without adopting
+    legacy's unsoundness). Recorded as a known gap in
+    `ASSUMPTIONS_ENGINE_PLAN.md` § "Accepted divergence"; left unfudged rather
+    than asserted as intended behavior.
 
 ### Feature gaps closed
 
@@ -250,9 +277,14 @@ under `"number"`).
 ## Highest-leverage remaining item
 
 **`slow_assumptions` → `logical combinations`** is the only failure left, and it
-is a **deliberate soundness divergence**, not a bucket of work — reproducing
-legacy's answers there means encoding unsound reasoning (see that section).
-Every other spec passes.
+is **accepted, not a bucket of work**. Of its six failing assertions, three want
+answers that are mathematically false (`y = 0` is a model, so `xy` really can be
+real/nonpositive/nonnegative) and a fourth is legacy's first-conjunct-wins `and`
+answering under a contradiction — reproducing any of them means encoding unsound
+reasoning. The remaining two are a completeness gap we decline on purpose,
+because closing it would move `simplify` and therefore grading (see that
+section). This engine is *incomplete* on that test, never unsound. Every other
+spec passes.
 
 Two things worth doing that no failing test covers:
 

@@ -96,8 +96,16 @@ npm run typecheck      # tsc over lib/ and over the published declarations
 ```
 
 The suite is the legacy JS test corpus, and it very nearly passes: 6,348 tests,
-6,337 passing, 10 skipped, and one failure — `slow_assumptions.spec.ts`, a
-documented assumptions-soundness divergence. Some legacy areas remain unported
+6,337 passing, 10 skipped, and one failure — `slow_assumptions.spec.ts` →
+`logical combinations`. On that test **legacy commits to answers this engine
+declines to give**; the engine is incomplete there, never unsound. Vitest aborts
+an `it` at its first failure, so the single failing test name hides **six**
+failing assertions (spec lines 7357, 7415, 7417, 7418, 7419, 7420 — count them
+by converting that `it`'s `expect` to `expect.soft`), from **two** unrelated
+root causes: `Facts::and_meet` declining under contradictory premises where
+legacy takes `left || right`, and non-realness never propagating through
+`+`/`*`/`^` in `assumptions/infer/combine/mod.rs`. Both are written up in
+`../../active-plans/COMPAT_TEST_FAILURE_SUMMARY.md`. Some legacy areas remain unported
 (richly-structured `get_assumptions`; the MathML converters are ported, but
 `Context.fromMml` is still `notImplemented` and `me.from` does not try MathML as
 its third fallback the way legacy's `create_from_multiple` did). See

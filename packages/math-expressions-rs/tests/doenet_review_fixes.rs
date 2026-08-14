@@ -7,7 +7,10 @@
 //! student sees a confident answer and nothing logs. The two cost tests exist
 //! because student input is adversarial by construction.
 
-use math_expressions::{simplify, Expr, MathConst, TextToAst};
+use math_expressions::{
+    is_integer, is_negative, is_nonnegative, is_nonpositive, is_positive, is_real, simplify,
+    Assumptions, Expr, MathConst, TextToAst,
+};
 use std::time::Instant;
 
 fn p(s: &str) -> Expr {
@@ -557,4 +560,60 @@ fn a_float_valued_one_is_still_the_multiplicative_identity() {
         tree(&simplify(&js(r#"["*",0.5,3,"x"]"#))),
         r#"["*",1.5,"x"]"#
     );
+}
+
+/// An integer power of an imaginary number is a *real* number, and the
+/// assumptions layer said it was not.
+///
+/// `eval_complex` fast-pathed to an exact `powi` only when the base was on the
+/// real axis; an imaginary base fell through to `powc`, which goes via
+/// `exp`/`ln` and returns `i² = -1 + 1.2246e-16i`. `Facts::of_constant` tests
+/// `im != 0.0` *exactly*, so that residue classified `-1` as a genuine complex
+/// value — and `Facts::normalize` then forced `integer`, `negative`, `nonneg`,
+/// `positive`, `nonpos` all to `false` behind it. So `is_real(i^2)` was false
+/// while `simplify(i^2)` was `-1`: the engine contradicting itself on the
+/// public API. The legacy JS library answered `true`.
+#[test]
+fn integer_powers_of_an_imaginary_base_are_real() {
+    let a = Assumptions::default();
+    let re = |s: &str| is_real(&p(s), &a);
+
+    // Negative real values: `i^2 = -1`, `(2i)^2 = -4`.
+    for s in ["i*i", "i^2", "i^(-2)", "(2i)^2", "sqrt(-1)^2", "(1+i)^2*i"] {
+        let e = p(s);
+        assert_eq!(is_real(&e, &a), Some(true), "{s} is real");
+        assert_eq!(is_negative(&e, &a), Some(true), "{s} is negative");
+        assert_eq!(is_nonpositive(&e, &a), Some(true), "{s} is nonpositive");
+        assert_eq!(is_positive(&e, &a), Some(false), "{s} is not positive");
+        assert_eq!(
+            is_nonnegative(&e, &a),
+            Some(false),
+            "{s} is not nonnegative"
+        );
+    }
+    assert_eq!(
+        is_integer(&p("i^2"), &a),
+        Some(true),
+        "i^2 is the integer -1"
+    );
+    assert_eq!(is_integer(&p("(2i)^2"), &a), Some(true), "(2i)^2 is -4");
+
+    // And the positive half of the cycle.
+    assert_eq!(re("i^4"), Some(true));
+    assert_eq!(is_positive(&p("i^4"), &a), Some(true), "i^4 is 1");
+    assert_eq!(is_integer(&p("i^4"), &a), Some(true));
+
+    // The direction that must *not* move: a value genuinely off the real axis
+    // still answers not-real, however small its imaginary part. Snapping the
+    // residue at its source rather than putting an epsilon in `of_constant` is
+    // what keeps these honest.
+    for s in ["i", "i^3", "(1+i)^2", "2i", "i*10^(-300)", "1+i*10^(-300)"] {
+        assert_eq!(is_real(&p(s), &a), Some(false), "{s} is not real");
+        assert_eq!(is_integer(&p(s), &a), Some(false), "{s} is not an integer");
+    }
+
+    // The value the sampler computes is the value `simplify` folds to.
+    assert_eq!(tree(&simplify(&p("i^2"))), "-1");
+    assert_eq!(tree(&simplify(&p("(2i)^2"))), "-4");
+    assert_eq!(tree(&simplify(&p("i^4"))), "1");
 }
