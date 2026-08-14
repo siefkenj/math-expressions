@@ -89,7 +89,10 @@ fn product(factors: Vec<Expr>) -> Expr {
     let mut out = fold_runs(flatten(factors, as_mul), Number::mul);
     // A literal zero annihilates the whole product regardless of adjacency
     // (`x·0·y` → `0`), except against a factor that is provably non-finite,
-    // where `0·∞` is indeterminate. Same rule as the canonical `mul`.
+    // where `0·∞` is indeterminate. The canonical `mul` decides this over
+    // `(base, exp)` pairs (`is_infinite_factor`, reached through
+    // `peel_nonzero_scaling`); this pass keeps trees unflattened and un-peeled,
+    // so it has to look through the wrappers itself — see `is_non_finite`.
     if out.iter().any(|f| matches!(f, Expr::Num(n) if n.is_zero())) {
         return if out.iter().any(is_non_finite) {
             Expr::Const(MathConst::NaN)
@@ -221,7 +224,17 @@ fn spell_exponent(x: Expr) -> Expr {
 /// annihilation. Finiteness that is merely unknown (a bare symbol, `1/x`) does
 /// not count — legacy's `is_nonzero` returned a third "undefined" state there
 /// and fell through to `0`.
+///
+/// Negations are peeled first. This pass deliberately preserves `Neg` wrappers
+/// that the canonical path removes, so matching only a bare `Const` let
+/// `0·(−∞)` annihilate to `0` — a wrong *number* on the `skip_ordering` path
+/// DoenetML's equality checking uses, which is the same failure shape
+/// `constructors::annihilate` exists to prevent. `−∞` is as non-finite as `∞`.
 fn is_non_finite(e: &Expr) -> bool {
+    let mut e = e;
+    while let Expr::Neg(inner) = e {
+        e = inner;
+    }
     matches!(
         e,
         Expr::Const(MathConst::Inf | MathConst::NegInf | MathConst::NaN)
@@ -358,5 +371,19 @@ mod tests {
         assert_eq!(run("1/0+x"), r#"["+",{"$":"Inf"},"x"]"#);
         assert_eq!(run("0/0+x"), r#"["+",{"$":"NaN"},"x"]"#);
         assert_eq!(run("0*(1/0)"), r#"{"$":"NaN"}"#);
+    }
+
+    /// A *negated* infinity blocks annihilation just as a bare one does. This
+    /// pass keeps the `Neg` wrapper the canonical path peels off, so matching
+    /// only `Expr::Const(…)` used to let these fold to `0` — a wrong number,
+    /// not a visible failure, on the `skip_ordering` path DoenetML's equality
+    /// checking uses.
+    #[test]
+    fn a_negated_infinity_blocks_annihilation() {
+        assert_eq!(run("0*(-infinity)"), r#"{"$":"NaN"}"#);
+        assert_eq!(run("0*(-(-infinity))"), r#"{"$":"NaN"}"#);
+        assert_eq!(run("x*0*(-infinity)"), r#"{"$":"NaN"}"#);
+        // Still annihilates when nothing is provably non-finite.
+        assert_eq!(run("0*(-x)"), "0");
     }
 }

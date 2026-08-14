@@ -121,7 +121,16 @@ pub(super) fn equals_numerical(a: &Expr, b: &Expr, opts: &EqOptions) -> bool {
 
     let scale = BINDING_SCALES[0];
     for _ in 0..(10 * NUMBER_TRIES) {
-        match find_region(a, b, &vars, scale, &mut rng, opts, fuzzy.as_ref(), &integer_vars) {
+        match find_region(
+            a,
+            b,
+            &vars,
+            scale,
+            &mut rng,
+            opts,
+            fuzzy.as_ref(),
+            &integer_vars,
+        ) {
             Region::Equal => return true,
             Region::Unequal => {
                 num_unequal += 1;
@@ -146,8 +155,9 @@ enum Region {
 /// `MINIMUM_MATCHES` neighborhood points are usable and agree; `Unequal` if the
 /// base or any neighborhood point disagrees; `Skip` if too few points are
 /// usable.
-#[allow(clippy::too_many_arguments)] // a private sampler helper; the args are
-// the point parameters, not distinct concerns worth a struct.
+// A private sampler helper; the arguments are the point parameters, not
+// distinct concerns worth grouping into a struct.
+#[allow(clippy::too_many_arguments)]
 fn find_region(
     a: &Expr,
     b: &Expr,
@@ -183,7 +193,14 @@ fn find_region(
 
     let mut finite_tries = 0;
     for _ in 0..100 {
-        let near = sample_point(vars, NEIGHBORHOOD_RADIUS, Some(&base), rng, opts.real_only, integer);
+        let near = sample_point(
+            vars,
+            NEIGHBORHOOD_RADIUS,
+            Some(&base),
+            rng,
+            opts.real_only,
+            integer,
+        );
         let (Some(va2), Some(vb2)) = (eval_complex(a, &near), eval_complex(b, &near)) else {
             continue;
         };

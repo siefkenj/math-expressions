@@ -18,7 +18,7 @@ me.fromText("x^2").derivative("x").toString(); // "2 x"
 ```
 
 > **Using this from DoenetML?** See
-> [`DOENET_INTEGRATION.md`](./DOENET_INTEGRATION.md) — the behavior changes,
+> [`DOENET_INTEGRATION.md`](../../active-plans/DOENET_INTEGRATION.md) — the behavior changes,
 > the known blockers, and the two things we need from you.
 
 ## Alpha limitation: wasm handle lifetimes

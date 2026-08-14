@@ -79,10 +79,7 @@ fn an_integer_assumption_constrains_the_equality_sampler() {
         assumptions: a,
         ..EqOptions::default()
     };
-    assert!(
-        eq("(-1)^n * (-1)^n", "1", &with_int),
-        "equal under n ∈ Z"
-    );
+    assert!(eq("(-1)^n * (-1)^n", "1", &with_int), "equal under n ∈ Z");
     // Without the assumption, n ranges over the complex disk and they differ.
     assert!(!eq("(-1)^n * (-1)^n", "1", &EqOptions::default()));
 }

@@ -400,14 +400,15 @@ fn extract_powers_from_root(q: i64, radicand: &Expr, root: Root, a: &Assumptions
 // ---- Cluster: ∞ / NaN folding ----
 //
 // Fold arithmetic that produces an infinity or NaN. Scope is deliberately the
-// subset compatible with our *exact* number model, which differs from JS's
-// float semantics in three principled, load-bearing ways that we do NOT emulate
-// (they are documented divergences, left as known corpus gaps):
+// subset compatible with our *exact* number model.
 //
-//   * `0 · x → 0` and `0/0 → 0`: canonicalize annihilates a zero product before
-//     any infinity is seen, so `0·∞`, `0/0`, `0·(1/0)` stay `0`, not `NaN`.
-//   * `0^0 → 1`: our `pow` defines this (a common CAS choice), so `(3-3)^0 → 1`,
-//     not `NaN`.
+// The indeterminate forms are *not* a divergence: `0·∞`, `0/0`, `0·(1/0)` and
+// `0^0` all fold to `NaN`, matching JS. See `normalize::constructors::annihilate`
+// for why — DoenetML computes an undefined slope as `0/0`, so annihilating it to
+// `0` reports a degenerate line as horizontal, which is a wrong number on a
+// grading path rather than a visible failure. Pinned by `tests/signed_zero.rs`.
+// (An earlier revision of this crate did fold them to `0`/`1`, and this comment
+// described that; do not restore it without also restoring the tests.)
 //
 // We DO track a signed zero (`Number::NegZero`), narrowly: it is value-equal to
 // `0` everywhere except the pole fold, so `6/-0 → −∞` and `1/((−1)·0) → −∞`
