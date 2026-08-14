@@ -39,18 +39,48 @@ pub(crate) const SQRT_KERNEL: FnKernel = FnKernel {
     cdfm: |z| 0.5 / z.sqrt().norm().max(f64::MIN_POSITIVE),
 };
 
+// `cbrt`/`nthroot` evaluate a real argument on the **real** branch — an odd
+// root of a negative real is the real root (`cbrt(-8)` is `-2`, not the
+// principal `1 + i√3`) — matching the branch `simplify`'s radical cluster
+// commits to and the `Pow(negative real, 1/odd)` rule in
+// `eval_numeric::complex`. For constant arguments `simplify` usually folds
+// first and masks these, but they still decide *sampling* (`equals` on
+// `cbrt(x)` where `x` takes negative values), so leaving them principal while
+// `x^(1/n)` reads real would split the two spellings of the same root.
+// Arguments off the real axis stay principal.
+
 pub const CBRT: FnDef = FnDef {
     name: "cbrt",
     parse_text: &["cbrt"],
     derivative: Some("1/(3*cbrt(x)^2)"),
-    eval1: Some(|z| Some(z.powf(1.0 / 3.0))),
+    eval1: Some(|z| {
+        Some(if z.im == 0.0 {
+            Complex64::new(z.re.cbrt(), 0.0)
+        } else {
+            z.powf(1.0 / 3.0)
+        })
+    }),
     ..DEFAULTS
 };
 
 pub const NTHROOT: FnDef = FnDef {
     name: "nthroot",
     parse_text: &["nthroot"],
-    eval2: Some(|a, b| Some(a.powc(b.inv()))),
+    eval2: Some(|a, b| {
+        // Odd integer degree of a negative real: the real root, signed. Any
+        // other shape — even or non-integer degree, base off the real axis —
+        // is the principal value, as before.
+        if a.im == 0.0
+            && a.re < 0.0
+            && b.im == 0.0
+            && b.re.fract() == 0.0
+            && b.re.abs() <= i32::MAX as f64
+            && (b.re as i64) % 2 != 0
+        {
+            return Some(Complex64::new(-(-a.re).powf(b.re.recip()), 0.0));
+        }
+        Some(a.powc(b.inv()))
+    }),
     ..DEFAULTS
 };
 

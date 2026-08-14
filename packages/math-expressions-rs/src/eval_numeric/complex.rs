@@ -105,6 +105,24 @@ fn eval_complex_inner(e: &Expr, env: &Env) -> Option<Complex64> {
                 } else {
                     base.powi(exp.re as i32)
                 }
+            } else if base.im == 0.0 && base.re < 0.0 {
+                // A negative real base under an odd root takes the *real*
+                // branch: `(-8)^(1/3)` is `-2`, not the principal `1 + i√3`.
+                // This is the branch `simplify` already commits to (its
+                // radical cluster folds `(-8)^(1/3) → -2` and pulls
+                // `(-2)^(1/3) → -2^(1/3)`), and `cbrt`/`nthroot` follow it in
+                // their `eval1`/`eval2` — leaving *this* arm principal split
+                // `x^(1/3)` from `cbrt(x)` at negative samples. The gate is
+                // structural (an exact rational exponent with an odd
+                // denominator), so `(-8)^(1/2)` and `(-8)^0.3333` — which is
+                // `3333/10000`, an even denominator — stay principal.
+                match odd_root_exponent(e) {
+                    Some(p) => {
+                        let mag = (-base.re).powf(exp.re);
+                        Complex64::new(if p % 2 == 0 { mag } else { -mag }, 0.0)
+                    }
+                    None => base.powc(exp),
+                }
             } else {
                 base.powc(exp)
             }
@@ -172,6 +190,36 @@ pub(crate) fn opaque_key(e: &Expr) -> String {
 
 fn number_to_complex(n: &Number) -> Complex64 {
     Complex64::new(n.to_f64(), 0.0)
+}
+
+/// The exponent of a `Pow`, read as an exact reduced rational with an **odd**
+/// denominator — the gate for the real-branch rule in the `Pow` arm above.
+/// Returns the reduced numerator, whose parity decides the result's sign.
+///
+/// `Number::Rat`'s lowest-terms invariant makes "odd denominator" a property
+/// of the *value*: `(-8)^(2/6)` lands with `(-8)^(1/3)` while `(-8)^0.3333` —
+/// exactly `3333/10000` — does not. The `Div` and `Neg` shapes are matched
+/// too, because this evaluator is also `evaluate_many`'s per-point fallback,
+/// which hands it the *raw* tree — there `1/3` is still a quotient node
+/// rather than a folded rational, and missing it would make the fallback
+/// disagree with the canonical-tree walk `evaluate_fast_f64` runs.
+fn odd_root_exponent(e: &Expr) -> Option<i64> {
+    match e {
+        Expr::Num(Number::Rat(p, q, _)) => (q % 2 != 0).then_some(*p),
+        Expr::Div(a, b) => match (&**a, &**b) {
+            (Expr::Num(Number::Int(p)), Expr::Num(Number::Int(q))) if *q != 0 => {
+                match Number::rat(*p, *q) {
+                    Number::Rat(p, q, _) => (q % 2 != 0).then_some(p),
+                    // Reduced to an integer — an integer exponent, which the
+                    // arm above has already handled by value.
+                    _ => None,
+                }
+            }
+            _ => None,
+        },
+        Expr::Neg(x) => odd_root_exponent(x)?.checked_neg(),
+        _ => None,
+    }
 }
 
 fn eval_apply(head: &Expr, args: &[Expr], env: &Env) -> Option<Complex64> {

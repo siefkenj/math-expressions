@@ -135,3 +135,52 @@ describe("substitute: simultaneous, differing from its sibling only in coercion"
     ).toBe("sin(y + x)");
   });
 });
+
+describe("odd roots of negatives read on the real branch, in every spelling", () => {
+  // The branch used to depend on whether the radicand was a perfect power:
+  // `(-8)^(1/3)` folded to the real `-2` while `(-2)^(1/3)` evaluated to the
+  // principal complex value, so four DoenetML `<answer>` cases that scored 1
+  // on the legacy engine scored 0 (expected `cbrt(-2)`, typed `(-2)^{1/3}`;
+  // and their nthroot/latex/decimal variants). Pinned here at the compat
+  // boundary; the crate-level matrix is `tests/odd_root_real_branch.rs`.
+  const eq = (a: any, b: any) => a.equals(b);
+
+  it("grades the four regressed answer rows as equal again", () => {
+    expect(eq(me.fromText("cbrt(-2)"), me.fromLatex("(-2)^{1/3}"))).toBe(true);
+    expect(eq(me.fromText("(-2)^(1/3)"), me.fromLatex("\\sqrt[3]{-2}"))).toBe(
+      true,
+    );
+    expect(eq(me.fromText("nthroot(-2,3)"), me.fromLatex("(-2)^{1/3}"))).toBe(
+      true,
+    );
+    expect(
+      eq(me.fromText("(-2)^(1/3)"), me.fromText("-1.2599210498948732")),
+    ).toBe(true);
+  });
+
+  it("keeps the two rows this engine fixed over legacy", () => {
+    expect(eq(me.fromText("cbrt(-2)"), me.fromText("-cbrt(2)"))).toBe(true);
+    expect(
+      eq(me.fromText("cbrt(-2)"), me.fromText("-1.2599210498948732")),
+    ).toBe(true);
+  });
+
+  it("no longer tells a perfect power apart from its own factorization", () => {
+    expect(
+      eq(me.fromText("(-8)^(1/3)"), me.fromText("(-2)^(1/3) * 4^(1/3)")),
+    ).toBe(true);
+  });
+
+  it("evaluates the value, and leaves even roots complex", () => {
+    expect(me.fromText("(-2)^(1/3)").evaluate_to_constant()).toBeCloseTo(
+      -1.2599210498948732,
+      12,
+    );
+    // An even root of a negative stays on the principal branch: the value
+    // comes back complex (`2i`), not as a real root.
+    expect(me.fromText("(-4)^(1/2)").evaluate_to_constant()).toMatchObject({
+      re: 0,
+      im: 2,
+    });
+  });
+});

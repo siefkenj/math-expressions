@@ -14,7 +14,10 @@ use std::collections::HashMap;
 /// complex) numeric value. `None` if a needed variable is unbound, the
 /// expression is not numerically meaningful, or the result is non-finite
 /// (`me.evaluate` returns `null` for e.g. `1/0`). Uses the complex principal
-/// branch, matching mathjs: `x^(1/3)` at `x = -8` is `1 + i√3`, not `-2`.
+/// branch, matching mathjs — with one deliberate exception: an odd root of a
+/// negative real is the *real* root (`x^(1/3)` at `x = -8` is `-2`, not
+/// mathjs's `1 + i√3`), the branch the rest of this crate commits to (see
+/// `eval_numeric::complex` and `tests/odd_root_real_branch.rs`).
 ///
 /// **None of the returned digits are certified.** This is a plain `Complex64`
 /// tree walk: every operation rounds, the errors compound, and nothing here
@@ -119,12 +122,14 @@ pub fn evaluate_many(e: &Expr, var: &str, values: &[f64]) -> Vec<f64> {
     // quadrature and ODE paths already sample through) and run its f64 sweep
     // per point. Measured 2–6× against the `eval_complex` tree walk below.
     //
-    // The tape is a *fast path*, never a replacement: it only speaks real f64,
-    // so wherever it escalates — a domain edge, an overflow, anything off the
-    // real branch — that point falls back to `eval_complex`, which decides in
-    // ℂ exactly as it always did. So the complex-principal-branch contract
-    // that `x^(1/3)` at `x = -8` is `1 + i√3` (hence `NaN` here, not `-2`)
-    // survives: the tape returns `None` there rather than a real root.
+    // The tape is a *fast path*, never a replacement: it only speaks real
+    // f64 and escalates on any non-positive base of a general power, so a
+    // point like `x^(1/3)` at `x = -8` falls back to `eval_complex`, which
+    // owns the branch decision — the real root `-2` for an odd root of a
+    // negative real, the principal value (hence `NaN` here) for even roots
+    // and non-rational exponents. The fallback sees the *raw* tree, which is
+    // why `odd_root_exponent` in `eval_numeric::complex` matches the
+    // quotient-node exponent shape as well as the folded rational.
     let mut fast: Vec<Option<f64>> = Vec::new();
     with_sampler(e, var, |t| t.eval_f64_many(values, &mut fast));
 
@@ -228,9 +233,10 @@ fn with_sampler<R>(e: &Expr, var: &str, f: impl FnOnce(&CompiledExpr) -> R) -> O
 ///
 /// 1. **Canonical shape.** The tape wants no `Div`/`Neg` and flat `Add`/`Mul`
 ///    (see `tape::compile`), which a raw parse tree is not. `canonicalize` is
-///    the pass that gets it there — deliberately *not* [`simplify_core`], which
-///    additionally folds constants in the real domain and would answer `-2` for
-///    `(-8)^(1/3)` where [`evaluate_fast_f64`] answers `1 + i√3` (hence `NaN`).
+///    the pass that gets it there — deliberately *not* [`simplify_core`],
+///    which additionally folds and rewrites constants, changing how the
+///    arithmetic associates and so which bits come back; the parity contract
+///    is with [`evaluate_fast_f64`], which walks the merely-canonical tree.
 ///
 /// 2. **Positional bindings.** The tape's slots are positional, so the fast
 ///    path is only sound when its one slot *is* the variable being swept. An
@@ -249,9 +255,8 @@ fn compile_sampler(e: &Expr, var: &str) -> Option<CompiledExpr> {
 /// Evaluate a closed expression to its numeric constant, or `None`. Matches
 /// `me.evaluate_to_constant`: `None` if the *original* expression mentions any
 /// genuine free variable (the constants `pi`/`e`/`i` don't count, and it does
-/// NOT cancel first — so `x − x` is `None`, not `0`); otherwise simplify (real-
-/// domain reductions apply, `(-8)^(1/3)` → `-2` — contrast [`evaluate_fast_f64`]'s
-/// complex-principal branch) and evaluate.
+/// NOT cancel first — so `x − x` is `None`, not `0`); otherwise simplify
+/// (real-domain reductions apply, `(-8)^(1/3)` → `-2`) and evaluate.
 ///
 /// `±∞` is a value here, not a failure: an unbounded interval endpoint is
 /// ordinary (`[-∞, ∞]` is the default domain of a function curve), and

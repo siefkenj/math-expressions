@@ -1344,9 +1344,10 @@ fn rule_distribute_sign(e: &Expr) -> Option<Expr> {
 // principal complex root — while a *variable* radicand never folds.
 //
 // - Odd root of a negative: the real root wins, so pull the sign out
-//   (`cbrt(-16x⁴) → -2·cbrt(2x⁴)`, `(-8)^(1/3) → -2`). This is the *real*
-//   branch, and it only applies while the rest of the radicand could be real —
-//   see `simplify_root`.
+//   (`cbrt(-16x⁴) → -2·cbrt(2x⁴)`, `(-8)^(1/3) → -2`, and for a base that is
+//   not a perfect power, `(-2)^(1/3) → -2^(1/3)`). This is the *real* branch,
+//   and it only applies while the rest of the radicand could be real — see
+//   `simplify_root`.
 // - Perfect q-th-power factors of the numeric coefficient come out front
 //   (`sqrt(8) → 2·sqrt(2)`). The coefficient may be a fraction, which extracts
 //   independently in the numerator and the denominator (`sqrt(2/9) → sqrt(2)/3`).
@@ -1365,12 +1366,33 @@ fn rule_distribute_sign(e: &Expr) -> Option<Expr> {
 
 fn rule_radical(e: &Expr, assumptions: &Assumptions) -> Option<Expr> {
     match e {
-        // Numeric power with a rational exponent: fold only when it reduces to
-        // an exact number (base is a perfect q-th power). Partial extraction
-        // from a `Pow` form is left alone.
+        // Numeric power with a rational exponent: fold when it reduces to an
+        // exact number (base is a perfect q-th power); otherwise, for a
+        // negative base under an odd root, pull the sign out on the real
+        // branch — `(-2)^(1/3) → -(2^(1/3))`, `(-2)^(2/3) → 2^(2/3)` — the
+        // same branch `fold_numeric_radical` takes for perfect powers and
+        // `simplify_root` for the `cbrt`/`nthroot` spellings. It has to happen
+        // *here*, not in the evaluator: `evaluate_to_constant` runs this pass
+        // and then the certified-digits tape before any evaluator is
+        // consulted, so a sign left on the base keeps the tape on the
+        // principal branch no matter what the evaluators say. With the base
+        // positive, no numeric path has a branch to choose. Partial extraction
+        // of perfect-power *factors* from a `Pow` form is still left alone
+        // (`8^(1/2)` stays symbolic while `sqrt(8)` reduces), and an even root
+        // of a negative keeps its sign (no real branch to prefer).
         Expr::Pow(base, exp) => {
             if let (Expr::Num(b), Expr::Num(Number::Rat(p, q, _))) = (&**base, &**exp) {
-                return fold_numeric_radical(b, *p, *q);
+                if let Some(folded) = fold_numeric_radical(b, *p, *q) {
+                    return Some(folded);
+                }
+                if b.is_negative() && q % 2 != 0 {
+                    let pos = Expr::Pow(Box::new(Expr::Num(b.neg())), exp.clone());
+                    return Some(if p % 2 == 0 {
+                        pos
+                    } else {
+                        mul(vec![Expr::int(-1), pos])
+                    });
+                }
             }
             None
         }

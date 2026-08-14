@@ -106,8 +106,11 @@ const CORPUS: &[&str] = &[
     "arctanh(x/8)",
     "asin(x)",
     "acos(x)",
-    // Fractional powers of a possibly-negative base: the complex-principal-
-    // branch contract `(-8)^(1/3) = 1 + i√3`, not the real root `-2`.
+    // Fractional powers of a possibly-negative base. Odd roots read on the
+    // real branch (`(-8)^(1/3) = -2`), even roots stay principal (a gap
+    // here); either way the tape escalates at a negative base and the
+    // fallback must agree with the reference walk — including on the raw
+    // `Div`-node exponent shape the fallback sees.
     "x^(1/3)",
     "x^(1/2)",
     "x^(2/3)",

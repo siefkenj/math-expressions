@@ -56,13 +56,18 @@ fn evaluate_real() {
 }
 
 #[test]
-fn evaluate_complex_principal_branch() {
-    // Matches mathjs: complex principal value, not the real root.
+fn evaluate_branch_choice() {
+    // An odd root of a negative real is the *real* root — the branch
+    // `simplify`'s radical cluster and `cbrt`/`nthroot` take, so every
+    // spelling of the same root evaluates to the same number (see
+    // `tests/odd_root_real_branch.rs`). This diverges from mathjs, which
+    // answers the principal `1 + i√3` here.
     approx(
         evaluate_fast_f64(&parse("x^(1/3)"), &binds(&[("x", -8.0)])),
-        1.0,
-        3f64.sqrt(),
+        -2.0,
+        0.0,
     );
+    // Even roots have no real branch and stay principal, matching mathjs.
     approx(
         evaluate_fast_f64(&parse("sqrt(x)"), &binds(&[("x", -4.0)])),
         0.0,

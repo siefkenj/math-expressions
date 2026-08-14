@@ -200,9 +200,10 @@ fn value_at(e: &Expr, bindings: &[(&str, &str)]) -> Option<(f64, f64)> {
     evaluate_to_constant(&substitute(e, &subs)).map(|z| (z.re, z.im))
 }
 
-/// The same substitution evaluated *without* simplifying first — the principal
-/// complex branch, straight off the tree. Independent of every rule under test,
-/// but only usable where the two branches coincide (see below).
+/// The same substitution evaluated *without* simplifying first — straight off
+/// the tree via `evaluate_fast_f64`. Independent of every simplify rule under
+/// test, but only used on nonnegative radicands, where no branch choice
+/// arises (see below).
 fn principal_value_at(e: &Expr, bindings: &[(&str, &str)]) -> Option<(f64, f64)> {
     let subs: HashMap<String, Expr> = bindings
         .iter()
@@ -312,12 +313,11 @@ fn the_value_is_unchanged_under_the_assumptions() {
 fn the_extracted_form_holds_up_against_an_unsimplified_evaluation() {
     // `value_at` above simplifies both sides, so it cannot by itself rule out
     // a rule that is wrong in the same way twice. These rows re-check the
-    // extraction against the raw principal-branch evaluator, which shares no
-    // code with the rewrite. They are restricted to radicands that land
-    // nonnegative, where the real and principal branches agree and the
-    // comparison therefore means something — the odd-root-of-a-negative rows
-    // are deliberately absent, since there the two branches differ *by design*
-    // and only `value_at` speaks the right convention.
+    // extraction against the raw evaluator, which shares no code with the
+    // rewrite. They are restricted to radicands that land nonnegative, where
+    // no branch choice arises and the comparison is unambiguous — the
+    // odd-root-of-a-negative rows are covered by `value_at` and by
+    // `tests/odd_root_real_branch.rs`, which pins the branch itself.
     let rows: &[(&'static [&'static str], &'static str, &'static Binding)] = &[
         (&["x > 0"], "cbrt(x^3)", &[("x", "2")]),
         (&["x > 0"], "nthroot(x^5, 5)", &[("x", "2")]),
