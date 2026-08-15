@@ -223,14 +223,24 @@ pub const IM: FnDef = FnDef {
     ..DEFAULTS
 };
 
+/// `eval1` here is mathjs's scalar convention — `det(2)` is `2`, and legacy
+/// agreed (`det(x) == x`). It is deliberately an identity and NOT the
+/// determinant: a `Matrix` argument never reaches it, because
+/// [`matrix::scalar_reduction`](crate::matrix) intercepts `det`/`trace` of a
+/// literal matrix ahead of the registry dispatch in both
+/// `eval_numeric::complex` and `normalize::fold_apply`. Without the kernel,
+/// `det` of a *non*-matrix was an opaque sample variable, so `det(x)` compared
+/// unequal to `x`.
 pub const DET: FnDef = FnDef {
     name: "det",
     parse_text: &["det"],
     parse_latex: &["det"],
+    eval1: Some(Some),
     latex_commands: &[("det", "det")],
     ..DEFAULTS
 };
 
+/// The scalar identity, for the same reason as [`DET`] — see its note.
 pub const TRACE: FnDef = FnDef {
     name: "trace",
     parse_text: &["trace"],

@@ -139,20 +139,28 @@ fn eval_complex_inner(e: &Expr, env: &Env) -> Option<Complex64> {
 /// unknown function, a subscript, a prime, or an `OtherOp` (`vec`, `angle`, …).
 pub(crate) fn is_opaque_atom(e: &Expr) -> bool {
     match e {
-        Expr::Apply(head, args) => !head_evaluable(head, args.len()),
+        Expr::Apply(head, args) => !head_evaluable(head, args),
         Expr::Index(..) | Expr::Prime(_) | Expr::OtherOp(..) => true,
         _ => false,
     }
 }
 
-/// Can `eval_apply` handle this head/arity? (A `Pow` head is `sin^2`-style; an
-/// `Index` head is a subscripted log `log_b`.)
-fn head_evaluable(head: &Expr, nargs: usize) -> bool {
+/// Can `eval_apply` handle this head and these arguments? (A `Pow` head is
+/// `sin^2`-style; an `Index` head is a subscripted log `log_b`.)
+///
+/// Takes the arguments rather than just their count because one decision needs
+/// to look at them: `det`/`trace` of a literal `Matrix` reduce to a scalar
+/// (`matrix::scalar_reduction`) while the same heads applied to anything else
+/// go through their scalar `eval1`.
+fn head_evaluable(head: &Expr, args: &[Expr]) -> bool {
     match head {
-        Expr::Pow(inner, _) => head_evaluable(inner, nargs),
-        Expr::Sym(s) => known_function(&s.name(), nargs),
+        Expr::Pow(inner, _) => head_evaluable(inner, args),
+        Expr::Sym(s) => {
+            known_function(&s.name(), args.len())
+                || crate::matrix::scalar_reduction(head, args).is_some()
+        }
         Expr::Index(inner, _) => {
-            nargs == 1 && matches!(inner.as_ref(), Expr::Sym(s) if s.name() == "log")
+            args.len() == 1 && matches!(inner.as_ref(), Expr::Sym(s) if s.name() == "log")
         }
         _ => false,
     }
@@ -238,6 +246,13 @@ fn eval_apply(head: &Expr, args: &[Expr], env: &Env) -> Option<Complex64> {
                 return Some(x.ln() / b.ln());
             }
         }
+    }
+    // `det`/`trace` of a literal matrix: reduce to the scalar expression it
+    // denotes and evaluate that. This runs *before* the registry dispatch
+    // because both heads also carry a scalar `eval1` (mathjs's `det(2) = 2`),
+    // which would be handed an `Expr::Matrix` it cannot evaluate.
+    if let Some(reduced) = crate::matrix::scalar_reduction(head, args) {
+        return eval_complex(&reduced, env);
     }
     let Expr::Sym(s) = head else { return None };
     let spelling = s.name();

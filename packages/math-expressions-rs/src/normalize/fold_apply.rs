@@ -58,17 +58,12 @@ fn fold_nodes(e: &Expr) -> Expr {
         return e;
     };
     // `det`/`trace` of a literal matrix reduce to a number (`\det[[1,2],[3,4]]`
-    // → −2). The matrix functions return a symbolic `Expr` for a symbolic matrix
-    // — keep the application in that case, only fold when it lands on a number.
-    if let ([arg @ Expr::Matrix(_)], Expr::Sym(s)) = (args.as_slice(), &**head) {
-        let folded = match s.name().as_str() {
-            "det" => Some(crate::matrix::det(arg)),
-            "trace" => Some(crate::matrix::trace(arg)),
-            _ => None,
-        };
-        if let Some(r @ Expr::Num(_)) = folded {
-            return r;
-        }
+    // → −2). The reduction returns a symbolic `Expr` for a symbolic matrix —
+    // keep the application in that case, only fold when it lands on a number.
+    // (The equality sampler consults the same helper, and does *not* stop at a
+    // number: see `matrix::scalar_reduction`.)
+    if let Some(r @ Expr::Num(_)) = crate::matrix::scalar_reduction(head, args) {
+        return r;
     }
     if let Some(v) = fold_application(head, args) {
         return Expr::Num(v);

@@ -481,6 +481,31 @@ describe("review cycle 3 — legacy contracts that had quietly lapsed", () => {
     );
   });
 
+  it("grades a determinant against its own value", () => {
+    // `equals` is the grading call, and it samples through a *third* numeric
+    // path — neither `f()` nor `evaluate_to_constant`. `det` had no evaluation
+    // kernel there and `trace`'s could not see inside a matrix, so each whole
+    // application was sampled as an unknown variable and agreed with its own
+    // value at no point: this `simplify`d to `-2` and compared unequal to `-2`.
+    // The legacy JavaScript library answered `true` to all of these.
+    const det = me.fromLatex("\\det\\begin{bmatrix}1&2\\\\3&4\\end{bmatrix}");
+    expect(det.equals(me.fromText("-2"))).toBe(true);
+    expect(det.equals(me.fromText("-3"))).toBe(false);
+    expect(det.evaluate_to_constant()).toBe(-2);
+    const trace = me.fromLatex(
+      "\\operatorname{trace}\\begin{bmatrix}1&2\\\\3&4\\end{bmatrix}",
+    );
+    expect(trace.equals(me.fromText("5"))).toBe(true);
+    expect(trace.evaluate_to_constant()).toBe(5);
+    // Symbolic entries: `simplify` leaves the application alone (legacy does
+    // too), so only the sampler decides.
+    expect(
+      me
+        .fromLatex("\\det\\begin{bmatrix}x&2\\\\3&4\\end{bmatrix}")
+        .equals(me.fromText("4x-6")),
+    ).toBe(true);
+  });
+
   it("honors variables(include_subscripts)", () => {
     // The argument was dropped, so a caller matching against a subscripted
     // name — `Line.js`, deciding whether a coefficient mentions the line's own

@@ -1,12 +1,12 @@
 # PR #84 review — known issues and durable findings
 
-The durable ledger from the fourteen review passes over
+The durable ledger from the fifteen review passes over
 [Doenet/math-expressions#84](https://github.com/Doenet/math-expressions/pull/84). The pass-by-pass
 history lives in the git log (`Review cycle N:` commits) and the PR's edit history; this file keeps
 only what still describes the code. Every entry below was re-verified against the pin it names or
 carries a symbol anchor checked to exist at the head this file is committed at (`41b9cb4` when the
-anchors were first swept at the eleventh pass, re-spot-checked at the thirteenth and fourteenth);
-the fifth pass re-reproduced each then-open entry through the built compat package.
+anchors were first swept at the eleventh pass, re-spot-checked at the thirteenth, fourteenth and
+fifteenth); the fifth pass re-reproduced each then-open entry through the built compat package.
 
 Conventions: "legacy" is `math-expressions@2.x` from npm. File paths are relative to
 `packages/math-expressions-rs/src/` for `.rs` and `packages/math-expressions-js-compat/lib/` for
@@ -18,20 +18,6 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
 
 ### Rust crate
 
-- **`equals` reads `det`/`trace` of a literal matrix as an opaque variable, so a determinant is
-  not equal to its own value.** `\det\begin{pmatrix}1&2\\3&4\end{pmatrix}` simplifies to `-2` and
-  `evaluate_to_constant`s to `-2`; `equals` against `-2` is `false`. Same for `trace` and `5`.
-  `eval_numeric/complex.rs`'s `head_evaluable` asks `special_functions::eval1` whether a head is
-  evaluable, and these two have no scalar kernel, so `is_opaque_atom` classifies the whole
-  application as a fresh unknown and samples it as one. The reduction that gets the right answer
-  is one layer away, in `normalize/fold_apply.rs`'s `det`/`trace` arm over `crate::matrix::{det,
-  trace}` — reached by `simplify` and never consulted by the sampler. Fix: fold
-  `Apply(det|trace, [Matrix])` through `crate::matrix` in the numeric evaluator and recurse, with
-  `head_evaluable` and `free_symbols` following so a symbolic entry stays a free variable rather
-  than part of an opaque key. Note the degenerate scalar spellings are a separate, smaller
-  question: `trace(3)` is `3` on every path (its kernel is the identity) while `det(3)` is `NaN`
-  from `evaluate_to_constant` and `3` from `f()`. Found at the fourteenth pass; the only
-  grading-reaching divergence the review has left open, and no spec covers `det` equality today.
 - **DP5(4) evaluates stage 7 twice per accepted step** (`mathjs_compat/ode.rs`, `solve_ode`): the
   FSAL stage loop already produced `f(t+h, ynew)` into `k[6]`. 7 RHS calls per step instead of 6,
   and through `solve_ode` each one is a JS boundary crossing. The `terminated_early` branch hanging
@@ -162,6 +148,31 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   `s·u·m·(…)` unless `appliedFunctionSymbols` is passed. Deliberate, matches legacy.
 
 ## Fixed during review, kept for its contract
+
+**`det`/`trace` of a literal matrix are evaluated, not sampled as unknowns** (fifteenth pass).
+`equals` said a determinant differed from its own value: `\det\begin{pmatrix}1&2\\3&4\end{pmatrix}`
+simplified to `-2` and compared `false` against `-2`, and `evaluate_to_constant` answered `None` on
+it. The cause was the third numeric path — `equals` samples through `eval_numeric/complex.rs`, whose
+`head_evaluable` asked `special_functions::eval1` alone. `DET` had no kernel and `TRACE`'s is a
+scalar identity that cannot see into a `Matrix`, so `is_opaque_atom` classified the whole
+application as an opaque atom and sampled it as a fresh variable, which agrees with `-2` nowhere.
+The legacy JavaScript library answered `-2`/`5`/`true` to all of it, so this was a regression, on a
+grading path.
+
+`matrix::scalar_reduction` is now the single place that decides whether an application of `det`/
+`trace` has a scalar value; `normalize/fold_apply.rs` (which keeps its `Num`-only gate, so
+`simplify` is byte-unchanged) and `eval_numeric/complex.rs` both call it. `head_evaluable` takes the
+argument list rather than its length so it can ask; `free_symbols` needed no change, since an
+application that is no longer opaque already descends into its arguments and `Expr::Matrix` already
+walks its entries — so `det([[x,2],[3,4]])` reports `x` and compares equal to `4x-6`. A matrix the
+reducers decline (non-square, over `resource_limits`) still comes back as the `OtherOp` residual and
+is still sampled as an unknown. `DET` also gained the scalar identity `TRACE` had, matching mathjs's
+`det(2) = 2` and legacy's `det(x) == x`.
+
+Pinned in `tests/matrix.rs` and `spec/quick_doenet_compat_pr84.spec.ts`, both verified to fail
+against the unfixed engine. `tests/functions_registry.rs`'s deny list — which is where the omission
+was codified, as `erf`'s had been — now says in the file that it pins a decision rather than an
+outside fact, and names the compat suite as the check that has outside authority.
 
 **Odd roots of negative reals read on the real branch on every numeric path** (eleventh pass).
 The branch for `(negative)^(p/q)`, odd `q`, used to depend on whether the radicand was a perfect

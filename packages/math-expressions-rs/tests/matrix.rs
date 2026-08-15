@@ -545,3 +545,67 @@ fn symbolic_pivots_are_assumption_gated() {
     );
     assert_eq!(rank(&a, &asm), Some(2));
 }
+
+// ---- grading: `det`/`trace` compared against their own value ----
+
+/// `equals` samples through `eval_numeric/complex.rs`, which is neither of the
+/// evaluation paths a `det`/`trace` application otherwise takes. It used to ask
+/// only `special_functions::eval1` whether a head was evaluable; `det` had no
+/// kernel and `trace`'s could not see inside a `Matrix`, so the whole
+/// application was classified as an *unknown* and sampled as a fresh variable.
+/// It then agreed with its own value at no point:
+/// `det([[1,2],[3,4]])` simplified to `-2` and compared **unequal** to `-2`.
+/// The JS library answered `true` to every case below, so this was a
+/// regression, on a grading path — `<answer>` calls `equals`.
+///
+/// `matrix::scalar_reduction` is now consulted by the sampler and by
+/// `normalize::fold_apply` alike, so the fold `simplify` performs and the value
+/// `equals` samples come from one place.
+#[test]
+fn det_and_trace_compare_equal_to_their_own_value() {
+    let m = mat(2, 2, &["1", "2", "3", "4"]);
+    let det_m = Expr::Apply(Box::new(Expr::sym("det")), vec![m.clone()]);
+    let trace_m = Expr::Apply(Box::new(Expr::sym("trace")), vec![m]);
+
+    assert!(eq(&det_m, &parse("-2")), "det([[1,2],[3,4]]) == -2");
+    assert!(eq(&trace_m, &parse("5")), "trace([[1,2],[3,4]]) == 5");
+    // Still discriminating — the fix must not make everything compare equal.
+    assert!(!eq(&det_m, &parse("-3")));
+    assert!(!eq(&trace_m, &parse("6")));
+
+    // The same value has to come back from `evaluate_to_constant`, which reads
+    // the same evaluator: `<number>` renders through it, and it answered
+    // nothing here while `simplify` answered `-2`.
+    let c = math_expressions::evaluate_to_constant(&det_m).expect("det evaluates to a constant");
+    assert_eq!((c.re, c.im), (-2.0, 0.0));
+
+    // Symbolic entries: the reduction is symbolic, so `simplify` leaves the
+    // application alone (as the JS library also does) and only the sampler
+    // decides. Both of these were `false`.
+    let sym_det = Expr::Apply(
+        Box::new(Expr::sym("det")),
+        vec![mat(2, 2, &["x", "2", "3", "4"])],
+    );
+    assert!(eq(&sym_det, &parse("4x - 6")), "det([[x,2],[3,4]]) == 4x-6");
+    assert!(!eq(&sym_det, &parse("4x + 6")));
+    let sym_trace = Expr::Apply(
+        Box::new(Expr::sym("trace")),
+        vec![mat(2, 2, &["x", "2", "3", "y"])],
+    );
+    assert!(eq(&sym_trace, &parse("x + y")), "trace == x+y");
+
+    // A matrix the reducers decline stays opaque rather than reducing wrongly:
+    // `det` of a non-square matrix has no value, so it must not compare equal
+    // to a number. (The JS library also answers `false` here.)
+    let oblong = Expr::Apply(
+        Box::new(Expr::sym("det")),
+        vec![mat(2, 3, &["1", "2", "3", "4", "5", "6"])],
+    );
+    assert!(!eq(&oblong, &parse("0")));
+
+    // A *non*-matrix argument is mathjs's scalar convention, `det(2) = 2`,
+    // which is what the identity `eval1` kernels are for. Legacy agreed.
+    assert!(eq(&parse("det(x)"), &parse("x")));
+    assert!(eq(&parse("trace(x)"), &parse("x")));
+    assert!(!eq(&parse("det(x)"), &parse("2x")));
+}

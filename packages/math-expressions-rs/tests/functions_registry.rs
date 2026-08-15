@@ -327,6 +327,12 @@ fn eval_coverage_matches_historical_known_function() {
         "trace",
         "factorial",
         "erf",
+        // `det` joined the list in review: like `trace` its kernel is mathjs's
+        // scalar identity (`det(2) = 2`), and without one `det(x)` was sampled
+        // as an unknown, so it compared unequal to `x` where legacy said equal.
+        // A `Matrix` argument does not come here at all — see
+        // `matrix::scalar_reduction`, and `matrix.rs`'s equality tests.
+        "det",
     ] {
         assert!(
             special_functions::eval1(name).is_some(),
@@ -341,8 +347,16 @@ fn eval_coverage_matches_historical_known_function() {
         );
     }
     // …and names deliberately NOT evaluable: aliases (evaluation runs on
-    // canonicalized trees), det, rootof.
-    for name in ["arcsin", "ln", "cosec", "det", "rootof", "notafunction"] {
+    // canonicalized trees) and `rootof`, whose `Apply` spelling `canonicalize`
+    // turns back into the `Expr::RootOf` leaf before any evaluator sees it.
+    //
+    // This half of the test pins a *decision*, not a fact about the outside
+    // world, so it cannot notice a head that ought to evaluate and does not —
+    // which is how `erf` and then `det` sat here while legacy evaluated both.
+    // The check with outside authority is
+    // `math-expressions-js-compat/spec/quick_doenet_compat_pr84.spec.ts`,
+    // which runs the same expressions the JS library answered.
+    for name in ["arcsin", "ln", "cosec", "rootof", "notafunction"] {
         assert!(special_functions::eval1(name).is_none(), "{name:?}");
     }
 }
