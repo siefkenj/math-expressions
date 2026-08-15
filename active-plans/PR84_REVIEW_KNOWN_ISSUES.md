@@ -1,12 +1,12 @@
 # PR #84 review — known issues and durable findings
 
-The durable ledger from the thirteen review passes over
+The durable ledger from the fourteen review passes over
 [Doenet/math-expressions#84](https://github.com/Doenet/math-expressions/pull/84). The pass-by-pass
 history lives in the git log (`Review cycle N:` commits) and the PR's edit history; this file keeps
 only what still describes the code. Every entry below was re-verified against the pin it names or
 carries a symbol anchor checked to exist at the head this file is committed at (`41b9cb4` when the
-anchors were first swept at the eleventh pass, re-spot-checked at the thirteenth); the fifth pass
-re-reproduced each then-open entry through the built compat package.
+anchors were first swept at the eleventh pass, re-spot-checked at the thirteenth and fourteenth);
+the fifth pass re-reproduced each then-open entry through the built compat package.
 
 Conventions: "legacy" is `math-expressions@2.x` from npm. File paths are relative to
 `packages/math-expressions-rs/src/` for `.rs` and `packages/math-expressions-js-compat/lib/` for
@@ -18,6 +18,20 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
 
 ### Rust crate
 
+- **`equals` reads `det`/`trace` of a literal matrix as an opaque variable, so a determinant is
+  not equal to its own value.** `\det\begin{pmatrix}1&2\\3&4\end{pmatrix}` simplifies to `-2` and
+  `evaluate_to_constant`s to `-2`; `equals` against `-2` is `false`. Same for `trace` and `5`.
+  `eval_numeric/complex.rs`'s `head_evaluable` asks `special_functions::eval1` whether a head is
+  evaluable, and these two have no scalar kernel, so `is_opaque_atom` classifies the whole
+  application as a fresh unknown and samples it as one. The reduction that gets the right answer
+  is one layer away, in `normalize/fold_apply.rs`'s `det`/`trace` arm over `crate::matrix::{det,
+  trace}` — reached by `simplify` and never consulted by the sampler. Fix: fold
+  `Apply(det|trace, [Matrix])` through `crate::matrix` in the numeric evaluator and recurse, with
+  `head_evaluable` and `free_symbols` following so a symbolic entry stays a free variable rather
+  than part of an opaque key. Note the degenerate scalar spellings are a separate, smaller
+  question: `trace(3)` is `3` on every path (its kernel is the identity) while `det(3)` is `NaN`
+  from `evaluate_to_constant` and `3` from `f()`. Found at the fourteenth pass; the only
+  grading-reaching divergence the review has left open, and no spec covers `det` equality today.
 - **DP5(4) evaluates stage 7 twice per accepted step** (`mathjs_compat/ode.rs`, `solve_ode`): the
   FSAL stage loop already produced `f(t+h, ynew)` into `k[6]`. 7 RHS calls per step instead of 6,
   and through `solve_ode` each one is a JS boundary crossing. The `terminated_early` branch hanging
@@ -194,6 +208,17 @@ only head broken that way. One head, `rootof`, is deliberately unmapped: it is i
 DoenetML's applied lists, so it cannot be typed, and the `critical_points()` output that produces
 it goes through `evaluate_to_constant`, never `f()`.
 
+**And the sweep's own blind spot** (fourteenth pass). It covered `f()` and `evaluate_to_constant`;
+there is a third numeric path, the sampler `eval_complex` that `equals` runs on, and it fails
+*differently* — a head it cannot evaluate becomes an opaque variable rather than a `NaN`, so the
+divergence is an equality that answers `false` instead of a value that reads `NaN`. `det` and
+`trace` are in that state; see the entry at the top of "Known issues, open". The registry test
+(`tests/functions_registry.rs`) does not catch this class either: it asserts that the evaluable
+list evaluates and the not-evaluable list does not, so it pins whatever is true rather than
+testing the list against an outside authority. A head that *ought* to be evaluable, is not, and is
+written into the deny list passes — which is exactly how `erf` was codified, and how `det` still
+is.
+
 **`erf` had no evaluation kernel at all** (thirteenth pass) — the mirror image of `nthroot`, and
 just as silent. `ERF` in `special_functions/misc.rs` carried parser spellings and LaTeX rendering
 but no `eval1`, so `evaluate_to_constant("erf(0.5)")` was `None` and `evaluate_many` sampled `NaN`
@@ -202,7 +227,14 @@ at every point, while `f()` was right throughout because math.js *has* `erf`. A 
 `<number>$$f(0.5)</number>` read `NaN` and whose extrema search found nothing — and legacy
 evaluated `erf` from all of those paths, so this was a regression. `eval1` is now a port of the
 same W. J. Cody rational-Chebyshev approximation math.js uses, so the two paths agree to the last
-bit rather than to a tolerance. Pinned in `tests/erf.rs` (which also asserts the three numeric
+bit rather than to a tolerance. Re-measured independently at the fourteenth pass over 38,385
+sample points (both tails, both interval boundaries, denormals, ±0, ±∞, NaN): **0 mismatches on
+the shipped wasm build**, because wasm32 Rust uses the `libm` crate's fdlibm `exp` and V8 uses the
+same one. A *native* `cargo test` build differs at ≤2 ulp (max relative 3.6e-16, all inside the
+`erfc2` branch) because it links glibc's `exp` instead — a property of the two `exp`s, not of the
+port, and ~2,800× under the 1e-12 `relative_tolerance` grading uses. Worth knowing because
+`spec/quick_doenet_compat_pr84.spec.ts`'s exact `toBe` on an `erf` value is a stricter contract
+than that. Pinned in `tests/erf.rs` (which also asserts the three numeric
 entry points agree) and `spec/quick_doenet_compat_pr84.spec.ts`, verified to fail with `eval1`
 removed. The general lesson is the one the sweep confirms: a head can be missing from *either*
 path, and neither absence produces a warning.
