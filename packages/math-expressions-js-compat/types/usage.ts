@@ -11,6 +11,7 @@ import me, {
   dopri,
   isTree,
   setWasmModule,
+  type Complex,
   type Expression,
   type OdeState,
   type Tree,
@@ -46,7 +47,11 @@ const _fuzzy: boolean = fromText.equals(fromLatex, {
   allowed_error_in_numbers: 0.001,
   include_error_in_number_exponents: false,
 });
-const _constant: number | null = fromText.evaluate_to_constant();
+// A non-real constant comes back as a math.js `Complex` — `fromText("i")` is
+// `{re: 0, im: 1}`, not `null` — so this is the shape a consumer must handle,
+// and annotating it `number | null` is what let a `{re, im}` object out of two
+// DoenetML functions that promised a number.
+const _constant: number | Complex | null = fromText.evaluate_to_constant();
 void _equal;
 void _fuzzy;
 void _constant;
