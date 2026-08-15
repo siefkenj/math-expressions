@@ -49,12 +49,24 @@ consumer needs it.
   `fold_numeric_radical` (the `b^(p/q)` power form) each gained the
   negative-even-root branch; `principal_imaginary_sqrt` builds `m·i·sqrt(r)`.
 
-## Why grading was never at stake
+## Why grading was never at stake — for the *even*-root cases
 
-`equals` already evaluates all of these on the principal complex branch, so it
-answered `sqrt(-4) == 2i` **true** before this change. This was only ever a
-`simplify` / `.tree` display gap; folding it makes the surface form agree with
-what grading already knew.
+`equals` already evaluated all of the even-root cases above on the principal
+complex branch, so it answered `sqrt(-4) == 2i` **true** before this change;
+for those rows this was only ever a `simplify` / `.tree` display gap.
+
+**Addendum (2026-08-14, eleventh review pass):** for *odd* roots of negatives
+grading **was** at stake, in exactly the gap this spec left: the perfect-power
+rows above folded real while a non-perfect radicand (`(-2)^(1/3)`) still
+*evaluated* principal, so the branch depended on whether the radicand was a
+perfect power and four DoenetML `<answer>` cases regressed against legacy. The
+real-branch rule now extends to the evaluators: `rule_radical`'s `Pow` arm
+pulls the sign out of a non-perfect odd root at simplify time
+(`(-2)^(1/3) → -2^(1/3)`), and `eval_complex`, `CBRT::eval1` and
+`NTHROOT::eval2` read `(negative real)^(1/odd)` on the real branch for
+sampling. Even roots stay exactly as this spec settled them. See
+`active-plans/PR84_REVIEW_KNOWN_ISSUES.md` ("Fixed during review") and
+`tests/odd_root_real_branch.rs`.
 
 ## Verification
 

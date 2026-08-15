@@ -4,8 +4,8 @@ Snapshot of `packages/math-expressions-js-compat` (`npx vitest run`) on branch
 `doenet`, after rebuilding `vendor/wasm` (`bash build-wasm.sh`) so results reflect
 current Rust source.
 
-**Current totals (2026-08-14, at `c4ae2e4` + working-tree work, re-measured):
-0 failed / 6337 passed / 6348 total** (11 skipped, 0 todo). The suite is green.
+**Current totals (2026-08-14, at `41b9cb4`, re-measured):
+0 failed / 6341 passed / 6352 total** (11 skipped, 0 todo). The suite is green.
 The eleventh skip is `slow_assumptions` → `logical combinations`, where **legacy
 commits to answers that are mathematically false and this engine declines to**
 (see below); it was carried as the one red test until the ninth review pass,
