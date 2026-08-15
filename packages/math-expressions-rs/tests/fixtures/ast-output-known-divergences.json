@@ -19,12 +19,6 @@
   },
   {
     "kind": "latex",
-    "ast": "[\"^\",[\"apply\",\"nthroot\",2],3]",
-    "js": "\\left(\\sqrt{2}\\right)^{3}",
-    "rust": "\\operatorname{nthroot}\\left(2\\right)^{3}"
-  },
-  {
-    "kind": "latex",
     "ast": "[\"angle\",\"A\",\"B\",\"C\"]",
     "js": "\\angle ABC",
     "rust": "\\angle\\left( A, B, C \\right)"

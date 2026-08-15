@@ -75,6 +75,21 @@ impl Writer<'_> {
         }
     }
 
+    /// What the bracket notations (`|…|`, `…!`) wrap: the whole argument of
+    /// the application. The text twin of
+    /// [`latex::Writer::sole_argument`](super::latex) — see the long note
+    /// there. In the JS AST an application has exactly one operand and a
+    /// multi-argument application is an application *to a tuple*, so at any
+    /// arity but one the tuple is what belongs inside the brackets. Guarding
+    /// these arms on `args.len() == 1` instead dropped the notation entirely
+    /// and printed `abs(x, y)` where legacy wrote `|(x, y)|`.
+    fn sole_argument(&self, args: &[Expr], ctx: u8) -> String {
+        match args {
+            [only] => self.emit(only, ctx),
+            _ => self.render_seq(SeqKind::Tuple, args).0,
+        }
+    }
+
     fn render(&self, e: &Expr) -> (String, u8) {
         use prec::{ADD, AND, ATOM, INDEX, MUL, NEG, NOT, OR, POW, REL, SIGN};
         match e {
@@ -420,12 +435,13 @@ impl Writer<'_> {
         // Special notations for particular function heads.
         if let Expr::Sym(s) = head {
             match s.name().as_str() {
-                "abs" if args.len() == 1 => {
-                    return (format!("|{}|", self.emit(&args[0], 0)), prec::ATOM)
-                }
+                "abs" => return (format!("|{}|", self.sole_argument(args, 0)), prec::ATOM),
                 // factorial is postfix `!`, so it prints at POW precedence.
-                "factorial" if args.len() == 1 => {
-                    return (format!("{}!", self.emit(&args[0], prec::POW)), prec::POW)
+                "factorial" => {
+                    return (
+                        format!("{}!", self.sole_argument(args, prec::POW)),
+                        prec::POW,
+                    )
                 }
                 _ => {}
             }

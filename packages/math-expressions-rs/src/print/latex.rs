@@ -439,13 +439,20 @@ impl Writer<'_> {
                 }
                 // The one genuinely two-argument notation here: the second
                 // argument is the index, not part of what the radical wraps.
-                "nthroot" if args.len() == 2 => {
+                // At any other arity there is no index to raise, so what is
+                // left is a plain radical over the whole argument — which is
+                // what legacy rendered, and what `normalize::canonicalize`
+                // already assumes when it rewrites `nthroot(x)` to `sqrt(x)`.
+                // Falling through instead would print `\operatorname{nthroot}`
+                // for a tree the rest of the engine treats as a square root.
+                "nthroot" => {
                     return (
-                        format!(
-                            "\\sqrt[{}]{}",
-                            self.emit(&args[1], 0),
-                            self.braced(&args[0])
-                        ),
+                        match args {
+                            [radicand, index] => {
+                                format!("\\sqrt[{}]{}", self.emit(index, 0), self.braced(radicand))
+                            }
+                            _ => format!("\\sqrt{}", self.braced_argument(args)),
+                        },
                         prec::ATOM,
                     )
                 }
@@ -675,10 +682,18 @@ fn cat(left: &str, right: &str) -> String {
 
 /// A radical (`\sqrt`, `\sqrt[3]`, `\sqrt[n]`): self-delimiting, but reads
 /// clearer parenthesized when raised to a power (`\left(\sqrt{2}\right)^{3}`).
+///
+/// This must agree with the `sqrt`/`cbrt`/`nthroot` arms of
+/// [`Writer::render_apply`], which emit a radical at *every* arity — the arity
+/// only chooses whether there is an index. It used to be guarded on
+/// `args.len() == 1`, which stopped matching those arms once they learned to
+/// wrap a multi-argument list, and a disagreement here is silent: the radical
+/// still renders, it just loses the parentheses, so `sqrt(x, y)^3` came out as
+/// `\sqrt{\left( x, y \right)}^{3}` where legacy wrote
+/// `\left(\sqrt{\left( x, y \right)}\right)^{3}`.
 fn is_radical(e: &Expr) -> bool {
-    matches!(e, Expr::Apply(head, args) if matches!(&**head, Expr::Sym(s)
-        if (matches!(s.name().as_str(), "sqrt" | "cbrt") && args.len() == 1)
-            || (s.name() == "nthroot" && args.len() == 2)))
+    matches!(e, Expr::Apply(head, _) if matches!(&**head, Expr::Sym(s)
+        if matches!(s.name().as_str(), "sqrt" | "cbrt" | "nthroot")))
 }
 
 /// Symbol name → LaTeX. Multi-char names in the allowed set become control

@@ -1,4 +1,4 @@
-// 16 expectations here were rewritten from the original JS library's output to
+// 15 expectations here were rewritten from the original JS library's output to
 // the Rust printer's — see the longer note in `quick_ast-to-text.spec.ts`, which
 // these follow. LaTeX-specific ones:
 //
@@ -6,10 +6,15 @@
 //     padding was noise (and rendered identically either way)
 //   - `\partial ^{2}x` → `\partial^{2}x`: the space belongs before a letter that
 //     would extend the control word, not before a superscript
-//   - `nthroot(2)` keeps its `\operatorname{nthroot}` spelling instead of
-//     silently becoming `\sqrt{2}`, which did not re-parse to the same head
 //   - `\angle\left( A, B, C \right)` for `\angle ABC`, adopted earlier in
 //     `quick_latex-to-ast-to-latex.spec.ts`
+//
+// A sixteenth was rewritten and has since been put back: `nthroot(2)` was given
+// the `\operatorname{nthroot}` spelling on the grounds that `\sqrt{2}` "did not
+// re-parse to the same head". It does not, but the engine does not keep that
+// head either — `normalize::canonicalize` rewrites `nthroot(x)` to `sqrt(x)`,
+// so the two are one expression by the time anything compares them, and only
+// the display disagreed. The JS output stands.
 import astToLatex from "../lib/converters/ast-to-latex";
 
 var converter = new astToLatex();
@@ -957,7 +962,7 @@ const objectsToTest = [
   },
   {
     ast: ["^", ["apply", "nthroot", 2], 3],
-    latex: "\\operatorname{nthroot}\\left(2\\right)^{3}",
+    latex: "\\left(\\sqrt{2}\\right)^{3}",
   },
   {
     ast: 0.0000000000123,
