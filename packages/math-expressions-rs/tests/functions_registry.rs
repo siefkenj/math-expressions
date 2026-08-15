@@ -326,6 +326,7 @@ fn eval_coverage_matches_historical_known_function() {
         "round",
         "trace",
         "factorial",
+        "erf",
     ] {
         assert!(
             special_functions::eval1(name).is_some(),
@@ -340,16 +341,8 @@ fn eval_coverage_matches_historical_known_function() {
         );
     }
     // …and names deliberately NOT evaluable: aliases (evaluation runs on
-    // canonicalized trees), det, erf, rootof.
-    for name in [
-        "arcsin",
-        "ln",
-        "cosec",
-        "det",
-        "erf",
-        "rootof",
-        "notafunction",
-    ] {
+    // canonicalized trees), det, rootof.
+    for name in ["arcsin", "ln", "cosec", "det", "rootof", "notafunction"] {
         assert!(special_functions::eval1(name).is_none(), "{name:?}");
     }
 }

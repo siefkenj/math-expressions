@@ -456,6 +456,31 @@ describe("review cycle 3 — legacy contracts that had quietly lapsed", () => {
     expect(() => me.fromText("nthroot(x,4)").f()({ x: -16 })).toThrow();
   });
 
+  it("evaluates erf on the engine's own path, not only through math.js", () => {
+    // The mirror image of `nthroot`, and just as silent. `erf` had no
+    // evaluation kernel, so every engine-side numeric path answered `NaN`
+    // while `f()` — which compiles through math.js, and math.js *has* `erf` —
+    // was right all along. A DoenetML `<function>erf(x)</function>` therefore
+    // plotted correctly and reported `NaN` for `<number>$$f(0.5)</number>`,
+    // and its extrema search (which samples `evaluate_many`) found nothing.
+    // The legacy JavaScript library evaluated `erf` from all of these.
+    expect(me.fromText("erf(0.5)").evaluate_to_constant()).toBeCloseTo(
+      0.5204998778130465,
+      15,
+    );
+    // Cody's approximation, like math.js's, lands a ulp below the true
+    // `erf(1) = 0.8427007929497149` — the point is that both paths say so.
+    expect(Array.from(me.fromText("erf(x)").evaluate_many("x", [0.5, 1]))).toEqual([
+      0.5204998778130465, 0.8427007929497148,
+    ]);
+    // Same Cody coefficients on both sides, so they agree to the last bit
+    // rather than merely to a tolerance.
+    expect(me.fromText("erf(x)").f()({ x: 1 })).toBe(0.8427007929497148);
+    expect(me.fromText("erf(x)").f()({ x: 0.5 })).toBe(
+      me.fromText("erf(0.5)").evaluate_to_constant(),
+    );
+  });
+
   it("honors variables(include_subscripts)", () => {
     // The argument was dropped, so a caller matching against a subscripted
     // name — `Line.js`, deciding whether a coefficient mentions the line's own

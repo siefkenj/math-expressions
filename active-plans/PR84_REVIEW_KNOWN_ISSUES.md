@@ -156,9 +156,18 @@ for sampling — matching the raw quotient-node exponent shape too, because that
 single-point paths at 835 corpus points; and `CBRT::eval1`/`NTHROOT::eval2`
 (`special_functions/powers.rs`) follow. Even roots, decimal exponents with even reduced
 denominators (`(-8)^0.3333` = `3333/10000`), and complex bases stay principal. This is a
-deliberate divergence from mathjs (`x^(1/3)` at `x = -8` is `-2`, not `1 + i√3`), stated in
-`evaluate_fast_f64`'s rustdoc. Pinned in `tests/odd_root_real_branch.rs` and
-`spec/quick_doenet_grading_gaps.spec.ts`, both verified to fail against the unfixed engine.
+deliberate divergence from mathjs on the engine's *own* numeric paths (`x^(1/3)` at `x = -8` is
+`-2` there, not `1 + i√3`), stated in `evaluate_fast_f64`'s rustdoc. **It does not extend to
+`f()`**, which compiles the tree to math.js and so keeps mathjs's principal branch for a `Pow`
+node: `f()` of `x^(1/3)` at `x = -8` is `1 + i√3`, while `cbrt` and `nthroot` — which map onto
+math.js functions that take the real branch themselves — are `-2`. So `evaluate_many` and `f()`
+disagree about the power spelling and agree about the root spellings, and a DoenetML
+`<function>x^(1/3)</function>` still has a gap at negative inputs that `<answer>` grading does not.
+That gap is unchanged from legacy (which also evaluated the power spelling principal through
+`numericalf`), so it is a standing difference rather than a regression, and closing it would mean
+mapping the odd-root `Pow` shape onto `nthRoot` in `tree-to-mathjs.ts`. Pinned in
+`tests/odd_root_real_branch.rs` and `spec/quick_doenet_grading_gaps.spec.ts`, both verified to fail
+against the unfixed engine.
 
 **`f()` could not compile `nthroot`** (twelfth pass). `functionConversions` in
 `packages/math-expressions-rs-wasm/src-js/tree-to-mathjs.ts` maps AST heads onto math.js names,
@@ -169,10 +178,30 @@ negative ones. `f()` is the plotting and root-finding entry point, so a DoenetML
 `<function>nthroot(x,3)</function>` drew nothing at all; legacy plotted it. Now mapped, which also
 puts an odd root of a negative on the real branch (`nthRoot(-8, 3) === -2`), consistent with the
 odd-root entry above and with `cbrt`. Pinned in `spec/quick_doenet_compat_pr84.spec.ts`, verified
-to fail with the mapping removed. Worth a look for siblings: any AST head math.js spells
-differently, or does not have, fails the same silent way.
+to fail with the mapping removed.
+
+**The sibling sweep that entry asked for, done** (thirteenth pass). Every spelling the Rust
+registry can produce was diffed against `Object.keys(mathjs)` and against `functionConversions`,
+and every author-typable spelling — the union of DoenetML's `appliedFunctionSymbolsDefault` and
+`…Latex`, 69 of them — was then evaluated through `f()` at two in-domain points. `nthroot` was the
+only head broken that way. One head, `rootof`, is deliberately unmapped: it is in neither of
+DoenetML's applied lists, so it cannot be typed, and the `critical_points()` output that produces
+it goes through `evaluate_to_constant`, never `f()`.
+
+**`erf` had no evaluation kernel at all** (thirteenth pass) — the mirror image of `nthroot`, and
+just as silent. `ERF` in `special_functions/misc.rs` carried parser spellings and LaTeX rendering
+but no `eval1`, so `evaluate_to_constant("erf(0.5)")` was `None` and `evaluate_many` sampled `NaN`
+at every point, while `f()` was right throughout because math.js *has* `erf`. A DoenetML
+`<function>erf(x)</function>` therefore plotted a correct curve whose
+`<number>$$f(0.5)</number>` read `NaN` and whose extrema search found nothing — and legacy
+evaluated `erf` from all of those paths, so this was a regression. `eval1` is now a port of the
+same W. J. Cody rational-Chebyshev approximation math.js uses, so the two paths agree to the last
+bit rather than to a tolerance. Pinned in `tests/erf.rs` (which also asserts the three numeric
+entry points agree) and `spec/quick_doenet_compat_pr84.spec.ts`, verified to fail with `eval1`
+removed. The general lesson is the one the sweep confirms: a head can be missing from *either*
+path, and neither absence produces a warning.
 
 Everything else fixed during the review passes is described by its `Review cycle N:` commit and
-its tests; the suite state at this head is `cargo test --workspace` 860 passed / 0 failed and the
-compat suite 6,353 tests — 6,342 passing, 11 skipped, 0 failing — with `cargo fmt` and
+its tests; the suite state at this head is `cargo test --workspace` 862 passed / 0 failed and the
+compat suite 6,354 tests — 6,343 passing, 11 skipped, 0 failing — with `cargo fmt` and
 `clippy -D warnings` clean.

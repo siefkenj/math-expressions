@@ -42,9 +42,149 @@ pub const ERF: FnDef = FnDef {
     name: "erf",
     parse_text: &["erf"],
     parse_latex: &["erf"],
+    // Without this the symbol parses and prints but has no numeric value at
+    // all: `evaluate_to_constant("erf(0.5)")` was `NaN` and
+    // `evaluate_many` returned `NaN` at every sample, while the math.js
+    // compile path behind `Expression#f()` answered correctly — so the same
+    // expression read one way when plotted and another way when evaluated.
+    eval1: Some(|z| real_only(z, erf_real)),
     latex_commands: &[("erf", "erf")],
     ..DEFAULTS
 };
+
+/// The error function on the reals.
+///
+/// A direct port of W. J. Cody's 1987 rational-Chebyshev implementation
+/// (<https://www.netlib.org/specfun/erf>), chosen because it is the same
+/// algorithm and the same coefficients math.js uses — so this and the math.js
+/// path behind `Expression#f()` agree to the last bit, which is the property
+/// that was missing. Three intervals: a rational approximation to `erf` near
+/// zero, and two to `erfc` beyond it.
+#[allow(clippy::excessive_precision)]
+fn erf_real(x: f64) -> f64 {
+    /// Upper bound of the first approximation interval.
+    const THRESH: f64 = 0.46875;
+    /// Cody's constant for `1/sqrt(pi)`.
+    const SQRPI: f64 = 5.6418958354775628695e-1;
+    /// Beyond `2^53` an `f64` cannot distinguish `erf` from `±1` anyway.
+    const MAX_NUM: f64 = 9007199254740992.0;
+
+    const P0: [f64; 5] = [
+        3.16112374387056560e00,
+        1.13864154151050156e02,
+        3.77485237685302021e02,
+        3.20937758913846947e03,
+        1.85777706184603153e-1,
+    ];
+    const Q0: [f64; 4] = [
+        2.36012909523441209e01,
+        2.44024637934444173e02,
+        1.28261652607737228e03,
+        2.84423683343917062e03,
+    ];
+    const P1: [f64; 9] = [
+        5.64188496988670089e-1,
+        8.88314979438837594e00,
+        6.61191906371416295e01,
+        2.98635138197400131e02,
+        8.81952221241769090e02,
+        1.71204761263407058e03,
+        2.05107837782607147e03,
+        1.23033935479799725e03,
+        2.15311535474403846e-8,
+    ];
+    const Q1: [f64; 8] = [
+        1.57449261107098347e01,
+        1.17693950891312499e02,
+        5.37181101862009858e02,
+        1.62138957456669019e03,
+        3.29079923573345963e03,
+        4.36261909014324716e03,
+        3.43936767414372164e03,
+        1.23033935480374942e03,
+    ];
+    const P2: [f64; 6] = [
+        3.05326634961232344e-1,
+        3.60344899949804439e-1,
+        1.25781726111229246e-1,
+        1.60837851487422766e-2,
+        6.58749161529837803e-4,
+        1.63153871373020978e-2,
+    ];
+    const Q2: [f64; 5] = [
+        2.56852019228982242e00,
+        1.87295284992346047e00,
+        5.27905102951428412e-1,
+        6.05183413124413191e-2,
+        2.33520497626869185e-3,
+    ];
+
+    /// `exp(-y²)`, split as Cody does so the squaring never loses precision:
+    /// `y²` is computed from a 4-bit-truncated `y` plus a correction.
+    fn exp_neg_square(y: f64) -> f64 {
+        let ysq = (y * 16.0).trunc() / 16.0;
+        let del = (y - ysq) * (y + ysq);
+        (-ysq * ysq).exp() * (-del).exp()
+    }
+
+    /// `erf(y)` for `0 <= y <= THRESH`.
+    fn erf1(y: f64) -> f64 {
+        let ysq = y * y;
+        let mut xnum = P0[4] * ysq;
+        let mut xden = ysq;
+        for i in 0..3 {
+            xnum = (xnum + P0[i]) * ysq;
+            xden = (xden + Q0[i]) * ysq;
+        }
+        y * (xnum + P0[3]) / (xden + Q0[3])
+    }
+
+    /// `erfc(y)` for `THRESH <= y <= 4`.
+    fn erfc2(y: f64) -> f64 {
+        let mut xnum = P1[8] * y;
+        let mut xden = y;
+        for i in 0..7 {
+            xnum = (xnum + P1[i]) * y;
+            xden = (xden + Q1[i]) * y;
+        }
+        exp_neg_square(y) * ((xnum + P1[7]) / (xden + Q1[7]))
+    }
+
+    /// `erfc(y)` for `y > 4`.
+    fn erfc3(y: f64) -> f64 {
+        let inv = 1.0 / (y * y);
+        let mut xnum = P2[5] * inv;
+        let mut xden = inv;
+        for i in 0..4 {
+            xnum = (xnum + P2[i]) * inv;
+            xden = (xden + Q2[i]) * inv;
+        }
+        let result = inv * (xnum + P2[4]) / (xden + Q2[4]);
+        exp_neg_square(y) * ((SQRPI - result) / y)
+    }
+
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    // `signum` would answer ±1 at zero; `erf(0)` is 0 and `erf(-0.0)` is -0.0.
+    let sign = if x > 0.0 {
+        1.0
+    } else if x < 0.0 {
+        -1.0
+    } else {
+        return x;
+    };
+    let y = x.abs();
+    if y >= MAX_NUM {
+        sign
+    } else if y <= THRESH {
+        sign * erf1(y)
+    } else if y <= 4.0 {
+        sign * (1.0 - erfc2(y))
+    } else {
+        sign * (1.0 - erfc3(y))
+    }
+}
 
 pub const ARG: FnDef = FnDef {
     name: "arg",
