@@ -1,11 +1,12 @@
 # PR #84 review — known issues and durable findings
 
-The durable ledger from the eleven review passes over
+The durable ledger from the thirteen review passes over
 [Doenet/math-expressions#84](https://github.com/Doenet/math-expressions/pull/84). The pass-by-pass
 history lives in the git log (`Review cycle N:` commits) and the PR's edit history; this file keeps
 only what still describes the code. Every entry below was re-verified against the pin it names or
-carries a symbol anchor checked to exist at commit `41b9cb4`; the fifth pass re-reproduced each
-then-open entry through the built compat package.
+carries a symbol anchor checked to exist at the head this file is committed at (`41b9cb4` when the
+anchors were first swept at the eleventh pass, re-spot-checked at the thirteenth); the fifth pass
+re-reproduced each then-open entry through the built compat package.
 
 Conventions: "legacy" is `math-expressions@2.x` from npm. File paths are relative to
 `packages/math-expressions-rs/src/` for `.rs` and `packages/math-expressions-js-compat/lib/` for
@@ -59,8 +60,10 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   tells them apart. Parity with legacy (which held everything in a JS number) — a limit of the AST
   wire format, not a regression — recorded because `max_pow_bits` deliberately permits results a
   thousand times past the f64 ceiling.
-- **`1/(0^0)` stays written out** as `["/",1,{"$":"NaN"}]` rather than folding to `NaN`. Every
-  other arithmetic combination with a `NaN` operand folds.
+- **`1/(0^0)` stays written out** as `["/", 1, NaN]` rather than folding to `NaN`. Every other
+  arithmetic combination with a `NaN` operand folds. (The `{"$":"NaN"}` envelope no longer reaches
+  `.tree`; that half is fixed — see `engine-rust.ts` in DoenetML and the corresponding
+  `MATH_EXPRESSIONS_UPSTREAM_REQUESTS.md` entry.)
 
 ### Compat layer
 
@@ -135,9 +138,12 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   the node build so a later injection can never win. The invariant is written at its site in
   `lib/math-expressions.ts` (the `Context._assumptionsHandle` lazy accessors) and pinned by a spec
   that injects a counting proxy and asserts zero touches during import.
-- **The one skipped-with-reason compat test** (`slow_assumptions.spec.ts`) is not an engine
-  unsoundness: legacy's expected answers there are partly false, so the test cannot be passed
-  soundly. See `active-plans/ASSUMPTIONS_ENGINE_PLAN.md` ("Accepted divergence").
+- **The 11 skipped compat tests** are 9 in `quick_trees.spec.ts` and 2 in
+  `slow_assumptions.spec.ts`; all but one carry a `[wontfix: …]` tag in the test name saying why.
+  None is an engine unsoundness: legacy's expected answers there are partly false, so the tests
+  cannot be passed soundly. See `active-plans/ASSUMPTIONS_ENGINE_PLAN.md` ("Accepted divergence").
+  The exception is `slow_assumptions.spec.ts`'s "define constants" (`:7292`), which carries a plain
+  comment rather than a tag — worth tagging so the count stays self-explaining.
 - **Aggregates have no default parser spelling**: `fromText("sum(3,17,5-4)")` parses as
   `s·u·m·(…)` unless `appliedFunctionSymbols` is passed. Deliberate, matches legacy.
 
