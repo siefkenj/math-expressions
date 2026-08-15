@@ -439,6 +439,23 @@ describe("review cycle 3 — legacy contracts that had quietly lapsed", () => {
     expect(me.fromText("x^2").f()({ x: 3 })).toBe(9);
   });
 
+  it("compiles nthroot, which math.js spells differently", () => {
+    // `nthroot` is ordinary DoenetML — `<function>nthroot(x,3)</function>`.
+    // math.js has no `nthroot`, only `nthRoot`, and an unknown head compiles
+    // fine and then throws `Undefined function nthroot` on the first
+    // `evaluate`. So it was not "wrong at negative inputs"; it was unevaluable
+    // at every input, and a `<function>` written that way plotted nothing.
+    expect(me.fromText("nthroot(x,3)").f()({ x: 8 })).toBe(2);
+    expect(me.fromText("nthroot(x,2)").f()({ x: 9 })).toBe(3);
+    // Odd root of a negative takes the real branch, like the rest of the
+    // engine and like `cbrt`.
+    expect(me.fromText("nthroot(x,3)").f()({ x: -8 })).toBe(-2);
+    expect(me.fromText("cbrt(x)").f()({ x: -8 })).toBe(-2);
+    // An even root of a negative has no real value to plot: math.js throws,
+    // and `f()`'s callers turn that into `NaN`, which is the wanted answer.
+    expect(() => me.fromText("nthroot(x,4)").f()({ x: -16 })).toThrow();
+  });
+
   it("honors variables(include_subscripts)", () => {
     // The argument was dropped, so a caller matching against a subscripted
     // name — `Line.js`, deciding whether a coefficient mentions the line's own

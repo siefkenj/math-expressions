@@ -160,7 +160,19 @@ deliberate divergence from mathjs (`x^(1/3)` at `x = -8` is `-2`, not `1 + i√3
 `evaluate_fast_f64`'s rustdoc. Pinned in `tests/odd_root_real_branch.rs` and
 `spec/quick_doenet_grading_gaps.spec.ts`, both verified to fail against the unfixed engine.
 
+**`f()` could not compile `nthroot`** (twelfth pass). `functionConversions` in
+`packages/math-expressions-rs-wasm/src-js/tree-to-mathjs.ts` maps AST heads onto math.js names,
+and math.js spells this one `nthRoot`. An unknown head is not a compile error — it becomes a
+`FunctionNode` over an undefined symbol and throws `Undefined function nthroot` on the first
+`evaluate` — so `nthroot(x, n)` was unevaluable through `f()` at _every_ input, not only at
+negative ones. `f()` is the plotting and root-finding entry point, so a DoenetML
+`<function>nthroot(x,3)</function>` drew nothing at all; legacy plotted it. Now mapped, which also
+puts an odd root of a negative on the real branch (`nthRoot(-8, 3) === -2`), consistent with the
+odd-root entry above and with `cbrt`. Pinned in `spec/quick_doenet_compat_pr84.spec.ts`, verified
+to fail with the mapping removed. Worth a look for siblings: any AST head math.js spells
+differently, or does not have, fails the same silent way.
+
 Everything else fixed during the review passes is described by its `Review cycle N:` commit and
-its tests; the suite state at `41b9cb4` is `cargo test --workspace` 860 passed / 0 failed and the
-compat suite 6,352 tests — 6,341 passing, 11 skipped, 0 failing — with `cargo fmt` and
+its tests; the suite state at this head is `cargo test --workspace` 860 passed / 0 failed and the
+compat suite 6,353 tests — 6,342 passing, 11 skipped, 0 failing — with `cargo fmt` and
 `clippy -D warnings` clean.

@@ -108,11 +108,26 @@ function conjoin(math: MathJsInstance, comparisons: MathNode[]): MathNode {
   return result;
 }
 
-/** AST function names that map onto a different math.js function name. */
+/**
+ * AST function names that map onto a different math.js function name.
+ *
+ * A name missing from this map and absent from math.js compiles to a
+ * `FunctionNode` over an undefined symbol, which does not fail at compile time
+ * — it throws `Undefined function <name>` on the first `evaluate`, i.e. per
+ * sample, from inside a caller that is plotting. `nthroot` was exactly that:
+ * math.js spells it `nthRoot`, so every `nthroot(x, n)` an author wrote was
+ * unevaluable through `f()`, at every input, not only the interesting ones.
+ *
+ * `nthRoot` also takes the real branch for an odd root of a negative
+ * (`nthRoot(-8, 3) === -2`), which is what the rest of the engine now does, and
+ * throws for an even root of a negative — where there is no real value to plot,
+ * so the caller's `catch` producing `NaN` is the wanted answer.
+ */
 const functionConversions: Record<string, string> = {
   nCr: "combinations",
   nPr: "permutations",
   binom: "combinations",
+  nthroot: "nthRoot",
 };
 
 // ---------------------------------------------------------------------------
