@@ -18,6 +18,36 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
 
 ### Rust crate
 
+- **The parsers produce an `Apply` shape the JS AST cannot express, so an expression is not equal
+  to itself after a round trip through `.tree`.** `f((x, y))` parses to
+  `Apply(f, [Seq(Tuple, [x, y])])` and `f(x, y)` to `Apply(f, [x, y])`, but `to_js` writes
+  `["apply","f",["tuple","x","y"]]` for *both* — byte-identical JSON — and `try_from_js` maps that
+  back to the second. The serialization is not injective, and the JS AST is the contract with a
+  consumer. Measured through the built package: `me.fromText("f((1,2))").tree` equals
+  `me.fromText("f(1,2)").tree` while `x.equals(me.fromAst(x.tree))` is **`false`**. The legacy
+  library had one tree for both spellings and answered `true` throughout, so every case below is a
+  regression against it.
+
+  **Not a grading defect** — that was measured end to end rather than assumed. DoenetML's
+  `checkEquality` passes raw `.tree` values to `check_equality`, which rebuilds both operands with
+  `me.fromAst` one line before calling `.equals()`, so the distinction is erased on the way in: an
+  `<answer>` awards full credit for the extra-parenthesis spelling on every head tried
+  (`sin`, `nPr`, `abs`, `floor`, `mod`), and `<boolean>$m1 = $m2</boolean>` is `true` while the
+  underlying objects compare `false`. What is *not* erased is **display**: the same saved JSON
+  renders `\sin\left(\left( x, y \right)\right)` before a save/restore and `\sin\left( x, y \right)`
+  after, and `floor((x,y))` changes notation outright, from `\left\lfloor … \right\rfloor` to
+  `\operatorname{floor}(…)`. LaTeX output has stopped being a function of the AST. Legacy is stable
+  across the same round trip.
+
+  The sixteenth pass's `spread_list_argument` closes the subset where the *spread* arity is
+  evaluable, which is the subset that reached grading — `mod` and the six aggregates normalize;
+  `sin`, `abs`, `floor`, `nPr` and 56 others still do not, because there the two spellings are
+  distinct opaque atoms rather than one value and one non-value. The fix for the rest is in the
+  **parsers**, not in canonicalization: flatten a lone `Tuple` argument at parse time, exactly as
+  `expr::serde::try_from_js` already does, so the Rust tree carries no distinction the JS AST
+  lacks. Canonicalizing it instead would fix `equals` and leave the rendering, which reads the raw
+  tree. `spread_list_argument` still earns its place afterwards, for the list kinds that are *not*
+  `Tuple` (`Seq(List, …)` round-trips through JS intact and is reachable from a DoenetML tree).
 - **DP5(4) evaluates stage 7 twice per accepted step** (`mathjs_compat/ode.rs`, `solve_ode`): the
   FSAL stage loop already produced `f(t+h, ynew)` into `k[6]`. 7 RHS calls per step instead of 6,
   and through `solve_ode` each one is a JS boundary crossing. The `terminated_early` branch hanging
