@@ -8,7 +8,7 @@
 //! brace-based Leibniz notation, and the `\circ` exponent unit.
 
 use super::common::{
-    atom_string, is_positive_number, negate_number, other_op, parse_js_float, sign_string,
+    apply, atom_string, is_positive_number, negate_number, other_op, parse_js_float, sign_string,
     MAX_PARSE_DEPTH, P,
 };
 use super::error::ParseError;
@@ -402,7 +402,7 @@ impl LatexToAst {
                 return Err(self.err("Expecting |"));
             }
             self.advance()?;
-            result = Some(Expr::Apply(Box::new(Expr::sym("abs")), vec![st]));
+            result = Some(apply(Expr::sym("abs"), vec![st]));
         } else if matches!(self.token.ttype, Tok::LFloor | Tok::LCeil) {
             result = Some(self.floor_ceil()?);
         } else if self.token.ttype == Tok::Angle {
@@ -529,11 +529,11 @@ impl LatexToAst {
         self.advance()?;
 
         Ok(if root == Expr::int(2) {
-            Expr::Apply(Box::new(Expr::sym("sqrt")), vec![parameter])
+            apply(Expr::sym("sqrt"), vec![parameter])
         } else if root == Expr::int(3) {
-            Expr::Apply(Box::new(Expr::sym("cbrt")), vec![parameter])
+            apply(Expr::sym("cbrt"), vec![parameter])
         } else {
-            Expr::Apply(Box::new(Expr::sym("nthroot")), vec![parameter, root])
+            apply(Expr::sym("nthroot"), vec![parameter, root])
         })
     }
 
@@ -545,7 +545,7 @@ impl LatexToAst {
         };
         self.advance()?;
         let st = self.statement(P::default())?;
-        let result = Expr::Apply(Box::new(Expr::sym(function_name)), vec![st]);
+        let result = apply(Expr::sym(function_name), vec![st]);
         if self.token.ttype != expected_right {
             return Err(self.err(format!("Expecting {}", expected_right)));
         }
@@ -613,7 +613,7 @@ impl LatexToAst {
 
         if p.in_subsuperscript {
             if must_apply {
-                result = Expr::Apply(Box::new(result), vec![Expr::Blank]);
+                result = apply(result, vec![Expr::Blank]);
             }
         } else {
             // Prime/caret runs on a function symbol (`\sin''`, `\sin^2^2…`)
@@ -661,7 +661,7 @@ impl LatexToAst {
                     Expr::Seq(SeqKind::List, xs) => xs,
                     other => vec![other],
                 };
-                result = Expr::Apply(Box::new(result), args);
+                result = apply(result, args);
             } else if must_apply {
                 if !self.opts.allow_simplified_function_application {
                     return Err(self.err("Expecting ( after function"));
@@ -672,7 +672,7 @@ impl LatexToAst {
                         ..P::default()
                     })?
                     .unwrap_or(Expr::Blank);
-                result = Expr::Apply(Box::new(result), vec![arg]);
+                result = apply(result, vec![arg]);
             }
         }
 
@@ -874,7 +874,7 @@ impl LatexToAst {
             ops.extend(ds);
         }
 
-        Ok(Expr::Apply(Box::new(head), vec![integrand]))
+        Ok(apply(head, vec![integrand]))
     }
 
     /// `\frac{d^n f}{d x^n}` derivative in Leibniz notation. Assumes the

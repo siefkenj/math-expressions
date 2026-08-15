@@ -506,21 +506,28 @@ describe("review cycle 3 — legacy contracts that had quietly lapsed", () => {
     ).toBe(true);
   });
 
-  it("reads f((a,b)) as f(a,b), the way legacy's parser had to", () => {
+  it("reads a sequence argument as an argument list, the way legacy's parser had to", () => {
     // Legacy's text parser wrote the *same* tree for `mod(7,3)` and
     // `mod((7,3))` — `["apply","mod",["tuple",7,3]]` — so the extra pair of
-    // parentheses cost nothing and both answered 1. This parser keeps the two
-    // spellings apart, and only the folding layer put them back together:
-    // `simplify` gave 1 while `equals` sampled the whole application as an
-    // unknown and said it differed from 1, with `evaluate_to_constant` null.
-    // That is the `det` split, one function over — so `<number>` read nothing
-    // and `<answer>` graded it wrong.
-    for (const [parenthesized, plain, value] of [
+    // parentheses cost nothing and both answered 1. This parser used to keep
+    // the two spellings apart, and only the folding layer put them back
+    // together: `simplify` gave 1 while `equals` sampled the whole application
+    // as an unknown and said it differed from 1, with `evaluate_to_constant`
+    // null. That is the `det` split, one function over — so `<number>` read
+    // nothing and `<answer>` graded it wrong.
+    //
+    // The parenthesized spelling is now flattened in the parsers, so it is
+    // literally the same tree as `mod(7,3)`; the bracketed one is what still
+    // reaches the folding layer's `spread_list_argument`. Both are checked.
+    for (const [sequence, plain, value] of [
+      ["mod([7,3])", "mod(7,3)", 1],
+      ["nPr([5,2])", "nPr(5,2)", 20],
+      ["nCr([5,2])", "nCr(5,2)", 10],
       ["mod((7,3))", "mod(7,3)", 1],
       ["nPr((5,2))", "nPr(5,2)", 20],
       ["nCr((5,2))", "nCr(5,2)", 10],
     ] as const) {
-      const e = me.fromText(parenthesized);
+      const e = me.fromText(sequence);
       expect(e.equals(me.fromText(String(value)))).toBe(true);
       expect(e.equals(me.fromText(plain))).toBe(true);
       expect(e.evaluate_to_constant()).toBe(value);
@@ -528,9 +535,62 @@ describe("review cycle 3 — legacy contracts that had quietly lapsed", () => {
     // The arity check still happens on the spread list, so a head that does not
     // take two arguments is left symbolic — on both layers, which is the part
     // that matters. It equals itself and claims no value.
-    const abs = me.fromText("abs((-3,5))");
+    const abs = me.fromText("abs([-3,5])");
     expect(abs.equals(abs)).toBe(true);
     expect(Number.isNaN(abs.evaluate_to_constant())).toBe(true);
+  });
+
+  it("makes f((a,b)) the same tree as f(a,b), so `.tree` round-trips", () => {
+    // `to_js` writes `["apply","f",["tuple","x","y"]]` for a one-argument
+    // apply whose argument is a tuple *and* for a two-argument apply, and
+    // `fromAst` reads that back as the second. So while the parsers produced
+    // the first, an expression was not equal to itself after a round trip
+    // through its own `.tree` — and, since the printers read the raw tree,
+    // the same saved JSON rendered differently before and after a save.
+    for (const [nested, flat] of [
+      ["sin((x,y))", "sin(x,y)"],
+      ["floor((x,y))", "floor(x,y)"],
+      ["f((x,y))", "f(x,y)"],
+      ["|(x,y)|", "abs(x,y)"],
+    ] as const) {
+      const e = me.fromText(nested);
+      expect(e.tree).toEqual(me.fromText(flat).tree);
+      expect(e.equals(me.fromAst(e.tree))).toBe(true);
+      expect(me.fromAst(e.tree).toLatex()).toEqual(e.toLatex());
+    }
+    // `factorial` has no applied-function spelling in the text parser, so its
+    // flat form is only reachable as an AST.
+    const bang = me.fromText("(x,y)!");
+    expect(bang.tree).toEqual(["apply", "factorial", ["tuple", "x", "y"]]);
+    expect(bang.equals(me.fromAst(bang.tree))).toBe(true);
+    expect(me.fromAst(bang.tree).toLatex()).toEqual(bang.toLatex());
+    // A tuple that is not the whole argument list is untouched.
+    const two = me.fromText("f((x,y),z)");
+    expect(two.tree).toEqual([
+      "apply",
+      "f",
+      ["tuple", ["tuple", "x", "y"], "z"],
+    ]);
+    expect(two.equals(me.fromAst(two.tree))).toBe(true);
+  });
+
+  it("renders the bracket notations around a tuple argument", () => {
+    // These wrap the application's whole argument, which for more than one
+    // argument is a tuple. Rendering only the one-argument case with brackets
+    // emitted LaTeX commands that do not exist — `\abs\left( x, y \right)`,
+    // and `\sqrt` with no braced argument.
+    expect(me.fromText("abs(x,y)").toLatex()).toEqual(
+      "\\left|\\left( x, y \\right)\\right|",
+    );
+    expect(me.fromText("sqrt(x,y)").toLatex()).toEqual(
+      "\\sqrt{\\left( x, y \\right)}",
+    );
+    expect(me.fromText("floor(x,y)").toLatex()).toEqual(
+      "\\left\\lfloor \\left( x, y \\right) \\right\\rfloor",
+    );
+    // and the one-argument spellings are unchanged
+    expect(me.fromText("abs(x)").toLatex()).toEqual("\\left|x\\right|");
+    expect(me.fromText("sqrt(x)").toLatex()).toEqual("\\sqrt{x}");
   });
 
   it("honors variables(include_subscripts)", () => {

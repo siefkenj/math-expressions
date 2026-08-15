@@ -142,21 +142,23 @@ fn effective_args(head: &Expr, args: &[Expr]) -> Vec<Expr> {
     spread_list_argument(head, args).unwrap_or_else(|| args.to_vec())
 }
 
-/// `f((a, b))` read as `f(a, b)`, or `None` when this head and argument list
-/// are not that shape.
+/// `f([a, b])` read as `f(a, b)` — an application whose sole argument is a
+/// sequence of values — or `None` when this head and argument list are not
+/// that shape.
 ///
-/// The legacy library had no such distinction to make: its parser produced
-/// `["apply","mod",["tuple",7,3]]` for `mod(7,3)` *and* for `mod((7,3))`, so
-/// every application carried a tuple and `mod((7,3))` was `1`. This engine's
-/// parser keeps them apart, and the spelling with the extra parentheses has to
-/// be brought back to the same value.
+/// The parenthesized spelling `f((a, b))` no longer arrives here: the parsers
+/// flatten a lone `Tuple` argument (`parse::common::apply`), the way
+/// `expr::serde::try_from_js` always has, so `mod((7,3))` *is* `mod(7,3)`
+/// before normalization sees it. What is left for this to do is the other
+/// list kinds, which do survive both the parsers and the JS AST: `mod([7,3])`
+/// and `["apply","mod",["list",7,3]]` are still one sequence argument.
 ///
 /// **Both layers that read an application must call this**, which is why it is
 /// `pub(crate)` rather than private to the fold. `normalize::fold_apply` folds
 /// the spread form; the equality sampler in `eval_numeric::complex` decides
 /// from the same question whether an application has a value at all or is an
 /// opaque atom to draw a random sample for. When only the fold spread,
-/// `simplify(mod((7,3)))` was `1` while `equals(mod((7,3)), 1)` was `false` —
+/// `simplify(mod([7,3]))` was `1` while `equals(mod([7,3]), 1)` was `false` —
 /// the same split that made a determinant differ from its own value
 /// (`matrix::scalar_reduction`).
 ///
@@ -164,7 +166,7 @@ fn effective_args(head: &Expr, args: &[Expr]) -> Vec<Expr> {
 /// reduce a list of numbers to one number: the nine variadic aggregates plus
 /// the fixed-arity `mod`, `nPr`, `nCr`, `abs`, `sign`, `floor`, `ceil`,
 /// `log10`, `log2`, `round`. Spreading into a fixed-arity head is not a
-/// mistake — it is what makes `mod((7,3))` legal — because the arity check
+/// mistake — it is what makes `mod([7,3])` legal — because the arity check
 /// still happens downstream, on the spread list.
 pub(crate) fn spread_list_argument(head: &Expr, args: &[Expr]) -> Option<Vec<Expr>> {
     match (head, args) {
@@ -369,29 +371,32 @@ mod tests {
         }
     }
 
-    /// …and so does a fixed-arity head, which is what makes the extra pair of
-    /// parentheses harmless. The text parser is where the two spellings come
-    /// apart — `mod((7,3))` is one `Seq` argument where `mod(7,3)` is two —
-    /// and legacy had no such distinction to make, since its parser wrote a
-    /// tuple for both and answered `1` to each.
+    /// …and so does a fixed-arity head. The parenthesized spelling reaches the
+    /// same value without this branch — the parsers flatten a lone `Tuple`, so
+    /// `mod((7,3))` *is* `mod(7,3)` — but a bracketed list does not, and it is
+    /// a spelling both the text parser and the JS AST can carry.
     ///
     /// The arity check still happens, on the spread list: a head whose folder
     /// does not take that many arguments is left alone rather than forced.
     #[test]
-    fn a_fixed_arity_head_spreads_a_tuple_too() {
+    fn a_fixed_arity_head_spreads_a_list_argument_too() {
+        // These take the branch: an `Array` argument is not flattened anywhere.
+        assert_eq!(run("mod([7,3])"), "1");
+        assert_eq!(run("nPr([5,2])"), "20");
+        assert_eq!(run("nCr([5,2])"), "10");
+        assert_eq!(run_js(r#"["apply","mod",["list",7,3]]"#), "1");
+        // The parenthesized and two-argument spellings, for the same values;
+        // both are the same tree by the time they arrive.
         assert_eq!(run("mod((7,3))"), "1");
-        assert_eq!(run("nPr((5,2))"), "20");
-        assert_eq!(run("nCr((5,2))"), "10");
-        // The two-argument spellings, for the same values.
         assert_eq!(run("mod(7,3)"), "1");
         assert_eq!(run("nPr(5,2)"), "20");
         assert_eq!(run("nCr(5,2)"), "10");
         // Spreading is not forcing: `abs` takes one argument, so a two-element
-        // tuple leaves it symbolic rather than folding to something.
-        assert_eq!(run("abs((-3,5))"), r#"["apply","abs",["tuple",-3,5]]"#);
+        // list leaves it symbolic rather than folding to something.
+        assert_eq!(run("abs([-3,5])"), r#"["apply","abs",["array",-3,5]]"#);
         assert_eq!(
-            run("log10((100,5))"),
-            r#"["apply","log10",["tuple",100,5]]"#
+            run("log10([100,5])"),
+            r#"["apply","log10",["array",100,5]]"#
         );
     }
 

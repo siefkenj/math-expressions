@@ -707,18 +707,24 @@ fn mathjs_named_constants_evaluate() {
 /// turns it into.
 ///
 /// `det` was the first instance (`tests/matrix.rs`). This is the second:
-/// `f((a,b))` read as `f(a,b)`, which the fold did and the sampler did not, so
-/// `simplify(mod((7,3)))` was `1` while `equals(mod((7,3)), 1)` was `false` and
+/// `f([a,b])` read as `f(a,b)`, which the fold did and the sampler did not, so
+/// `simplify(mod([7,3]))` was `1` while `equals(mod([7,3]), 1)` was `false` and
 /// `evaluate_to_constant` was `None`. Both now go through
 /// `normalize::spread_list_argument`.
 ///
-/// Legacy is the authority for the values: its parser produced the same tuple
-/// tree for `mod(7,3)` and `mod((7,3))`, so both were `1` there. Measured
-/// against `math-expressions@2.0.0-alpha94`.
+/// The bracketed spelling is the one that still reaches that helper. The
+/// parenthesized `mod((7,3))` is checked alongside it because it is the
+/// spelling the defect was first found in, but it no longer depends on the
+/// helper at all: the parsers flatten a lone `Tuple` argument, so it is the
+/// same tree as `mod(7,3)` — which is what legacy produced for both, and why
+/// both were `1` there. Measured against `math-expressions@2.0.0-alpha94`.
 #[test]
-fn an_extra_pair_of_parentheses_does_not_split_the_folder_from_the_sampler() {
+fn a_sequence_argument_does_not_split_the_folder_from_the_sampler() {
     use math_expressions::evaluate_to_constant;
     for (parenthesized, plain, value) in [
+        ("mod([7,3])", "mod(7,3)", "1"),
+        ("nPr([5,2])", "nPr(5,2)", "20"),
+        ("nCr([5,2])", "nCr(5,2)", "10"),
         ("mod((7,3))", "mod(7,3)", "1"),
         ("nPr((5,2))", "nPr(5,2)", "20"),
         ("nCr((5,2))", "nCr(5,2)", "10"),
@@ -742,7 +748,7 @@ fn an_extra_pair_of_parentheses_does_not_split_the_folder_from_the_sampler() {
     // argument, so `abs((-3,5))` stays symbolic — on *both* layers, which is
     // the property that matters here. It is its own opaque atom and equal to
     // itself, and claims no value.
-    for symbolic in ["abs((-3,5))", "log10((100,5))", "floor((1.5,2.5))"] {
+    for symbolic in ["abs([-3,5])", "log10([100,5])", "floor([1.5,2.5])"] {
         assert!(eq(symbolic, symbolic), "{symbolic} must equal itself");
         assert!(
             equals(

@@ -1,6 +1,6 @@
 # PR #84 review — known issues and durable findings
 
-The durable ledger from the seventeen review passes over
+The durable ledger from the eighteen review passes over
 [Doenet/math-expressions#84](https://github.com/Doenet/math-expressions/pull/84). The pass-by-pass
 history lives in the git log (`Review cycle N:` commits) and the PR's edit history; this file keeps
 only what still describes the code. Every entry below was re-verified against the pin it names or
@@ -18,36 +18,6 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
 
 ### Rust crate
 
-- **The parsers produce an `Apply` shape the JS AST cannot express, so an expression is not equal
-  to itself after a round trip through `.tree`.** `f((x, y))` parses to
-  `Apply(f, [Seq(Tuple, [x, y])])` and `f(x, y)` to `Apply(f, [x, y])`, but `to_js` writes
-  `["apply","f",["tuple","x","y"]]` for *both* — byte-identical JSON — and `try_from_js` maps that
-  back to the second. The serialization is not injective, and the JS AST is the contract with a
-  consumer. Measured through the built package: `me.fromText("f((1,2))").tree` equals
-  `me.fromText("f(1,2)").tree` while `x.equals(me.fromAst(x.tree))` is **`false`**. The legacy
-  library had one tree for both spellings and answered `true` throughout, so every case below is a
-  regression against it.
-
-  **Not a grading defect** — that was measured end to end rather than assumed. DoenetML's
-  `checkEquality` passes raw `.tree` values to `check_equality`, which rebuilds both operands with
-  `me.fromAst` one line before calling `.equals()`, so the distinction is erased on the way in: an
-  `<answer>` awards full credit for the extra-parenthesis spelling on every head tried
-  (`sin`, `nPr`, `abs`, `floor`, `mod`), and `<boolean>$m1 = $m2</boolean>` is `true` while the
-  underlying objects compare `false`. What is *not* erased is **display**: the same saved JSON
-  renders `\sin\left(\left( x, y \right)\right)` before a save/restore and `\sin\left( x, y \right)`
-  after, and `floor((x,y))` changes notation outright, from `\left\lfloor … \right\rfloor` to
-  `\operatorname{floor}(…)`. LaTeX output has stopped being a function of the AST. Legacy is stable
-  across the same round trip.
-
-  The sixteenth pass's `spread_list_argument` closes the subset where the *spread* arity is
-  evaluable, which is the subset that reached grading — `mod` and the six aggregates normalize;
-  `sin`, `abs`, `floor`, `nPr` and 56 others still do not, because there the two spellings are
-  distinct opaque atoms rather than one value and one non-value. The fix for the rest is in the
-  **parsers**, not in canonicalization: flatten a lone `Tuple` argument at parse time, exactly as
-  `expr::serde::try_from_js` already does, so the Rust tree carries no distinction the JS AST
-  lacks. Canonicalizing it instead would fix `equals` and leave the rendering, which reads the raw
-  tree. `spread_list_argument` still earns its place afterwards, for the list kinds that are *not*
-  `Tuple` (`Seq(List, …)` round-trips through JS intact and is reachable from a DoenetML tree).
 - **DP5(4) evaluates stage 7 twice per accepted step** (`mathjs_compat/ode.rs`, `solve_ode`): the
   FSAL stage loop already produced `f(t+h, ynew)` into `k[6]`. 7 RHS calls per step instead of 6,
   and through `solve_ode` each one is a JS boundary crossing. The `terminated_early` branch hanging
@@ -182,6 +152,41 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
 
 ## Fixed during review, kept for its contract
 
+**`f((a, b))` and `f(a, b)` are one tree, because `to_js` cannot tell them apart** (eighteenth
+pass). `f((x, y))` parsed to `Apply(f, [Seq(Tuple, [x, y])])` and `f(x, y)` to `Apply(f, [x, y])`,
+but `to_js` writes `["apply","f",["tuple","x","y"]]` for *both* — byte-identical JSON — and
+`try_from_js` maps that back to the second. The serialization was not injective, and the JS AST is
+the contract with every consumer, so an expression was not equal to itself after a round trip
+through its own `.tree`: `me.fromText("f((1,2))").tree` equalled `me.fromText("f(1,2)").tree` while
+`x.equals(me.fromAst(x.tree))` was **`false`**.
+
+The fix is in the **parsers**, not in canonicalization, because the printers read the raw tree: a
+canonical-form fix would have repaired `equals` and left the display wrong. `parse::common::apply`
+flattens a lone `Tuple` argument exactly as `expr::serde::try_from_js` always has, and every
+`Expr::Apply` the two parsers build now goes through it — the call form, the simplified
+application, `|…|`, `⌊…⌋`, `⌈…⌉`, `√`, `∛`, `…!` and the integral. Only a *lone* tuple flattens: in
+`f((x, y), z)` the inner tuple is one of two arguments, survives the round trip intact, and is left
+alone. Legacy had one tree for both spellings, so this is parity, not a new rule.
+
+It was never a grading defect — DoenetML's `checkEquality` rebuilds both operands with `me.fromAst`
+one line before `.equals()`, so the distinction was erased on the way in — but it was a **display**
+regression: the same saved JSON rendered `\sin\left(\left( x, y \right)\right)` before a
+save/restore and `\sin\left( x, y \right)` after. Pinned in `tests/js_ast_image.rs`, whose
+corpus sweep states the property directly (rendering is a function of the saved JSON) over every
+parser fixture plus six hand-written spellings, and which fails both against the unfixed parsers
+and against the plausible over-flattening variant that spreads *every* tuple argument.
+
+Two things followed from it. The sixteenth pass's `normalize::spread_list_argument` keeps its
+place, but for the *other* list kinds — `mod([7,3])` and `["apply","mod",["list",7,3]]` are still
+one sequence argument, and `Tuple` no longer reaches it from any parser — so its tests now exercise
+the bracketed spelling, which is the one that can still fail if the branch is narrowed. And the
+LaTeX printer's bracket notations turned out to be guarded on `args.len() == 1`, falling through to
+`head\left(…\right)` otherwise and spelling the head as a command that does not exist: `abs(x, y)`
+rendered as `\abs\left( x, y \right)` and `sqrt(x, y)` as `\sqrt\left( x, y \right)`, neither
+of which MathJax can render. They now wrap the tuple, which is both what the JS AST says the
+argument is and what legacy rendered (`print/latex.rs::sole_argument`, pinned in
+`tests/formatter_fixes.rs`).
+
 **A `rootof` whose polynomial is written as a product reaches the same leaf** (seventeenth pass).
 `canon_apply` rewrites `rootof(p, k)` into the `Expr::RootOf` leaf only when
 `polynomials::rootof::from_apply_args` accepts, and `expr_to_upoly` read only a *sum of monomials*.
@@ -212,16 +217,19 @@ rather than a regression. It is fixed rather than filed because that surface shi
 which applies any name followed by a parenthesized list — and through `\operatorname{rootof}` in
 LaTeX.
 
-**`f((a, b))` is read as `f(a, b)` by the sampler too** (sixteenth pass). The same split as the
-`det` entry below, on the same path, found by asking what else the two layers could disagree
-about. Legacy's text parser wrote one tree for `mod(7,3)` and `mod((7,3))` — a head applied to a
-tuple — so the extra parentheses cost nothing and both answered `1`. This parser keeps them apart,
-and only `normalize/fold_apply.rs` put them back together, via an `effective_args` helper that
-spread a single list argument. The sampler in `eval_numeric/complex.rs` did not, and
+**A sequence argument is read as an argument list by the sampler too** (sixteenth pass). The same
+split as the `det` entry below, on the same path, found by asking what else the two layers could
+disagree about. Legacy's text parser wrote one tree for `mod(7,3)` and `mod((7,3))` — a head
+applied to a tuple — so the extra parentheses cost nothing and both answered `1`. This parser kept
+them apart, and only `normalize/fold_apply.rs` put them back together, via an `effective_args`
+helper that spread a single list argument. The sampler in `eval_numeric/complex.rs` did not, and
 `known_function("mod", 1)` is false, so it called the application an opaque atom: `simplify` gave
 `1`, `equals(mod((7,3)), 1)` gave `false`, and `evaluate_to_constant` gave `None` — `<number>` read
 nothing and `<answer>` graded it wrong. `nPr` and `nCr` are the other two heads whose folder takes
-the arity the spread produces.
+the arity the spread produces. (The *parenthesized* spelling is no longer this helper's business —
+the eighteenth pass's parser fix, above, makes `mod((7,3))` the same tree as `mod(7,3)` — but the
+bracketed `mod([7,3])` and the JS `["apply","mod",["list",7,3]]` still are, and that is what the
+tests now exercise.)
 
 An earlier pass had this in the open list, as "`fold_apply::is_variadic` tests 'has an exact
 folder' rather than 'is an aggregate', so a tuple argument spreads into fixed-arity heads". Two
@@ -230,13 +238,14 @@ the right one. The spreading is not the bug — it is legacy parity, and narrowi
 the aggregates makes `mod((7,3))` stop being `1`, which is a *regression*. And the example given,
 `["apply","mod",["tuple",7,3]]`, never took the branch: the JS deserializer flattens a tuple
 argument into an argument list before any of this runs, so a DoenetML tree could not reach it and
-only the text parser could.
+only the text parser could — which is the observation the eighteenth pass followed back to the
+parsers.
 
 The spread is now `normalize::spread_list_argument`, `pub(crate)` and consulted by both layers, the
 way `det`/`trace` go through `matrix::scalar_reduction`. `head_evaluable` asks it for the effective
 arity and `eval_apply` evaluates the spread list; `free_symbols` needed no change, for the same
 reason it did not for `det`. The arity check still happens downstream on the spread list, so
-`abs((-3,5))` stays symbolic on *both* layers rather than being forced into a two-argument `abs`.
+`abs([-3,5])` stays symbolic on *both* layers rather than being forced into a two-argument `abs`.
 Pinned in `tests/equality.rs`, `normalize/fold_apply.rs` and
 `spec/quick_doenet_compat_pr84.spec.ts`, verified to fail against the unfixed engine.
 

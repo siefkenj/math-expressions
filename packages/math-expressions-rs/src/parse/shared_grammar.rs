@@ -505,7 +505,7 @@ macro_rules! shared_grammar_methods {
                     }
                     Tok::Bang => {
                         self.advance()?;
-                        Expr::Apply(Box::new(Expr::sym("factorial")), vec![r])
+                        apply(Expr::sym("factorial"), vec![r])
                     }
                     _ => {
                         self.advance()?;

@@ -256,9 +256,10 @@ fn eval_apply(head: &Expr, args: &[Expr], env: &Env) -> Option<Complex64> {
     if let Some(reduced) = crate::matrix::scalar_reduction(head, args) {
         return eval_complex(&reduced, env);
     }
-    // `f((a, b))` is `f(a, b)`, as it was in legacy — and the fold in
+    // `f([a, b])` is `f(a, b)`, as it was in legacy — and the fold in
     // `normalize::fold_apply` reads it that way, so this has to as well or the
-    // two disagree about whether the application has a value. See
+    // two disagree about whether the application has a value. (The
+    // parenthesized `f((a, b))` is already flattened by the parsers.) See
     // `normalize::spread_list_argument`.
     if let Some(spread) = crate::normalize::spread_list_argument(head, args) {
         return eval_apply(head, &spread, env);

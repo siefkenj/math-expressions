@@ -76,6 +76,30 @@ impl Writer<'_> {
         format!("{{{}}}", self.emit(e, 0))
     }
 
+    /// What the bracket notations (`|…|`, `⌊…⌋`, `√…`, `…!`) wrap: the whole
+    /// argument of the application.
+    ///
+    /// In the JS AST an application has exactly one operand, and a
+    /// multi-argument application is an application *to a tuple*
+    /// (`["apply", "abs", ["tuple", "x", "y"]]`), so the tuple is what belongs
+    /// inside the brackets — which is what the legacy library rendered. These
+    /// arms used to be guarded on `args.len() == 1` and fall through to the
+    /// generic `head\left(…\right)` form otherwise, which spelled the head as
+    /// a LaTeX command that does not exist: `abs(x, y)` came out as
+    /// `\abs\left( x, y \right)` and `sqrt(x, y)` as `\sqrt\left( x, y
+    /// \right)`, neither of which MathJax can render.
+    fn sole_argument(&self, args: &[Expr], ctx: u8) -> String {
+        match args {
+            [only] => self.emit(only, ctx),
+            _ => self.render_seq(SeqKind::Tuple, args).0,
+        }
+    }
+
+    /// [`sole_argument`](Self::sole_argument) inside braces — `\sqrt{…}`.
+    fn braced_argument(&self, args: &[Expr]) -> String {
+        format!("{{{}}}", self.sole_argument(args, 0))
+    }
+
     fn render(&self, e: &Expr) -> (String, u8) {
         use prec::{ADD, AND, ATOM, INDEX, MUL, NEG, NOT, OR, POW, REL, SIGN};
         match e {
@@ -382,30 +406,39 @@ impl Writer<'_> {
         }
         if let Expr::Sym(s) = head {
             match s.name().as_str() {
-                "abs" if args.len() == 1 => {
+                "abs" => {
                     return (
-                        format!("\\left|{}\\right|", self.emit(&args[0], 0)),
+                        format!("\\left|{}\\right|", self.sole_argument(args, 0)),
                         prec::ATOM,
                     )
                 }
-                "floor" if args.len() == 1 => {
+                "floor" => {
                     return (
-                        format!("\\left\\lfloor {} \\right\\rfloor", self.emit(&args[0], 0)),
+                        format!(
+                            "\\left\\lfloor {} \\right\\rfloor",
+                            self.sole_argument(args, 0)
+                        ),
                         prec::ATOM,
                     )
                 }
-                "ceil" if args.len() == 1 => {
+                "ceil" => {
                     return (
-                        format!("\\left\\lceil {} \\right\\rceil", self.emit(&args[0], 0)),
+                        format!(
+                            "\\left\\lceil {} \\right\\rceil",
+                            self.sole_argument(args, 0)
+                        ),
                         prec::ATOM,
                     )
                 }
-                "sqrt" if args.len() == 1 => {
-                    return (format!("\\sqrt{}", self.braced(&args[0])), prec::ATOM)
+                "sqrt" => return (format!("\\sqrt{}", self.braced_argument(args)), prec::ATOM),
+                "cbrt" => {
+                    return (
+                        format!("\\sqrt[3]{}", self.braced_argument(args)),
+                        prec::ATOM,
+                    )
                 }
-                "cbrt" if args.len() == 1 => {
-                    return (format!("\\sqrt[3]{}", self.braced(&args[0])), prec::ATOM)
-                }
+                // The one genuinely two-argument notation here: the second
+                // argument is the index, not part of what the radical wraps.
                 "nthroot" if args.len() == 2 => {
                     return (
                         format!(
@@ -416,8 +449,11 @@ impl Writer<'_> {
                         prec::ATOM,
                     )
                 }
-                "factorial" if args.len() == 1 => {
-                    return (format!("{}!", self.emit(&args[0], prec::POW)), prec::POW)
+                "factorial" => {
+                    return (
+                        format!("{}!", self.sole_argument(args, prec::POW)),
+                        prec::POW,
+                    )
                 }
                 _ => {}
             }

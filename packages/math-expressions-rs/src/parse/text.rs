@@ -14,7 +14,7 @@
 //!   (x^a)*b).
 
 use super::common::{
-    atom_string, is_positive_number, negate_number, other_op, parse_js_float, sign_string,
+    apply, atom_string, is_positive_number, negate_number, other_op, parse_js_float, sign_string,
     MAX_PARSE_DEPTH, P,
 };
 use super::error::ParseError;
@@ -345,7 +345,7 @@ impl TextToAst {
                 return Err(self.err("Expecting |"));
             }
             self.advance()?;
-            result = Some(Expr::Apply(Box::new(Expr::sym("abs")), vec![st]));
+            result = Some(apply(Expr::sym("abs"), vec![st]));
         } else if self.token.ttype == Tok::Angle {
             result = self.angle_factor(p)?;
         } else if self.token.ttype == Tok::Int {
@@ -383,7 +383,7 @@ impl TextToAst {
 
         if p.in_subsuperscript {
             if must_apply {
-                result = Expr::Apply(Box::new(result), vec![Expr::Blank]);
+                result = apply(result, vec![Expr::Blank]);
             }
         } else {
             // Prime/caret runs each wrap `result` one level deeper; charge that
@@ -428,7 +428,7 @@ impl TextToAst {
                     Expr::Seq(SeqKind::List, xs) => xs,
                     other => vec![other],
                 };
-                result = Expr::Apply(Box::new(result), args);
+                result = apply(result, args);
             } else if must_apply {
                 // an applied function symbol cannot omit its argument
                 if !self.opts.allow_simplified_function_application {
@@ -441,7 +441,7 @@ impl TextToAst {
                         ..P::default()
                     })?
                     .unwrap_or(Expr::Blank);
-                result = Expr::Apply(Box::new(result), vec![arg]);
+                result = apply(result, vec![arg]);
             }
         }
 
@@ -588,7 +588,7 @@ impl TextToAst {
             ops.extend(ds);
         }
 
-        Ok(Expr::Apply(Box::new(head), vec![integrand]))
+        Ok(apply(head, vec![integrand]))
     }
 
     /// Attempt to parse a derivative in Leibniz notation (dy/dx, ∂²f/∂x∂y…).

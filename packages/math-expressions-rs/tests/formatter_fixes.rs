@@ -1,6 +1,7 @@
 //! Regression tests for formatter correctness fixes: logical-operator
 //! parenthesization, power-tower parens, LaTeX `%` escaping, Leibniz spacing,
-//! and `perp` in text. Trees are built from the JS AST shape via `try_from_js`.
+//! `perp` in text, and the bracket notations applied to a tuple. Trees are
+//! built from the JS AST shape via `try_from_js`.
 
 use math_expressions::expr::serde::try_from_js;
 use math_expressions::{to_latex, to_text, LatexOpts, TextOpts};
@@ -118,4 +119,50 @@ fn units_in_a_product_are_parenthesized() {
     // a standalone unit keeps no parens; `$` gets a space
     assert_eq!(lx(json!(["unit", "$", "x"])), r"\$ x");
     assert_eq!(tx(json!(["unit", "$", "x"])), "$ x");
+}
+
+/// The bracket notations wrap the whole argument, and in the JS AST a
+/// multi-argument application is an application to a *tuple*. Rendering only
+/// the one-argument case with brackets and falling through otherwise emitted
+/// LaTeX commands that do not exist — `\abs`, and `\sqrt` with no braced
+/// argument — for a tree the parsers produce from `abs(x, y)` or `|(x, y)|`.
+#[test]
+fn bracket_notations_wrap_a_tuple_argument() {
+    let xy = json!(["tuple", "x", "y"]);
+    assert_eq!(
+        lx(json!(["apply", "abs", xy])),
+        r"\left|\left( x, y \right)\right|"
+    );
+    assert_eq!(
+        lx(json!(["apply", "floor", ["tuple", "x", "y"]])),
+        r"\left\lfloor \left( x, y \right) \right\rfloor"
+    );
+    assert_eq!(
+        lx(json!(["apply", "ceil", ["tuple", "x", "y"]])),
+        r"\left\lceil \left( x, y \right) \right\rceil"
+    );
+    assert_eq!(
+        lx(json!(["apply", "sqrt", ["tuple", "x", "y"]])),
+        r"\sqrt{\left( x, y \right)}"
+    );
+    assert_eq!(
+        lx(json!(["apply", "cbrt", ["tuple", "x", "y"]])),
+        r"\sqrt[3]{\left( x, y \right)}"
+    );
+    assert_eq!(
+        lx(json!(["apply", "factorial", ["tuple", "x", "y"]])),
+        r"\left( x, y \right)!"
+    );
+    // `nthroot` is the exception: its second argument is the index, not part
+    // of what the radical wraps.
+    assert_eq!(
+        lx(json!(["apply", "nthroot", ["tuple", "x", "y"]])),
+        r"\sqrt[y]{x}"
+    );
+    // the one-argument spellings are unchanged
+    assert_eq!(lx(json!(["apply", "abs", "x"])), r"\left|x\right|");
+    assert_eq!(
+        lx(json!(["apply", "floor", "x"])),
+        r"\left\lfloor x \right\rfloor"
+    );
 }
