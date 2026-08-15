@@ -1,6 +1,6 @@
 # PR #84 review — known issues and durable findings
 
-The durable ledger from the fifteen review passes over
+The durable ledger from the seventeen review passes over
 [Doenet/math-expressions#84](https://github.com/Doenet/math-expressions/pull/84). The pass-by-pass
 history lives in the git log (`Review cycle N:` commits) and the PR's edit history; this file keeps
 only what still describes the code. Every entry below was re-verified against the pin it names or
@@ -35,25 +35,11 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   branches do, the rest do not.)
 - **Two-argument `log` does not fold** (`log(8,2)` stays an application), while the `log_10` /
   `log10` spellings do.
-- **A `rootof` application the canonicalizer declines is an opaque atom, so two spellings of the
-  same root compare unequal.** `canon_apply` rewrites `rootof(p, k)` into the `Expr::RootOf` leaf
-  only when `polynomials::rootof::from_apply_args` accepts, and that requires `p` to already be a
-  *dense canonical* univariate polynomial. A factored or scaled one is not: `rootof((x-1)(x-2), 0)`
-  and `rootof(2(x^2-2), 0)` stay applications of a head with no evaluation at all, so `equals` says
-  `rootof((x-1)(x-2), 0)` differs from `1` and from `rootof(x^2-3x+2, 0)`, which is the same
-  number. The sixteenth pass measured it after the fifteenth's commit message asserted the opposite
-  ("that one is unreachable: `canonicalize` rewrites `Apply(rootof, …)` back into the `Expr::RootOf`
-  leaf") — the rewrite is heavily conditional, and text and LaTeX both reach the residue.
-  **Narrower than the `det` defect it resembles, which is why it is filed rather than fixed:** the
-  residue is self-consistent — it equals itself, and neither layer claims a value for it — so
-  nothing simplifies to a number it then denies. Only the cross-spelling comparison is wrong. The
-  fix is to make `expr_to_upoly` multiply and add polynomials rather than only recognize a dense
-  one, with a degree guard so `(x-1)^10000000` cannot expand before `max_rootof_degree` refuses it.
-  The way in is the library's own text parser at default options, which applies any name followed
-  by a parenthesized list; DoenetML passes its own applied-function list, and `rootof` is in
-  neither of them (see the sweep entry below), so a factored polynomial has to be typed into
-  `rootof` through the library directly. The leaf the engine itself produces round-trips through
-  its own canonical spelling and is unaffected.
+- **`polynomials::rootof::expr_to_upoly` reads a monomial of any degree**, so
+  `rootof(x^1000000000 - 1, 0)` allocates a billion `BigRational` zeros before `make_rootof` can
+  refuse the degree. Pre-existing, and untouched by the seventeenth pass's product reading, which
+  deliberately left that arm alone so the change could be a strict widening; the cap belongs on the
+  dense allocation, not on the product.
 - **`mono_less_than` answers `true` in both directions** (`polynomials/compat/mono.rs`) for two
   distinct variables that `cmp_default_order` ranks `Equal` — the tie case `mono_gcd` already
   acknowledges.
@@ -165,6 +151,36 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   `s·u·m·(…)` unless `appliedFunctionSymbols` is passed. Deliberate, matches legacy.
 
 ## Fixed during review, kept for its contract
+
+**A `rootof` whose polynomial is written as a product reaches the same leaf** (seventeenth pass).
+`canon_apply` rewrites `rootof(p, k)` into the `Expr::RootOf` leaf only when
+`polynomials::rootof::from_apply_args` accepts, and `expr_to_upoly` read only a *sum of monomials*.
+Canonicalization does not expand products, so a factored spelling was declined and stayed an
+application of a head with no evaluation at all — an opaque atom. Two spellings of the same number
+therefore compared unequal: `rootof((x-1)(x-2), 0)` was neither `1` nor `rootof(x^2-3x+2, 0)`.
+`expr_to_upoly` now multiplies and adds polynomials.
+
+Three things the sixteenth pass wrote about this were imprecise, and measuring them is what set the
+fix's shape. It is not "dense canonical" input that was required — sparse (`x^2-2`) reads fine, and
+so does a *scaled* one: `make_rootof` normalizes to primitive integer coefficients with a positive
+leading coefficient, so `rootof(2x^2-6x+4, 0)` and `rootof(x^2/2-3x/2+1, 0)` already equalled `1`.
+The one shape that failed was an **unexpanded product** — `(x-1)(x-2)`, `2(x^2-2)`, `x(x-1)`. And
+the degree guard cannot simply be `max_rootof_degree` applied everywhere: the first draft put it on
+every arm and thereby *narrowed* `rootof(x^70 - x^69, 0)`, which the old reading accepted because
+`make_rootof` takes the squarefree radical (degree 70 → `t^2 - t`). The cap is on products only,
+where multiplying many-term polynomials grows the coefficients as well as the degree —
+`(x^2+x+1)^200` alone spent ten seconds under a more generous cap — while a monomial sum costs
+nothing to read at any degree and keeps its old, uncapped arm. Pinned in
+`tests/rootof_adversarial.rs`, both the widening and the two refusals, verified to fail against the
+unfixed reading.
+
+The residue this closes was never on a DoenetML path: `rootof` is in neither of DoenetML's
+`appliedFunctionSymbols` lists (`utils/math.ts` has no occurrence of the name), and legacy
+`math-expressions@2.x` has no `rootof` at all, so it is a defect in this engine's own new surface
+rather than a regression. It is fixed rather than filed because that surface ships as
+`math-expressions@3.x` to npm, where a library caller reaches it through the default text parser —
+which applies any name followed by a parenthesized list — and through `\operatorname{rootof}` in
+LaTeX.
 
 **`f((a, b))` is read as `f(a, b)` by the sampler too** (sixteenth pass). The same split as the
 `det` entry below, on the same path, found by asking what else the two layers could disagree
