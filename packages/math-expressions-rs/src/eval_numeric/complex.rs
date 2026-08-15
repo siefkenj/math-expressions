@@ -156,7 +156,9 @@ fn head_evaluable(head: &Expr, args: &[Expr]) -> bool {
     match head {
         Expr::Pow(inner, _) => head_evaluable(inner, args),
         Expr::Sym(s) => {
-            known_function(&s.name(), args.len())
+            let nargs = crate::normalize::spread_list_argument(head, args)
+                .map_or(args.len(), |spread| spread.len());
+            known_function(&s.name(), nargs)
                 || crate::matrix::scalar_reduction(head, args).is_some()
         }
         Expr::Index(inner, _) => {
@@ -253,6 +255,13 @@ fn eval_apply(head: &Expr, args: &[Expr], env: &Env) -> Option<Complex64> {
     // which would be handed an `Expr::Matrix` it cannot evaluate.
     if let Some(reduced) = crate::matrix::scalar_reduction(head, args) {
         return eval_complex(&reduced, env);
+    }
+    // `f((a, b))` is `f(a, b)`, as it was in legacy — and the fold in
+    // `normalize::fold_apply` reads it that way, so this has to as well or the
+    // two disagree about whether the application has a value. See
+    // `normalize::spread_list_argument`.
+    if let Some(spread) = crate::normalize::spread_list_argument(head, args) {
+        return eval_apply(head, &spread, env);
     }
     let Expr::Sym(s) = head else { return None };
     let spelling = s.name();

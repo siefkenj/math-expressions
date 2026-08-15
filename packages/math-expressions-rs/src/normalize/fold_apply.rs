@@ -136,14 +136,44 @@ fn fold_nodes_approx(e: &Expr) -> Expr {
     fold_approximately(head, &args).map_or(e, Expr::Num)
 }
 
-/// The argument list a fold should actually reduce over: an aggregate called on
-/// a single list is spread into that list's elements, everything else is left
-/// alone. See the comment in [`fold_application`] for why this is limited to
-/// the variadic family.
+/// The argument list a fold should actually reduce over: a head that takes a
+/// list is spread into that list's elements, everything else is left alone.
 fn effective_args(head: &Expr, args: &[Expr]) -> Vec<Expr> {
-    match args {
-        [Expr::Seq(kind, xs)] if is_list_like(*kind) && is_variadic(head) => xs.clone(),
-        _ => args.to_vec(),
+    spread_list_argument(head, args).unwrap_or_else(|| args.to_vec())
+}
+
+/// `f((a, b))` read as `f(a, b)`, or `None` when this head and argument list
+/// are not that shape.
+///
+/// The legacy library had no such distinction to make: its parser produced
+/// `["apply","mod",["tuple",7,3]]` for `mod(7,3)` *and* for `mod((7,3))`, so
+/// every application carried a tuple and `mod((7,3))` was `1`. This engine's
+/// parser keeps them apart, and the spelling with the extra parentheses has to
+/// be brought back to the same value.
+///
+/// **Both layers that read an application must call this**, which is why it is
+/// `pub(crate)` rather than private to the fold. `normalize::fold_apply` folds
+/// the spread form; the equality sampler in `eval_numeric::complex` decides
+/// from the same question whether an application has a value at all or is an
+/// opaque atom to draw a random sample for. When only the fold spread,
+/// `simplify(mod((7,3)))` was `1` while `equals(mod((7,3)), 1)` was `false` —
+/// the same split that made a determinant differ from its own value
+/// (`matrix::scalar_reduction`).
+///
+/// `fold_exact` is the membership test because it is the set of heads that
+/// reduce a list of numbers to one number: the nine variadic aggregates plus
+/// the fixed-arity `mod`, `nPr`, `nCr`, `abs`, `sign`, `floor`, `ceil`,
+/// `log10`, `log2`, `round`. Spreading into a fixed-arity head is not a
+/// mistake — it is what makes `mod((7,3))` legal — because the arity check
+/// still happens downstream, on the spread list.
+pub(crate) fn spread_list_argument(head: &Expr, args: &[Expr]) -> Option<Vec<Expr>> {
+    match (head, args) {
+        (Expr::Sym(s), [Expr::Seq(kind, xs)])
+            if is_list_like(*kind) && fold_exact(&s.name()).is_some() =>
+        {
+            Some(xs.clone())
+        }
+        _ => None,
     }
 }
 
@@ -154,13 +184,6 @@ fn effective_args(head: &Expr, args: &[Expr]) -> Vec<Expr> {
 fn is_list_like(kind: crate::expr::SeqKind) -> bool {
     use crate::expr::SeqKind::*;
     matches!(kind, Tuple | Array | List | Vector | AltVector)
-}
-
-/// Is this head one of the variadic aggregates (`sum`, `count`, `mean`, …)?
-/// Those are the only functions defined at every arity, and so the only ones a
-/// list argument can legitimately be spread into.
-fn is_variadic(head: &Expr) -> bool {
-    matches!(head, Expr::Sym(s) if fold_exact(&s.name()).is_some())
 }
 
 /// Whether [`fold_numeric_applications`] would replace this application with a
@@ -322,6 +345,54 @@ mod tests {
         assert_eq!(run_js(r#"["apply","max",["tuple",1,5,3]]"#), "5");
         assert_eq!(run_js(r#"["apply","min",["tuple",1,5,3]]"#), "1");
         assert_eq!(run_js(r#"["apply","sum",3]"#), "3");
+    }
+
+    /// The spreading above is reachable only from a tree built directly: the
+    /// JS deserializer turns `["apply","sum",["tuple",1,2,3]]` into a
+    /// three-argument apply before any of this runs, so the `run_js` cases
+    /// above never take the `spread_list_argument` branch. Take it explicitly,
+    /// so the branch has a test that fails if it is narrowed.
+    #[test]
+    fn an_aggregate_spreads_a_tuple_argument() {
+        let tuple = Expr::Seq(
+            crate::expr::SeqKind::Tuple,
+            vec![Expr::int(1), Expr::int(2), Expr::int(3)],
+        );
+        for (name, expected) in [("sum", "6"), ("count", "3"), ("max", "3")] {
+            let applied = Expr::Apply(Box::new(Expr::sym(name)), vec![tuple.clone()]);
+            let folded = fold_numeric_applications(&applied);
+            assert_eq!(
+                crate::expr::serde::to_js(&folded).to_string(),
+                expected,
+                "{name} must spread its tuple"
+            );
+        }
+    }
+
+    /// …and so does a fixed-arity head, which is what makes the extra pair of
+    /// parentheses harmless. The text parser is where the two spellings come
+    /// apart — `mod((7,3))` is one `Seq` argument where `mod(7,3)` is two —
+    /// and legacy had no such distinction to make, since its parser wrote a
+    /// tuple for both and answered `1` to each.
+    ///
+    /// The arity check still happens, on the spread list: a head whose folder
+    /// does not take that many arguments is left alone rather than forced.
+    #[test]
+    fn a_fixed_arity_head_spreads_a_tuple_too() {
+        assert_eq!(run("mod((7,3))"), "1");
+        assert_eq!(run("nPr((5,2))"), "20");
+        assert_eq!(run("nCr((5,2))"), "10");
+        // The two-argument spellings, for the same values.
+        assert_eq!(run("mod(7,3)"), "1");
+        assert_eq!(run("nPr(5,2)"), "20");
+        assert_eq!(run("nCr(5,2)"), "10");
+        // Spreading is not forcing: `abs` takes one argument, so a two-element
+        // tuple leaves it symbolic rather than folding to something.
+        assert_eq!(run("abs((-3,5))"), r#"["apply","abs",["tuple",-3,5]]"#);
+        assert_eq!(
+            run("log10((100,5))"),
+            r#"["apply","log10",["tuple",100,5]]"#
+        );
     }
 
     /// The whole point of the exactness gate: an irrational value keeps its

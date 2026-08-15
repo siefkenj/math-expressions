@@ -698,3 +698,60 @@ fn mathjs_named_constants_evaluate() {
     // `variables()` lists them and a sampler binds them.
     assert!(math_expressions::variables(&Expr::sym("E")).contains(&"E".to_string()));
 }
+
+/// The two layers that read an application must agree about whether it has a
+/// value: `normalize::fold_apply` folds, and the equality sampler in
+/// `eval_numeric::complex` decides from `known_function` whether to evaluate an
+/// application or draw a random value for it as an opaque atom. When they
+/// disagree, `equals` says an expression differs from the number `simplify`
+/// turns it into.
+///
+/// `det` was the first instance (`tests/matrix.rs`). This is the second:
+/// `f((a,b))` read as `f(a,b)`, which the fold did and the sampler did not, so
+/// `simplify(mod((7,3)))` was `1` while `equals(mod((7,3)), 1)` was `false` and
+/// `evaluate_to_constant` was `None`. Both now go through
+/// `normalize::spread_list_argument`.
+///
+/// Legacy is the authority for the values: its parser produced the same tuple
+/// tree for `mod(7,3)` and `mod((7,3))`, so both were `1` there. Measured
+/// against `math-expressions@2.0.0-alpha94`.
+#[test]
+fn an_extra_pair_of_parentheses_does_not_split_the_folder_from_the_sampler() {
+    use math_expressions::evaluate_to_constant;
+    for (parenthesized, plain, value) in [
+        ("mod((7,3))", "mod(7,3)", "1"),
+        ("nPr((5,2))", "nPr(5,2)", "20"),
+        ("nCr((5,2))", "nCr(5,2)", "10"),
+    ] {
+        assert!(
+            eq(parenthesized, value),
+            "{parenthesized} must equal {value}"
+        );
+        assert!(eq(plain, value), "{plain} must equal {value}");
+        assert!(
+            eq(parenthesized, plain),
+            "{parenthesized} must equal {plain}"
+        );
+        assert_eq!(simplify(&parse(parenthesized)), parse(value));
+        assert!(
+            evaluate_to_constant(&parse(parenthesized)).is_some(),
+            "{parenthesized} must have a numeric value, so <number> can read it"
+        );
+    }
+    // Spreading does not force an arity the head does not have: `abs` takes one
+    // argument, so `abs((-3,5))` stays symbolic — on *both* layers, which is
+    // the property that matters here. It is its own opaque atom and equal to
+    // itself, and claims no value.
+    for symbolic in ["abs((-3,5))", "log10((100,5))", "floor((1.5,2.5))"] {
+        assert!(eq(symbolic, symbolic), "{symbolic} must equal itself");
+        assert!(
+            equals(
+                &parse(symbolic),
+                &simplify(&parse(symbolic)),
+                &EqOptions::default()
+            ),
+            "{symbolic} must equal its own simplification"
+        );
+        assert!(evaluate_to_constant(&parse(symbolic)).is_none());
+    }
+}

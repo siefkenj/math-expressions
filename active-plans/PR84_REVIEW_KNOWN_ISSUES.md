@@ -25,8 +25,6 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
 - **`max_steps` is off by one** (`mathjs_compat/ode.rs`): an integration converging in exactly
   `max_steps` steps reports `terminatedEarly`. The vanishing-step guard beside it also uses a
   different scale from the completion test, so a large-`t` run can reject its final sliver.
-- **`fold_apply::is_variadic` tests "has an exact folder" rather than "is an aggregate"**, so a
-  tuple argument spreads into fixed-arity heads: `["apply","mod",["tuple",7,3]]` folds to `1`.
 - **`digits = +Infinity` disables the decimals mode** in
   `round_numbers_to_precision_plus_decimals` (`ops/numbers.rs`), asymmetrically with `-Infinity`.
 - **`evaluate_many`'s scalar fallback skips canonicalization** while the tape path canonicalizes,
@@ -37,6 +35,25 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   branches do, the rest do not.)
 - **Two-argument `log` does not fold** (`log(8,2)` stays an application), while the `log_10` /
   `log10` spellings do.
+- **A `rootof` application the canonicalizer declines is an opaque atom, so two spellings of the
+  same root compare unequal.** `canon_apply` rewrites `rootof(p, k)` into the `Expr::RootOf` leaf
+  only when `polynomials::rootof::from_apply_args` accepts, and that requires `p` to already be a
+  *dense canonical* univariate polynomial. A factored or scaled one is not: `rootof((x-1)(x-2), 0)`
+  and `rootof(2(x^2-2), 0)` stay applications of a head with no evaluation at all, so `equals` says
+  `rootof((x-1)(x-2), 0)` differs from `1` and from `rootof(x^2-3x+2, 0)`, which is the same
+  number. The sixteenth pass measured it after the fifteenth's commit message asserted the opposite
+  ("that one is unreachable: `canonicalize` rewrites `Apply(rootof, …)` back into the `Expr::RootOf`
+  leaf") — the rewrite is heavily conditional, and text and LaTeX both reach the residue.
+  **Narrower than the `det` defect it resembles, which is why it is filed rather than fixed:** the
+  residue is self-consistent — it equals itself, and neither layer claims a value for it — so
+  nothing simplifies to a number it then denies. Only the cross-spelling comparison is wrong. The
+  fix is to make `expr_to_upoly` multiply and add polynomials rather than only recognize a dense
+  one, with a degree guard so `(x-1)^10000000` cannot expand before `max_rootof_degree` refuses it.
+  The way in is the library's own text parser at default options, which applies any name followed
+  by a parenthesized list; DoenetML passes its own applied-function list, and `rootof` is in
+  neither of them (see the sweep entry below), so a factored polynomial has to be typed into
+  `rootof` through the library directly. The leaf the engine itself produces round-trips through
+  its own canonical spelling and is unaffected.
 - **`mono_less_than` answers `true` in both directions** (`polynomials/compat/mono.rs`) for two
   distinct variables that `cmp_default_order` ranks `Equal` — the tie case `mono_gcd` already
   acknowledges.
@@ -148,6 +165,34 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   `s·u·m·(…)` unless `appliedFunctionSymbols` is passed. Deliberate, matches legacy.
 
 ## Fixed during review, kept for its contract
+
+**`f((a, b))` is read as `f(a, b)` by the sampler too** (sixteenth pass). The same split as the
+`det` entry below, on the same path, found by asking what else the two layers could disagree
+about. Legacy's text parser wrote one tree for `mod(7,3)` and `mod((7,3))` — a head applied to a
+tuple — so the extra parentheses cost nothing and both answered `1`. This parser keeps them apart,
+and only `normalize/fold_apply.rs` put them back together, via an `effective_args` helper that
+spread a single list argument. The sampler in `eval_numeric/complex.rs` did not, and
+`known_function("mod", 1)` is false, so it called the application an opaque atom: `simplify` gave
+`1`, `equals(mod((7,3)), 1)` gave `false`, and `evaluate_to_constant` gave `None` — `<number>` read
+nothing and `<answer>` graded it wrong. `nPr` and `nCr` are the other two heads whose folder takes
+the arity the spread produces.
+
+An earlier pass had this in the open list, as "`fold_apply::is_variadic` tests 'has an exact
+folder' rather than 'is an aggregate', so a tuple argument spreads into fixed-arity heads". Two
+things in that were wrong, and both had to be established by measurement before the fix could be
+the right one. The spreading is not the bug — it is legacy parity, and narrowing `is_variadic` to
+the aggregates makes `mod((7,3))` stop being `1`, which is a *regression*. And the example given,
+`["apply","mod",["tuple",7,3]]`, never took the branch: the JS deserializer flattens a tuple
+argument into an argument list before any of this runs, so a DoenetML tree could not reach it and
+only the text parser could.
+
+The spread is now `normalize::spread_list_argument`, `pub(crate)` and consulted by both layers, the
+way `det`/`trace` go through `matrix::scalar_reduction`. `head_evaluable` asks it for the effective
+arity and `eval_apply` evaluates the spread list; `free_symbols` needed no change, for the same
+reason it did not for `det`. The arity check still happens downstream on the spread list, so
+`abs((-3,5))` stays symbolic on *both* layers rather than being forced into a two-argument `abs`.
+Pinned in `tests/equality.rs`, `normalize/fold_apply.rs` and
+`spec/quick_doenet_compat_pr84.spec.ts`, verified to fail against the unfixed engine.
 
 **`det`/`trace` of a literal matrix are evaluated, not sampled as unknowns** (fifteenth pass).
 `equals` said a determinant differed from its own value: `\det\begin{pmatrix}1&2\\3&4\end{pmatrix}`

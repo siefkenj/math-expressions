@@ -37,6 +37,7 @@ pub(crate) mod syntactic;
 
 pub use expand::expand;
 pub(crate) use expand::expand_core;
+pub(crate) use fold_apply::spread_list_argument;
 pub use fold_apply::{fold_numeric_applications, fold_numeric_applications_approx};
 pub(crate) use order::cmp;
 pub(crate) use present::{present, split_number};

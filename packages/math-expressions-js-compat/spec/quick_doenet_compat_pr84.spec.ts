@@ -506,6 +506,33 @@ describe("review cycle 3 — legacy contracts that had quietly lapsed", () => {
     ).toBe(true);
   });
 
+  it("reads f((a,b)) as f(a,b), the way legacy's parser had to", () => {
+    // Legacy's text parser wrote the *same* tree for `mod(7,3)` and
+    // `mod((7,3))` — `["apply","mod",["tuple",7,3]]` — so the extra pair of
+    // parentheses cost nothing and both answered 1. This parser keeps the two
+    // spellings apart, and only the folding layer put them back together:
+    // `simplify` gave 1 while `equals` sampled the whole application as an
+    // unknown and said it differed from 1, with `evaluate_to_constant` null.
+    // That is the `det` split, one function over — so `<number>` read nothing
+    // and `<answer>` graded it wrong.
+    for (const [parenthesized, plain, value] of [
+      ["mod((7,3))", "mod(7,3)", 1],
+      ["nPr((5,2))", "nPr(5,2)", 20],
+      ["nCr((5,2))", "nCr(5,2)", 10],
+    ] as const) {
+      const e = me.fromText(parenthesized);
+      expect(e.equals(me.fromText(String(value)))).toBe(true);
+      expect(e.equals(me.fromText(plain))).toBe(true);
+      expect(e.evaluate_to_constant()).toBe(value);
+    }
+    // The arity check still happens on the spread list, so a head that does not
+    // take two arguments is left symbolic — on both layers, which is the part
+    // that matters. It equals itself and claims no value.
+    const abs = me.fromText("abs((-3,5))");
+    expect(abs.equals(abs)).toBe(true);
+    expect(Number.isNaN(abs.evaluate_to_constant())).toBe(true);
+  });
+
   it("honors variables(include_subscripts)", () => {
     // The argument was dropped, so a caller matching against a subscripted
     // name — `Line.js`, deciding whether a coefficient mentions the line's own
