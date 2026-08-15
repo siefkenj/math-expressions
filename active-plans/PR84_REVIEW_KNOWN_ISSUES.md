@@ -123,15 +123,17 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
 - **The render-option key list is enumerated in four places and each is different.**
   `converters/render-options.ts`'s `FORWARDED` is the authority; two lists in
   `math-expressions.ts` omit `avoidScientificNotation` and `matrixEnvironment`, `ast-to-text.ts`
-  omits `notation` and `matrixEnvironment`, and `wasm.ts` omits both and drops `unicode` from the
-  LaTeX variant only.
+  omits `notation` and `matrixEnvironment`, and
+  `packages/math-expressions-rs-wasm/src-js/wasm.ts` (outside this file's `lib/` path convention)
+  omits both and drops `unicode` from the LaTeX variant only.
 
 ## Standing invariants worth knowing
 
-- **Nothing in `lib/**`may dereference`wasm`at module scope.**`setWasmModule`is re-exported
-from the package root, so importing it evaluates the whole barrel; a module-scope`wasm`touch
-triggers the node fallback — throwing in a browser, and under node quietly pinning the node
-build so a later injection can never win. The invariant is written at its site in`lib/math-expressions.ts` (`Context.\_assumptionsHandle` lazy accessors) and pinned by a spec
+- **Nothing anywhere under `lib/` may dereference `wasm` at module scope.** `setWasmModule` is
+  re-exported from the package root, so importing it evaluates the whole barrel; a module-scope
+  `wasm` touch triggers the node fallback — throwing in a browser, and under node quietly pinning
+  the node build so a later injection can never win. The invariant is written at its site in
+  `lib/math-expressions.ts` (the `Context._assumptionsHandle` lazy accessors) and pinned by a spec
   that injects a counting proxy and asserts zero touches during import.
 - **The one skipped-with-reason compat test** (`slow_assumptions.spec.ts`) is not an engine
   unsoundness: legacy's expected answers there are partly false, so the test cannot be passed
