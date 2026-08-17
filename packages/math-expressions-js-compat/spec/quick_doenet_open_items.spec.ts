@@ -27,14 +27,39 @@ describe("evaluate_to_constant reports an infinite value", () => {
     expect(me.fromText("1/Infinity").evaluate_to_constant()).toBe(0);
   });
 
-  // `null` is reserved for what is genuinely *undecided* — a free variable.
-  // An indeterminate form is decided: the answer is `NaN`, and reporting it as
-  // `null` loses that, because `null` coerces to `0` on the JS side and would
-  // present an undefined result as a real value.
-  it("reports an indeterminate form as NaN, and only a free variable as null", () => {
+  // "No numeric value" has exactly one spelling, and it is `NaN` — legacy's.
+  // This method answered `null` for a free variable for a while, on the theory
+  // that "undecided" was worth telling apart from "decided to be NaN". It is,
+  // but not at this cost: `null` coerces to `0`, satisfies `<=`, and slips past
+  // `Number.isNaN`, so an expression with no value read as a real one on every
+  // consumer that had not been individually taught otherwise.
+  //
+  // A caller that really wants the distinction still has `variables()`.
+  it("reports both an indeterminate form and a free variable as NaN", () => {
     expect(me.fromText("Infinity-Infinity").evaluate_to_constant()).toBeNaN();
     expect(me.fromText("0/0").evaluate_to_constant()).toBeNaN();
-    expect(me.fromText("x+1").evaluate_to_constant()).toBe(null);
+    expect(me.fromText("x+1").evaluate_to_constant()).toBeNaN();
+    // The distinction, for anyone who needs it.
+    expect(me.fromText("x+1").variables()).toEqual(["x"]);
+    expect(me.fromText("0/0").variables()).toEqual([]);
+  });
+
+  // The property that makes `NaN` the right marker and `null` the wrong one:
+  // it survives being computed with. Each of these is a shape that actually
+  // occurred on a grading path while the sentinel was `null` — a width, a
+  // coordinate average, a slope, a comparison, a distance.
+  it("poisons arithmetic and comparison rather than reading as zero", () => {
+    const noValue = me.fromText("x+1").evaluate_to_constant();
+    expect(noValue + 5).toBeNaN();
+    expect(noValue * 2).toBeNaN();
+    expect(Number(noValue)).toBeNaN();
+    expect((noValue + 3) / 2).toBeNaN();
+    expect(noValue <= 1).toBe(false);
+    expect(noValue >= -3).toBe(false);
+    expect(Number.isNaN(noValue)).toBe(true);
+    expect(Number.isFinite(noValue)).toBe(false);
+    // A blank answer — the `<constrainTo>` / `<isBetween>` shape.
+    expect(me.fromText("＿").evaluate_to_constant() < 1).toBe(false);
   });
 
   // Legacy returned a math.js complex object for a non-real value rather than

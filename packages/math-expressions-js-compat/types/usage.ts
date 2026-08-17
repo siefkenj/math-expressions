@@ -47,11 +47,17 @@ const _fuzzy: boolean = fromText.equals(fromLatex, {
   allowed_error_in_numbers: 0.001,
   include_error_in_number_exponents: false,
 });
-// A non-real constant comes back as a math.js `Complex` — `fromText("i")` is
-// `{re: 0, im: 1}`, not `null` — so this is the shape a consumer must handle,
-// and annotating it `number | null` is what let a `{re, im}` object out of two
-// DoenetML functions that promised a number.
-const _constant: number | Complex | null = fromText.evaluate_to_constant();
+// Exactly two shapes, and `null` is not one of them: a `number` (with `NaN`
+// standing for "no numeric value", as in legacy), or a math.js `Complex` for a
+// non-real value — `fromText("i")` is `{re: 0, im: 1}`. Annotating it
+// `number | null` is what let a `{re, im}` object out of two DoenetML functions
+// that promised a number, and the `null` it used to answer for `x+1` is what
+// let unevaluable expressions read as zero.
+const _constant: number | Complex = fromText.evaluate_to_constant();
+// The narrowing that is actually sound, and which `!== null` never was.
+const _asNumber: number =
+  typeof _constant === "number" && !Number.isNaN(_constant) ? _constant : NaN;
+void _asNumber;
 void _equal;
 void _fuzzy;
 void _constant;

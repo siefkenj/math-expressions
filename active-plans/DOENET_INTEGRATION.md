@@ -47,7 +47,7 @@ plan — iterative `Drop`, parser depth cap — close the vector end-to-end.
 
 Items 1 and 2 are new in this revision and were found while auditing what we had assumed were our own
 failures; see the note below. The two items we had open before are fixed in `970c1c3`:
-`evaluate_to_constant()` now reports ±Infinity rather than `null`, and the printer implements the
+`evaluate_to_constant()` now reports ±Infinity rather than a "no value" marker, and the printer implements the
 ECMAScript scientific-notation threshold with `avoidScientificNotation` honored.
 
 We also filed one of these wrongly and want that on the record: we claimed `panic = "abort"` was why
@@ -195,7 +195,9 @@ Two consequences worth flagging, since they change what a caller sees:
 - `me.utils.flatten` / `unflattenLeft` / `unflattenRight` / `match` take these untagged trees now, so
   a `.tree` value can be fed straight back into them. Previously they went through a bare
   `JSON.stringify`, which writes `null` for a non-finite — a silently wrong tree rather than an error.
-- `evaluate_to_constant()` reports an indeterminate form as `NaN` rather than `null`. `null` is now
-  reserved for what is genuinely undecided, i.e. a free variable. The distinction matters because
-  `null` coerces to `0` in JS, so the old spelling presented an undefined slope as a real point at
-  the origin.
+- `evaluate_to_constant()` answers `NaN` — never `null` — whenever there is no numeric value, which
+  is legacy's contract restored. It briefly distinguished the two, `NaN` for an indeterminate form
+  and `null` for something genuinely undecided such as a free variable. That distinction is real but
+  `null` is the wrong way to carry it: it coerces to `0`, satisfies `<=`, and slips past
+  `Number.isNaN`, so an expression with no value read as a real one everywhere the consumer had not
+  been individually taught otherwise. A caller that wants the distinction can ask `variables()`.

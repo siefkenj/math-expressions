@@ -299,9 +299,11 @@ describe("§3 — simplify folds numeric function applications", () => {
 describe("item 3b — undefined quantities evaluate to undefined, not 0", () => {
   it("does not collapse 0*blank to a number", () => {
     // evaluate_to_constant underlies DoenetML's numeric reads; a hole must stay
-    // undefined rather than simplify to 0/1.
-    expect(me.fromText("0*_").evaluate_to_constant()).toBeNull();
-    expect(me.fromText("(_-_)/(_-_)").evaluate_to_constant()).toBeNull();
+    // undefined rather than simplify to 0/1. "Undefined" is spelled `NaN` —
+    // these used to answer `null`, which is the one spelling that *does*
+    // collapse to 0 the moment a consumer computes with it.
+    expect(me.fromText("0*_").evaluate_to_constant()).toBeNaN();
+    expect(me.fromText("(_-_)/(_-_)").evaluate_to_constant()).toBeNaN();
     expect(me.fromText("2+3").evaluate_to_constant()).toBe(5);
   });
 });

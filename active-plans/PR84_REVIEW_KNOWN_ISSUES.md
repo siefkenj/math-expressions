@@ -12,6 +12,18 @@ Conventions: "legacy" is `math-expressions@2.x` from npm. File paths are relativ
 `packages/math-expressions-rs/src/` for `.rs` and `packages/math-expressions-js-compat/lib/` for
 `.ts` unless said otherwise.
 
+**The `null` sentinel is gone (twentieth pass).** `evaluate_to_constant` used to answer `null` for a
+free variable or a placeholder blank, and `NaN` only for an indeterminate form. Legacy answered
+`NaN` for all of them, and legacy was right: `null` is *anti*-poisoning in JavaScript
+(`Number(null)` is `0`, `null + 5` is `5`, `null <= 1` is `true`, `Number.isNaN(null)` is `false`),
+so a value that did not exist behaved like zero in any consumer that had not been individually
+taught to test for it. Roughly fourteen DoenetML grading defects were traced to that one inversion,
+found one at a time over the preceding passes. The compat layer answers `NaN` now, and the
+declarations say `number | Complex` rather than `number | Complex | null`. Entries below that
+turned on the old sentinel are struck through or amended in place rather than deleted, so the
+history stays readable. The native Rust API keeps `Option<f64>`, which is right where there is no
+coercion hazard.
+
 ## Known issues, open
 
 None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follow-up work.
@@ -112,15 +124,15 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   `create_from_multiple` had that third fallback, and `Context.fromMml` is still `notImplemented`.
 - **`Context.reviver` drops the `assumptions` field** legacy restored onto a revived expression,
   and `toJSON` no longer emits it — silent on both sides of a persist/revive round trip.
-- **`evaluate_to_constant` does not read `nan_for_non_numeric`.** It always behaves as `false`
-  (`null` for an unevaluable expression) where legacy defaulted to `true` (`NaN`). Deliberate, and
-  DoenetML depends on it — but the option is part of the legacy signature and is accepted and
-  ignored; stated in the code.
-- **`evaluate_to_constant`'s blank-handling comments describe the wrong trees**
-  (`math-expressions.ts`, near `treeHasBareBlank`): `_` in _text_ parses as a subscript node
-  `["_","＿","＿"]`, and only the `head !== "_"` exception makes it `null`; written with the blank
-  itself as an operand — which is what `fromAst("＿")` produces — `0·＿` and `＿/＿` are `NaN`,
-  the opposite of what the paragraph promises.
+- **`evaluate_to_constant` does not read `nan_for_non_numeric`.** It now always behaves as legacy's
+  `true` default — `NaN` for anything with no numeric value — so the only remaining divergence is
+  that passing `false` is accepted and ignored rather than producing `null`. Marked `@deprecated`
+  in the published declarations.
+  _(Was: "always behaves as `false`, and DoenetML depends on it." Both halves were wrong to rely
+  on. The `null` sentinel is gone; see the note at the top of this file.)_
+- ~~**`evaluate_to_constant`'s blank-handling comments describe the wrong trees.**~~ Resolved by
+  deletion: `treeHasBareBlank`/`treeHasBlank` existed only to split blanks between the `NaN` and
+  `null` answers, and there is one answer now.
 - **`equalSpecifiedSignErrors` does not require _exactly_ `n_sign_errors`,** as its docstring
   says. `singleNegations` enumerates sign-invariant positions too, so negating `x` inside `x^2`
   folds back and a perfectly correct answer scores as "1 sign error" on DoenetML's

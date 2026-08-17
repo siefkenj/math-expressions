@@ -181,37 +181,12 @@ function varName(v: string | Expression): string {
   return String(v);
 }
 
-/** Unit symbols the engine recognizes — excluded from "free variables" when
- * deciding `evaluate_to_constant`'s null (unknown variable) vs NaN (no value). */
-const UNIT_NAMES = new Set(["%", "$", "deg", "circ"]);
-
 /** Whether a tree involves the imaginary unit `i` as a leaf — used to tell a
  * complex NaN (`Infinity*i` → `{re:NaN, im:NaN}`) apart from a real NaN
  * (`0/0` → scalar `NaN`), since both fold to a single `NaN`. */
 function treeHasImaginary(tree: Tree): boolean {
   if (tree === "i") return true;
   return Array.isArray(tree) && tree.some((t) => treeHasImaginary(t));
-}
-
-/** Any blank (`＿`) leaf anywhere in the tree. */
-function treeHasBlank(tree: Tree): boolean {
-  if (tree === "＿") return true;
-  return Array.isArray(tree) && tree.some((t) => treeHasBlank(t));
-}
-
-/** A blank (`＿`) used as a direct operand of an operator *other than* `_`
- * (subscript) — i.e. a hole sitting in an actual computation (`1 + 2 + ＿`),
- * as opposed to an undefined placeholder like `0·_` or `_/_`. The former is
- * not-a-number (NaN); the latter stays undefined (null). */
-function treeHasBareBlank(tree: Tree): boolean {
-  if (!Array.isArray(tree)) return false;
-  const head = tree[0];
-  for (let i = 1; i < tree.length; i++) {
-    const child = tree[i];
-    if (child === "＿" && head !== "_") return true;
-    if (treeHasBareBlank(child)) return true;
-  }
-  return false;
 }
 
 /** Whether a tree contains a `det`/`trace` application — the matrix reductions
@@ -895,11 +870,14 @@ class Expression {
   }
 
   // ---- evaluation ----
+  // Two return shapes, and neither is `null`: a `number` — where `NaN` is the
+  // "no numeric value" marker, as legacy's was — or a math.js `Complex` for a
+  // non-real value. The wasm entry point reports only the real case; the
+  // complex one comes back through `evaluate_to_complex`.
+  //
   // Legacy returned a plain number for a real value and a complex value for a
   // non-real one, so `fromText("i").evaluate_to_constant()` is `{re:0, im:1}`,
-  // not null. The wasm entry point reports only the real case; the complex one
-  // comes back through `evaluate_to_complex`, which applies the same
-  // free-variable and undefined-leaf rules.
+  // not NaN.
   //
   // The complex value is a math.js `Complex`, as legacy's was: callers pass it
   // straight into math.js functions (`divide(evaluate_to_constant(a), …)`),
@@ -939,32 +917,45 @@ class Expression {
       const sc = s._w.evaluate_to_complex();
       if (sc !== undefined) return math.complex(sc[0], sc[1]);
     }
-    // Not a constant. A free (non-unit) variable means "unknown" → null.
-    // **This is a deliberate divergence, not the legacy behavior**: legacy
-    // answered `NaN` for `x+1` unless asked for `null` with
-    // `{nan_for_non_numeric: false}`. The distinction is worth having — `NaN`
-    // is a *value* an expression can evaluate to (`0/0`), and collapsing the
-    // two loses DoenetML's undefined-slope contract — but it is a contract
-    // change, and `null` is the more dangerous of the two to leak into
-    // arithmetic (`null * 2` is `0`). Callers must test for it; DoenetML does,
-    // through its `isNumericConstant`/`evaluateToNumber` helpers.
+    // Not a constant: `NaN`, as legacy answered. Everything that reaches here —
+    // a free variable (`x+1`), a blank `＿`, a placeholder hole (`0·_`, `_/_`),
+    // a matrix, a leftover unit — is "no numeric value", and legacy spelled all
+    // of them `NaN`.
     //
-    // Legacy's `nan_for_non_numeric` option is therefore *not* honored: this
-    // path always behaves as `false`. Honoring its `true` default would undo
-    // the divergence above, and honoring it only when passed would give the
-    // one question three answers. Left unimplemented rather than half-done.
+    // This used to be `null` for the free-variable and placeholder cases, on
+    // the grounds that "cannot be evaluated" is worth telling apart from
+    // "evaluates to NaN". The distinction is real, but `null` is the wrong way
+    // to carry it across into JavaScript, and it was carrying it into every
+    // consumer whether or not the consumer had asked. `null` is *anti*-
+    // poisoning: `Number(null)` is `0`, `null + 5` is `5`, `null <= 1` is
+    // `true`, `Number.isNaN(null)` is `false`. So an expression with no value
+    // silently behaved like zero — a rectangle 0 wide, a line with slope 1, a
+    // blank answer scoring full credit. `NaN` does the opposite: it propagates
+    // through arithmetic and falsifies every comparison, which is what a
+    // "no value" marker has to do to be safe by default.
     //
-    // A bare blank sitting in a computation is not-a-number
-    // (`1+2+＿` → NaN), but a hole that only stands in as an undefined
-    // placeholder (`0·_`, `_/_`) stays undefined → null (it must not collapse to
-    // `0`/`1` — DoenetML's undefined-slope contract). Anything else that cannot
-    // be a number — a matrix, a leftover unit — is NaN.
-    const freeVars = e.variables().filter((n) => !UNIT_NAMES.has(String(n)));
-    if (freeVars.length > 0) return null;
-    if (treeHasBareBlank(e.tree as Tree)) return NaN;
-    if (treeHasBlank(e.tree as Tree)) return null;
+    // A caller that genuinely needs "unevaluable" apart from "evaluates to NaN"
+    // can still get it — `variables()` reports the free variables, and the tree
+    // is right there — but it has to ask, and the default is the safe one.
+    //
+    // Legacy's `nan_for_non_numeric` option is still *not* honored: this path
+    // always behaves as its `true` default, which is now also the only
+    // behavior. Passing `{nan_for_non_numeric: false}` does not produce `null`.
     return NaN;
   }
+  /**
+   * The complex half of `evaluate_to_constant`, on its own.
+   *
+   * This one *does* answer `null`, and deliberately, unlike
+   * `evaluate_to_constant`. Two reasons it is not the same hazard. It has no
+   * legacy counterpart, so there is no drop-in contract saying otherwise; and
+   * its range already contains `Complex(NaN, NaN)` as a genuine value
+   * (`Infinity*i`), so `NaN` cannot double as the "no value" marker here the
+   * way it can for a real result. A `Complex` never coerces silently either —
+   * math.js rejects `null` loudly rather than reading it as `0`.
+   *
+   * Not part of the published `types/math-expressions.d.ts` surface.
+   */
   evaluate_to_complex() {
     const v = this._w.evaluate_to_complex();
     return v === undefined ? null : math.complex(v[0], v[1]);
