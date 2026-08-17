@@ -118,3 +118,35 @@ describe("a float survives the AST boundary unchanged", () => {
     }
   });
 });
+
+describe("add_unit takes the shapes its declaration promises", () => {
+  // The wasm entry point is `add_unit(unit: &str)`, and wasm-bindgen reads a
+  // non-string argument as a pointer/length pair into linear memory. The
+  // published declaration says `Expression | Tree`, as legacy's did, so both
+  // documented spellings used to fail — an `Expression` with
+  // `RuntimeError: memory access out of bounds`, an array `Tree` with
+  // `arg.charCodeAt is not a function`. Neither is something a caller can
+  // recover from, and the first corrupts the wasm heap rather than throwing at
+  // the boundary.
+  const expected = me.fromText("50%").tree;
+
+  it("accepts a unit name", () => {
+    expect(me.fromAst(50).add_unit("%").tree).toEqual(expected);
+  });
+
+  it("accepts an Expression, as the declaration says", () => {
+    expect(me.fromAst(50).add_unit(me.fromText("%")).tree).toEqual(expected);
+  });
+
+  it("accepts a string Tree, as the declaration says", () => {
+    expect(me.fromAst(50).add_unit("deg").tree).toEqual(
+      me.fromText("50deg").tree,
+    );
+  });
+
+  it("still scales back out through remove_units", () => {
+    expect(
+      me.fromAst(50).add_unit(me.fromText("%")).evaluate_to_constant(),
+    ).toBe(0.5);
+  });
+});

@@ -90,6 +90,34 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   `create_discrete_infinite_set` each discard intermediates. Systemically, every `toExpr(other, …)`
   in `equals`/`add`/`match`/… leaks whenever the argument is a tree or a string — `substitute` was
   the only method freeing carefully.
+- **Nine declared parameters the implementation has no arity for.** Found by a member-by-member
+  audit of `types/math-expressions.d.ts` against `lib/` at the twenty-first pass, prompted by the
+  two the twentieth pass had found by accident (`match`'s `allow_permutations?: boolean`, and
+  `evaluate_to_constant`'s `| null`). `simplify`, `simplify_logical`, `collect_like_terms_factors`,
+  `simplify_ratios` and `expand` are all declared with options and are arity 0; `derivative`'s
+  `story` array is never written; `equalsViaReal`/`equalsViaComplex` ignore their `EqualsOptions`,
+  so their tolerances have no effect; and `isAnalytic`'s declared `string[]` arm is read as an
+  options object, so every flag comes out `false` — `match(true)` a second time. All nine are now
+  marked `@deprecated` and "accepted and ignored" in the declarations, and the `string[]` arm is
+  gone, which is honesty rather than a fix: the engine should either honor them or they should be
+  dropped. Verified against the built package, not read off the source.
+- **`Context.toString(expr)` answers `"[object Object]"`.** The expression-first mirror skips
+  anything already `in Context`, and `toString` is inherited from `Object.prototype` — deliberately,
+  since shadowing it would break `String(me)`. The declaration promised it anyway; it no longer
+  does. `expr.toString()` is unaffected and is the only spelling that works.
+- **`Context.assumptions`, `get_assumptions`, `solve_linear`, `Context.from`,
+  `create_discrete_infinite_set` and `Context.class` all return or accept something the
+  declaration does not admit.** `assumptions` is declared a variable-keyed map and is an object of
+  methods; `get_assumptions(string[])` — the one declared input shape — answers `undefined`, and
+  its return is a `Tree`, not an `Assumptions`; `solve_linear` answers a frozen `ABSENT_EXPRESSION`
+  whose `.tree` is `undefined`; `from` and `create_discrete_infinite_set` can answer `undefined`;
+  `Context.class` is declared as an AST constructor and takes a wasm handle. Left declared as they
+  are, because each needs a decision about which side is wrong.
+- **`Expression.match` drops `allow_extended_match`; the free `utils.match` honors it.**
+  `normalizeMatchOptions` copies only `variables`, `allow_permutations` and
+  `allow_implicit_identities`, so the same pattern answers differently through the two entry
+  points. `MatchOptions` declares the option on neither, so no typed caller can reach the working
+  path.
 - **`astToJson` and `astReplacer` are not interchangeable** despite their shared file's claim:
   `astToJson` tags non-finites but does not unwrap an `Expression`, so the tree utils reject one
   where `fromAst` accepts it.
@@ -163,6 +191,17 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   `s·u·m·(…)` unless `appliedFunctionSymbols` is passed. Deliberate, matches legacy.
 
 ## Fixed during review, kept for its contract
+
+**`add_unit` corrupted the wasm heap when handed the argument its declaration invites**
+(twenty-first pass). The wasm entry point is `add_unit(unit: &str)`, and wasm-bindgen reads a
+non-string argument as a pointer/length pair into linear memory. The published declaration says
+`Expression | Tree`, as legacy's did, so `add_unit(me.fromText("%"))` — the documented call — gave
+`RuntimeError: memory access out of bounds` and an array tree gave
+`arg.charCodeAt is not a function`. The fix is the `varName` coercion `critical_points` already
+used against the identical hazard, and it is worth recording that the hazard had been *named* in a
+comment one method away for several passes without anyone checking which other methods had it. A
+unit is a symbol, so its name is all the Rust side wants. Pinned in
+`quick_doenet_open_items.spec.ts`, revert-fail-restore verified.
 
 **`f((a, b))` and `f(a, b)` are one tree, because `to_js` cannot tell them apart** (eighteenth
 pass). `f((x, y))` parsed to `Apply(f, [Seq(Tuple, [x, y])])` and `f(x, y)` to `Apply(f, [x, y])`,
@@ -363,6 +402,9 @@ removed. The general lesson is the one the sweep confirms: a head can be missing
 path, and neither absence produces a warning.
 
 Everything else fixed during the review passes is described by its `Review cycle N:` commit and
-its tests; the suite state at this head is `cargo test --workspace` 862 passed / 0 failed and the
-compat suite 6,354 tests — 6,343 passing, 11 skipped, 0 failing — with `cargo fmt` and
-`clippy -D warnings` clean.
+its tests; the suite state at this head is `cargo test --workspace` 876 passed / 0 failed and the
+compat suite 6,363 tests — 6,352 passing, 11 skipped, 0 failing — with `cargo fmt` and
+`clippy -D warnings` clean. (These two numbers were written at the thirteenth pass and left to rot
+through seven more; both were re-measured at the twenty-first, each from a redirected run whose own
+exit status was checked. If you are editing this line, re-run them — a count that says "at this
+head" and is not is worse than no count.)

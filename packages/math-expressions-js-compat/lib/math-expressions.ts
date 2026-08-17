@@ -846,7 +846,14 @@ class Expression {
     return wrap(this._w.remove_scaling_units(), this.context);
   }
   add_unit(unit) {
-    return wrap(this._w.add_unit(unit), this.context);
+    // `varName`, for the same reason `critical_points` uses it: the wasm entry
+    // point is `add_unit(unit: &str)`, and wasm-bindgen reads a non-string
+    // argument as a pointer/length pair. The published declaration invites an
+    // `Expression | Tree` here — legacy took one — and handing it either read
+    // out of bounds (`RuntimeError: memory access out of bounds`) or threw
+    // `arg.charCodeAt is not a function`. A unit is a symbol, so its name is
+    // all the Rust side wants.
+    return wrap(this._w.add_unit(varName(unit)), this.context);
   }
   set_small_zero(tolerance) {
     return wrap(
