@@ -95,7 +95,7 @@ npm test               # vitest run
 npm run typecheck      # tsc over lib/ and over the published declarations
 ```
 
-The suite is the legacy JS test corpus and it passes: 6,363 tests, 6,352
+The suite is the legacy JS test corpus and it passes: 6,383 tests, 6,372
 passing, 11 skipped, nothing failing. One of those skips is a divergence rather
 than an unported feature — `slow_assumptions.spec.ts` → `logical combinations`,
 on which **legacy commits to answers this engine declines to give**; the engine

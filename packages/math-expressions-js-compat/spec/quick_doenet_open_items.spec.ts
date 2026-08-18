@@ -150,3 +150,120 @@ describe("add_unit takes the shapes its declaration promises", () => {
     ).toBe(0.5);
   });
 });
+
+describe("the parsers reject a non-string rather than reading memory", () => {
+  // `parse_text`/`parse_latex` are `(s: &str)` on the Rust side, so a
+  // non-string was read as a pointer/length pair into linear memory:
+  // `me.fromText(5)` was `RuntimeError: memory access out of bounds`, and
+  // `me.fromText(["x"])` was `arg.charCodeAt is not a function`. These are the
+  // package's two most-used entry points, and the message is one a student can
+  // reach — `<mathInput showPreview>` renders the parser's complaint.
+  //
+  // Nothing here used to succeed, so this is only a clearer failure. The
+  // sibling `add_unit` case above takes a coercion instead, because *its*
+  // declaration invites an `Expression | Tree`; `fromText` is declared to take
+  // a string, and there is no faithful reading of anything else.
+  const bad: [string, unknown][] = [
+    ["a number", 5],
+    ["an Expression", me.fromText("x")],
+    ["an AST tree", ["+", 1, "x"]],
+    ["a plain object", {}],
+    ["null", null],
+    ["undefined", undefined],
+  ];
+
+  for (const [what, value] of bad) {
+    it(`fromText rejects ${what} with a TypeError`, () => {
+      expect(() => me.fromText(value as string)).toThrow(TypeError);
+      expect(() => me.fromText(value as string)).toThrow(/expected a string/);
+    });
+
+    it(`fromLatex rejects ${what} with a TypeError`, () => {
+      expect(() => me.fromLatex(value as string)).toThrow(TypeError);
+      expect(() => me.fromLatex(value as string)).toThrow(/expected a string/);
+    });
+  }
+
+  it("still parses a string, with and without options", () => {
+    expect(me.fromText("x+1").tree).toEqual(["+", "x", 1]);
+    expect(me.fromText("xy", { splitSymbols: false }).tree).toEqual("xy");
+    expect(me.fromLatex("\\frac{1}{2}").tree).toEqual(["/", 1, 2]);
+  });
+
+  it("still parses a String object, which wasm-bindgen always read", () => {
+    // eslint-disable-next-line no-new-wrappers
+    expect(me.fromText(new String("x+1") as unknown as string).tree).toEqual([
+      "+",
+      "x",
+      1,
+    ]);
+  });
+
+  it("leaves `me.from` free to try both parsers on a real string", () => {
+    // `from` catches the text parser's error to retry as LaTeX, so the new
+    // throw must not be reachable from there: it guards non-strings, and
+    // `from` never hands the parsers one.
+    expect(me.from("\\frac{1}{2}").tree).toEqual(["/", 1, 2]);
+    expect(me.from(["+", 1, "x"]).tree).toEqual(["+", 1, "x"]);
+    expect(me.from(5).tree).toEqual(5);
+  });
+});
+
+describe("Expression#match and me.utils.match are one implementation", () => {
+  // `allow_extended_match` lets a `+`/`*` pattern match a subset of a larger
+  // sum or product, and it is handled outside the Rust matcher — by enumerating
+  // operand subsets in `trees/flatten.ts`. `Expression#match` used to call the
+  // matcher directly, sharing only the option normalizer, so it dropped the
+  // option while `me.utils.match` honored it: the same call bound `b` to
+  // `y + z` through one entry point and to `y`, with `z` reported as skipped,
+  // through the other. The comment there claimed the two could not drift.
+  const options = {
+    variables: { a: true, b: true },
+    allow_extended_match: true,
+  };
+
+  it("agrees on an extended match", () => {
+    const viaExpression = me
+      .fromText("x+y+z")
+      .match(me.fromText("a+b"), options);
+    const viaUtils = me.utils.match(
+      me.fromText("x+y+z").tree,
+      me.fromText("a+b").tree,
+      options,
+    );
+    expect(viaExpression).toEqual(viaUtils);
+    // ...and that shared answer is the extended one: `z` set aside, not
+    // swallowed into `b`.
+    expect(viaExpression).toMatchObject({ a: "x", b: "y", _skipped: ["z"] });
+  });
+
+  it("still agrees where the option is absent", () => {
+    const plain = { variables: { a: true, b: true } };
+    expect(me.fromText("x+y+z").match(me.fromText("a+b"), plain)).toEqual(
+      me.utils.match(me.fromText("x+y+z").tree, me.fromText("a+b").tree, plain),
+    );
+  });
+
+  it("keeps the no-options legacy default, where every leaf binds", () => {
+    // Not delegated blindly: an absent or empty options object still takes the
+    // path where every string leaf in the pattern is a parameter.
+    expect(me.fromText("x+y").match(me.fromText("a+b"))).toEqual({
+      a: "x",
+      b: "y",
+    });
+    expect(me.fromText("x+y").match(me.fromText("a+b"), {})).toEqual({
+      a: "x",
+      b: "y",
+    });
+  });
+
+  it("still parses a string pattern rather than reading it as a leaf", () => {
+    expect(me.fromText("x+y").match("a+b")).toEqual({ a: "x", b: "y" });
+  });
+
+  it("still answers false where nothing matches", () => {
+    expect(me.fromText("x*y").match(me.fromText("a+b"), options)).toEqual(
+      false,
+    );
+  });
+});

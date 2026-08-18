@@ -1,6 +1,6 @@
 # PR #84 review — known issues and durable findings
 
-The durable ledger from the eighteen review passes over
+The durable ledger from the twenty-two review passes over
 [Doenet/math-expressions#84](https://github.com/Doenet/math-expressions/pull/84). The pass-by-pass
 history lives in the git log (`Review cycle N:` commits) and the PR's edit history; this file keeps
 only what still describes the code. Every entry below was re-verified against the pin it names or
@@ -100,24 +100,77 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   options object, so every flag comes out `false` — `match(true)` a second time. All nine are now
   marked `@deprecated` and "accepted and ignored" in the declarations, and the `string[]` arm is
   gone, which is honesty rather than a fix: the engine should either honor them or they should be
-  dropped. Verified against the built package, not read off the source.
+  dropped. Verified against the built package, not read off the source — and re-verified the same
+  way at the twenty-second pass, where all nine still behave exactly as described. The verdict
+  stands: **accepted and ignored**, because each is a parameter legacy honored and this engine has
+  no arity for, so the only alternatives are engine work (the ask upstream) or breaking a legacy
+  call that compiles today; the declaration saying so costs neither.
+- ~~**The parsers read a non-string as a pointer into linear memory.**~~ Fixed at the
+  twenty-second pass, and the reason it is recorded rather than quietly patched is that the
+  twenty-first pass's `add_unit` fix reported having swept "the rest of the string-taking entry
+  points; all were already guarded" — and `parse_text`/`parse_latex`, the two most-used entry
+  points in the package, were not. `me.fromText(5)`, `me.fromText(anExpression)` and
+  `me.fromText({})` were all `RuntimeError: memory access out of bounds`; an array tree was
+  `arg.charCodeAt is not a function`. (The module recovers — the allocation fails at the boundary
+  rather than corrupting the heap — but the message is engine-internal, and `<mathInput
+  showPreview>` renders whatever the parser complains about, so a student could reach it.) They now
+  throw a `TypeError` naming the argument type and pointing at `fromAst`/`from`. A *throw*, where
+  `add_unit` took a coercion, because `add_unit`'s declaration invites an `Expression | Tree` and a
+  unit is a symbol, while `fromText` is declared to take a string and no other value has a faithful
+  reading — so nothing that used to succeed changed. `String` objects still parse, as wasm-bindgen
+  always read them. Pinned in `quick_doenet_open_items.spec.ts`, revert-fail-restore verified.
+  The rest of the sweep the twenty-first pass claimed *does* hold: every other string-taking wasm
+  entry reachable from the published surface was re-probed at runtime with an `Expression`, an
+  array tree and a number, and each is guarded (`varName` on
+  `derivative`/`integrate`/`critical_points`/`evaluate_many`/`solve_linear`/`add_unit`,
+  `JSON.stringify` or `tree_json()` on every options/AST parameter, `.toString()` on the assumption
+  texts).
+- ~~**48 of the 114 declared `Expression` members are `undefined` at runtime.**~~ Decided at the
+  twenty-second pass, which is what the entry had been waiting for: **narrowed**, not documented.
+  The members are gone from both `Expression` and `Context` in
+  `types/math-expressions.d.ts` — 96 declarations, plus `Context`'s own `ZmodN` and
+  `parser_parameters`, which are Context-only properties and so fell outside the `Expression` audit
+  that found the 48. The argument for narrowing is that a `.d.ts` whose job is to describe a
+  drop-in earns nothing by promising members that are not there: keeping them made `expr.sin()` a
+  compile-time success and a runtime `TypeError`, which is the worse of the two places to find out,
+  and removing them moves the report to `tsc`, names the member, and costs a caller who was going
+  to fail anyway nothing. What is left is checkable and was checked: every member either interface
+  declares — 66 on `Expression`, 87 on `Context` — is present at runtime on the built package. The
+  gap itself is unchanged and is still the open ask upstream; it is enumerated in a comment at the
+  end of `Expression` and in `MATH_EXPRESSIONS_UPSTREAM_REQUESTS.md`, and a name goes back the
+  moment `lib/` implements it. DoenetML's vendored copy was narrowed in the same shape, and its
+  `npm run typecheck` is unchanged by it (22 packages clean, the same 5 not gated, the same 59
+  pre-existing errors), which is the measurement that nothing called them.
 - **`Context.toString(expr)` answers `"[object Object]"`.** The expression-first mirror skips
   anything already `in Context`, and `toString` is inherited from `Object.prototype` — deliberately,
   since shadowing it would break `String(me)`. The declaration promised it anyway; it no longer
   does. `expr.toString()` is unaffected and is the only spelling that works.
-- **`Context.assumptions`, `get_assumptions`, `solve_linear`, `Context.from`,
+- ~~**`Context.assumptions`, `get_assumptions`, `solve_linear`, `Context.from`,
   `create_discrete_infinite_set` and `Context.class` all return or accept something the
-  declaration does not admit.** `assumptions` is declared a variable-keyed map and is an object of
-  methods; `get_assumptions(string[])` — the one declared input shape — answers `undefined`, and
-  its return is a `Tree`, not an `Assumptions`; `solve_linear` answers a frozen `ABSENT_EXPRESSION`
-  whose `.tree` is `undefined`; `from` and `create_discrete_infinite_set` can answer `undefined`;
-  `Context.class` is declared as an AST constructor and takes a wasm handle. Left declared as they
-  are, because each needs a decision about which side is wrong.
-- **`Expression.match` drops `allow_extended_match`; the free `utils.match` honors it.**
-  `normalizeMatchOptions` copies only `variables`, `allow_permutations` and
-  `allow_implicit_identities`, so the same pattern answers differently through the two entry
-  points. `MatchOptions` declares the option on neither, so no typed caller can reach the working
-  path.
+  declaration does not admit.**~~ Decided at the twenty-second pass, one verdict each, all six
+  measured against the built package first. Five were the **declaration** being wrong about a
+  deliberate implementation, and the declaration now says what the code does: `assumptions` is
+  typed as the object of methods it is (the per-variable facts are under `byvar`);
+  `get_assumptions` takes the three query shapes that work — a name, a *nested* `[["x","y"]]` list,
+  or an expression — and returns `Tree | undefined`, the bare `["x","y"]` it used to declare being
+  the one shape that answers `undefined` (legacy's own suite queries `[["x"]]`, so the nesting is
+  parity, not a quirk); `from` and `create_discrete_infinite_set` are declared `| undefined`, which
+  is legacy's failure value and what callers must check; and `class` takes a wasm handle, now
+  declared `never` so `new me.class(tree)` is a compile error rather than an object whose every
+  method fails. The sixth, `solve_linear`'s frozen `ABSENT_EXPRESSION`, is **accepted**: legacy
+  handed back an `Expression` whose `.tree` was `undefined` and callers read `.tree`
+  unconditionally, so declaring `| undefined` would break the callers the stand-in exists to serve.
+  Documented in place instead — test the `.tree`, not the result.
+- ~~**`Expression.match` drops `allow_extended_match`; the free `utils.match` honors it.**~~ Fixed
+  at the twenty-second pass. The option is handled *outside* the Rust matcher — `trees/flatten.ts`
+  enumerates operand subsets — and `Expression.match` called the matcher directly, sharing only
+  `normalizeMatchOptions` while its comment claimed the two entry points could not drift. It now
+  delegates to that shared `match`, which is what makes the claim true, and `MatchOptions` declares
+  `allow_extended_match` because it now works from both. `x+y+z` against `a+b` bound `b` to `y+z`
+  here and to `y` with `_skipped: ["z"]` there; both answer the second now. The no-options path is
+  still gated on `hasOptions`, so an absent or empty options object keeps the legacy default where
+  every string leaf in the pattern binds. Pinned in `quick_doenet_open_items.spec.ts`,
+  revert-fail-restore verified.
 - **`astToJson` and `astReplacer` are not interchangeable** despite their shared file's claim:
   `astToJson` tags non-finites but does not unwrap an `Expression`, so the tree utils reject one
   where `fromAst` accepts it.
@@ -140,9 +193,9 @@ None of these block DoenetML (Doenet/DoenetML#1622); they are recorded for follo
   entry as `[1, row, col]` describes a call the code rejects (`"matrix"` is not in
   `COMPONENT_CONTAINERS`). DoenetML's `@doenet/math` `getComponent` wrapper restores the legacy
   throw for the one call site that used it as a type test.
-- **`Expression#match` silently ignores `allow_extended_match`**, which `me.utils.match` honors,
-  so the two entry points disagree on the same input despite the comment claiming they cannot
-  drift. Legacy's `Expression.prototype.match` delegated to the shared implementation.
+- ~~**`Expression#match` silently ignores `allow_extended_match`**~~ — the same finding as the
+  entry above, filed twice; fixed once, at the twenty-second pass, by delegating to the shared
+  implementation the way legacy's `Expression.prototype.match` did.
 - **`ABSENT_EXPRESSION` snapshots the prototype before it is finished.** The `notImplemented`
   methods and `applyAllTransformations` are attached after the IIFE builds it, so
   `solve_linear(...).applyAllTransformations()` is a `TypeError` rather than the documented
@@ -403,8 +456,8 @@ path, and neither absence produces a warning.
 
 Everything else fixed during the review passes is described by its `Review cycle N:` commit and
 its tests; the suite state at this head is `cargo test --workspace` 876 passed / 0 failed and the
-compat suite 6,363 tests — 6,352 passing, 11 skipped, 0 failing — with `cargo fmt` and
+compat suite 6,383 tests — 6,372 passing, 11 skipped, 0 failing — with `cargo fmt` and
 `clippy -D warnings` clean. (These two numbers were written at the thirteenth pass and left to rot
-through seven more; both were re-measured at the twenty-first, each from a redirected run whose own
-exit status was checked. If you are editing this line, re-run them — a count that says "at this
+through seven more; they were re-measured at the twenty-first and again at the twenty-second, each
+from a redirected run whose own exit status was checked. If you are editing this line, re-run them — a count that says "at this
 head" and is not is worse than no count.)

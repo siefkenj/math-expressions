@@ -6,13 +6,7 @@
 // test fails cleanly (the suite still runs). See JS_TEST_COVERAGE_AUDIT.md.
 import wasm, { onWasmModuleChange, setWasmModule } from "./_wasm";
 import math from "./mathjs";
-import {
-  match,
-  flatten,
-  unflattenLeft,
-  unflattenRight,
-  normalizeMatchOptions,
-} from "./trees/flatten";
+import { match, flatten, unflattenLeft, unflattenRight } from "./trees/flatten";
 import * as converters from "./converters/index";
 import { jsonToAst, tagNonFinite } from "./converters/ast-json";
 import { renderOptions } from "./converters/render-options";
@@ -1130,6 +1124,8 @@ class Expression {
    * - `allow_permutations` — match `+`/`*` operands in any order.
    * - `allow_implicit_identities` — array of parameter names that may take the
    *   operator's identity, so `a x + b` matches `x` with `a = 1`, `b = 0`.
+   * - `allow_extended_match` — let a `+`/`*` pattern match a *subset* of a
+   *   larger sum or product, reporting the untouched operands as `_skipped`.
    *
    * The kinds replace the JS predicates the legacy API took: a function cannot
    * cross the wasm boundary, and these three are what the predicates expressed.
@@ -1137,26 +1133,33 @@ class Expression {
    * one as "any" is what made `requireNumericMatches` a no-op.
    */
   match(pattern, options?) {
-    const tree = this._w.tree_json();
-    const pat = toExpr(pattern, this.context)._w.tree_json();
-    // Bindings come back through `jsonToAst`, not bare `JSON.parse`: they are
+    // Delegated to the shared implementation, which is what makes the claim
+    // that this and `me.utils.match` cannot drift true. It used to share only
+    // `normalizeMatchOptions` and call the wasm matcher itself, and
+    // `allow_extended_match` is handled *outside* that matcher — so the two
+    // entry points answered differently for the same call:
+    // `("x+y+z").match("a+b", {variables: {a: true, b: true},
+    // allow_extended_match: true})` bound `b` to `y+z` here and to `y`, with
+    // `_skipped: ["z"]`, through `me.utils.match`. Legacy's
+    // `Expression.prototype.match` delegated for the same reason.
+    //
+    // `.tree`, not `_w.tree_json()`, because the shared entry takes trees; and
+    // the pattern still goes through `toExpr` first, since a string pattern is
+    // a *parse* here and would be a bare leaf to `astToJson`.
+    //
+    // `hasOptions`, not the shared `hasParams`, so an empty options object
+    // keeps taking the cheaper no-options path — which is also the path whose
+    // legacy default lets every string leaf in the pattern bind. Bindings come
+    // back through `jsonToAst` in there, not bare `JSON.parse`: they are
     // subtrees, and `.tree` hands subtrees out untagged, so returning
-    // `{a: {$: "Inf"}}` here would contradict the convention the rest of the
+    // `{a: {$: "Inf"}}` would contradict the convention the rest of the
     // surface follows — and break the `typeof m.a === "number"` consumers
     // legacy supported.
-    if (!hasOptions(options)) {
-      const res = wasm.match_template(tree, pat);
-      return res === undefined ? false : jsonToAst(res);
-    }
-    // Shared with `me.utils.match` so the two entry points cannot drift; the
-    // `true` spelling of `allow_implicit_identities` is expanded by the
-    // matcher, which is the only side that knows the default parameter set.
-    const res = wasm.match_template_with_options(
-      tree,
-      pat,
-      JSON.stringify(normalizeMatchOptions(options)),
+    return match(
+      this.tree,
+      toExpr(pattern, this.context).tree,
+      hasOptions(options) ? options : undefined,
     );
-    return res === undefined ? false : jsonToAst(res);
   }
 }
 
@@ -1290,12 +1293,44 @@ function asParseError(e: unknown) {
   return wrapped;
 }
 
+/**
+ * Reject a non-string at the parser boundary, with a message that says so.
+ *
+ * `parse_text`/`parse_latex` are declared `(s: &str)` on the Rust side, and
+ * wasm-bindgen reads a non-string argument as a pointer/length pair into linear
+ * memory: `me.fromText(5)` and `me.fromText(anExpression)` both came out as
+ * `RuntimeError: memory access out of bounds`, and an array tree as
+ * `arg.charCodeAt is not a function`. These are the package's two most-used
+ * entry points, and the second message reaches a student — `<mathInput
+ * showPreview>` renders whatever the parser complains about.
+ *
+ * A *throw* is right here where `add_unit` takes a coercion: `add_unit`'s
+ * declaration invites an `Expression | Tree` and a unit is a symbol, so its
+ * name is a faithful reading; `fromText` is declared to take a `string` and
+ * there is no faithful reading of anything else. So this changes no call that
+ * used to succeed — it only replaces an engine-internal failure with a
+ * diagnosable one.
+ *
+ * `String` *objects* are accepted: they carry `.length` and `.charCodeAt`, so
+ * wasm-bindgen has always read them correctly and rejecting them here would be
+ * a new restriction rather than a clearer message.
+ */
+function parseInput(s: unknown, what: "fromText" | "fromLatex"): string {
+  if (typeof s === "string") return s;
+  if (s instanceof String) return String(s);
+  throw new TypeError(
+    `${what}: expected a string, got ${s === null ? "null" : typeof s}. ` +
+      "Use `me.fromAst` for an AST tree and `me.from` for an Expression.",
+  );
+}
+
 function parseText(string, opts?) {
+  const text = parseInput(string, "fromText");
   try {
     return new Expression(
       hasOptions(opts)
-        ? wasm.parse_text_with_options(string, JSON.stringify(opts))
-        : wasm.parse_text(string),
+        ? wasm.parse_text_with_options(text, JSON.stringify(opts))
+        : wasm.parse_text(text),
       Context,
     );
   } catch (e) {
@@ -1303,11 +1338,12 @@ function parseText(string, opts?) {
   }
 }
 function parseLatex(string, opts?) {
+  const latex = parseInput(string, "fromLatex");
   try {
     return new Expression(
       hasOptions(opts)
-        ? wasm.parse_latex_with_options(string, JSON.stringify(opts))
-        : wasm.parse_latex(string),
+        ? wasm.parse_latex_with_options(latex, JSON.stringify(opts))
+        : wasm.parse_latex(latex),
       Context,
     );
   } catch (e) {
